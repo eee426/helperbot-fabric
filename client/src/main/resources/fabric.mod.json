@@ -1,0 +1,19 @@
+{
+	"schemaVersion": 1,
+	"id": "helperbotclient",
+	"version": "${version}",
+	"name": "Helper Bot Remote",
+	"description": "Client-side buttons for the Helper Bot: pick what to fetch from a menu instead of typing /bot commands.",
+	"authors": ["Vale"],
+	"license": "MIT",
+	"environment": "client",
+	"entrypoints": {
+		"client": ["com.vale.helperbot.client.HelperBotClient"]
+	},
+	"depends": {
+		"fabricloader": ">=0.17.3",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
