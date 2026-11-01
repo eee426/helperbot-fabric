@@ -1,0 +1,577 @@
+package com.vale.helperbot.bot;
+
+import com.mojang.authlib.GameProfile;
+import com.vale.helperbot.guard.Rules;
+import com.vale.helperbot.path.Air;
+import com.vale.helperbot.task.BotTask;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.TamableAnimal;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.Items;
+import java.util.List;
+import java.util.Set;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.game.ServerboundPlayerLoadedPacket;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ClientInformation;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.phys.Vec3;
+
+/**
+ * The bot itself: a server-side player with no client. Its position is driven directly by
+ * {@link MovementController}, which keeps every move within what a real player could do.
+ */
+public class BotPlayer extends ServerPlayer {
+	/** Foods with nasty side effects the bot won't eat. */
+	private static final Set<Item> BAD_FOOD = Set.of(Items.ROTTEN_FLESH, Items.SPIDER_EYE, Items.POISONOUS_POTATO,
+			Items.PUFFERFISH, Items.CHORUS_FRUIT, Items.SUSPICIOUS_STEW, Items.CHICKEN);
+
+	private final MovementController movement = new MovementController(this);
+	private final Loot loot = new Loot(this);
+	private BotTask task;
+	/** On by default during the beta so the plan is always visible. */
+	private boolean debugPath = true;
+
+	public BotPlayer(MinecraftServer server, ServerLevel level, GameProfile profile) {
+		super(server, level, profile, ClientInformation.createDefault());
+	}
+
+	/** Skip the client "world loaded" handshake that a real client would send. */
+	public void markLoaded() {
+		connection.handleAcceptPlayerLoad(new ServerboundPlayerLoadedPacket());
+	}
+
+	@Override
+	public void tick() {
+		if (tickCount % 10 == 0) {
+			connection.resetPosition();
+			level().getChunkSource().move(this);
+		}
+		super.tick();
+		// What ServerGamePacketListenerImpl.tickPlayer() does for a real client.
+		xo = getX();
+		yo = getY();
+		zo = getZ();
+		doTick();
+
+		if (!isAlive()) {
+			return;
+		}
+		loot.observe();
+		// Survival first: air, then fighting back. The task waits meanwhile.
+		if (breathe()) {
+			return; // it moved itself this tick
+		}
+		if (combat()) {
+			movement.tick();
+			return;
+		}
+		// Eating takes its 1.6 s like for anyone. It keeps walking meanwhile, slowed down the
+		// way vanilla slows a player who's eating; the task itself waits.
+		if (isUsingItem() || tryEat()) {
+			movement.tick();
+			return;
+		}
+		// Collect what its kills and its mining dropped before going back to the task.
+		if (loot.tick()) {
+			movement.tick();
+			return;
+		}
+		if (tickCount % 40 == 0 && freeSlots() <= LOW_FREE_SLOTS) {
+			tidyInventory();
+		}
+		if (task != null) {
+			BotTask.Status status = task.tick(this);
+			if (status != BotTask.Status.RUNNING) {
+				task.onEnd(this, status);
+				task = null;
+				movement.stop();
+			}
+		}
+		movement.tick();
+	}
+
+	@Override
+	public void awardKillScore(net.minecraft.world.entity.Entity killed, DamageSource source) {
+		super.awardKillScore(killed, source);
+		loot.onKill(killed);
+	}
+
+	/** How it's getting air: a planned way up, sealed in a shaft waiting for it to drain, or straight up. */
+	private enum Breath {
+		NONE, ROUTE, SEALED, CLIMB
+	}
+
+	private Breath breath = Breath.NONE;
+	private int breathTicks;
+	private double bestEscape;
+	/** Sealed in, the water should be gone within this (flowing water recedes every 5 ticks). */
+	private static final int SEAL_DRAIN_TICKS = 80;
+	/** On the planned way up this long without getting any closer to air: just go straight up. */
+	private static final int ROUTE_STALL_TICKS = 60;
+
+	/**
+	 * Top survival priority, independent of what the task or path is doing. The same rule the
+	 * planner follows (see {@link Air}): the air budget, health it may spend included, must cover
+	 * the way back up from here. When it barely does (or the planner found nowhere to go on the air
+	 * left), it goes for air:
+	 * <ul>
+	 * <li>down a shaft it dug through the sea floor: block it off over its head, wait for the water
+	 * to drain, and carry on dry (what a player does);</li>
+	 * <li>otherwise up the quickest way the planner finds (digging through sand, around an
+	 * overhang...), or if that gets nowhere, straight up, digging what's overhead.</li>
+	 * </ul>
+	 * Then a full breath, and back to what it was doing. Returns true while busy with that.
+	 */
+	private boolean breathe() {
+		boolean underwater = movement.headUnderwater();
+		if (breath == Breath.NONE) {
+			if (!underwater) {
+				return false;
+			}
+			int budget = Air.budget(this);
+			if (budget >= Air.UNLIMITED) {
+				return false;
+			}
+			double escape = movement.escapeTicks();
+			boolean asked = movement.takeAirRequest();
+			boolean low = budget <= Air.reserve(escape);
+			boolean sealNow = movement.canSeal() && (movement.headingDown() || low || asked)
+					&& getAirSupply() < getMaxAirSupply();
+			if (!sealNow && !low && !asked) {
+				return false;
+			}
+			breathTicks = 0;
+			if (sealNow && movement.seal()) {
+				breath = Breath.SEALED;
+				movement.pause();
+				log("在井里把头顶堵上，等水退掉");
+			} else {
+				breath = Breath.ROUTE;
+				bestEscape = escape;
+				log("该换气了（还能撑 " + budget / 20 + " 秒，上去要 "
+						+ (Double.isInfinite(escape) ? "?" : String.valueOf((int) Math.ceil(escape / 20))) + " 秒）");
+				movement.headForAir();
+			}
+		}
+		breathTicks++;
+		if (underwater) {
+			switch (breath) {
+				case SEALED -> {
+					movement.tick();
+					if (breathTicks > SEAL_DRAIN_TICKS) {
+						log("水没退掉，改为游上去");
+						breath = Breath.ROUTE;
+						breathTicks = 0;
+						bestEscape = movement.escapeTicks();
+						movement.resume();
+						movement.headForAir();
+					}
+				}
+				case ROUTE -> {
+					movement.tick();
+					double escape = movement.escapeTicks();
+					if (escape < bestEscape - 1) {
+						bestEscape = escape;
+						breathTicks = 0;
+					}
+					if (breathTicks > ROUTE_STALL_TICKS || movement.status() == MovementController.Status.FAILED) {
+						log("找路上不去，直接往上游/挖");
+						breath = Breath.CLIMB;
+						movement.pause();
+					}
+				}
+				default -> movement.ascendStep();
+			}
+			return true;
+		}
+		// Head in air: a full breath first.
+		if (getAirSupply() < getMaxAirSupply()) {
+			if (breath == Breath.CLIMB) {
+				movement.ascendStep(); // floats at the surface
+			} else {
+				movement.tick();
+			}
+			return true;
+		}
+		log("换好气了，继续");
+		Breath was = breath;
+		breath = Breath.NONE;
+		if (was != Breath.SEALED) {
+			movement.disengage();
+		}
+		movement.resume();
+		return false;
+	}
+
+	/** Ranged attackers (skeletons, witches, pillagers...) this close are chased down. */
+	private static final double RANGED_ENGAGE_RANGE = 10;
+	/** Stay on guard this long after the last threat before going back to the task. */
+	private static final int CALM_TICKS = 20;
+	/** Something that hit us this recently counts as a threat even if it isn't "targeting" us. */
+	private static final int RECENT_HIT_TICKS = 60;
+	/** Give up chasing a ranged attacker after this long (it's up a pillar, flying...)... */
+	private static final int CHASE_GIVE_UP = 200;
+	/** ...and leave it alone (unless it comes within reach) for this long. */
+	private static final int IGNORE_TICKS = 300;
+	private boolean inCombat;
+	private int calmTicks;
+	private java.util.UUID chasing;
+	private int chaseTicks;
+	private BlockPos chaseAim;
+	private final java.util.Map<java.util.UUID, Integer> ignoredUntil = new java.util.HashMap<>();
+
+	/**
+	 * Fight back, putting its own safety before the task. Threats are mobs (hostile or not, e.g. a
+	 * polar bear guarding a cub) that target it or just hit it, and that it can see:
+	 * <ul>
+	 * <li>ranged attackers within {@link #RANGED_ENGAGE_RANGE} come first, since they keep shooting:
+	 * it goes after them, to a spot it can hit from;</li>
+	 * <li>melee mobs only once actually within reach (it reaches further than they do, so it still
+	 * strikes first); before that it just keeps working.</li>
+	 * </ul>
+	 * The task is paused meanwhile, the weapon is taken out once and kept in hand (swapping items
+	 * resets the attack charge in vanilla), and it only swings at full charge. Afterwards it goes
+	 * back to what it was doing. Tamed pets are never attacked. Returns true while in combat.
+	 */
+	private boolean combat() {
+		if (tickCount % IGNORE_TICKS == 0) {
+			ignoredUntil.values().removeIf(until -> until < tickCount);
+		}
+		Mob threat = pickThreat();
+		if (threat == null) {
+			if (inCombat && --calmTicks <= 0) {
+				inCombat = false;
+				chasing = null;
+				log("周围安全了，继续任务");
+				movement.disengage();
+				movement.resume();
+			}
+			return inCombat;
+		}
+		String name = threat.getType().getDescription().getString();
+		if (!inCombat) {
+			inCombat = true;
+			log((isRanged(threat) ? "被远程怪 " : "遭到 ") + name + " 攻击，暂停任务先打它");
+			movement.pause();
+			holdWeapon();
+		}
+		calmTicks = CALM_TICKS;
+		movement.lookAt(threat.getBoundingBox().getCenter());
+		if (isWithinEntityInteractionRange(threat, 0) && hasLineOfSight(threat)) {
+			movement.pause();
+			chaseTicks = 0;
+			// Getting here may have meant digging or placing blocks (pickaxe, dirt in hand).
+			holdWeapon();
+			if (getAttackStrengthScale(0.5f) >= 0.9f) {
+				attack(threat);
+				swing(InteractionHand.MAIN_HAND);
+			}
+			return true;
+		}
+		// Out of reach: only ranged attackers get picked like that. Go get it.
+		if (!threat.getUUID().equals(chasing)) {
+			chasing = threat.getUUID();
+			chaseTicks = 0;
+			chaseAim = null;
+		}
+		if (++chaseTicks > CHASE_GIVE_UP
+				|| (movement.isEngaged() && movement.status() == MovementController.Status.FAILED)) {
+			ignoredUntil.put(threat.getUUID(), tickCount + IGNORE_TICKS);
+			log("够不着 " + name + "，先不管它");
+			chasing = null;
+			movement.pause();
+			return true;
+		}
+		BlockPos at = threat.blockPosition();
+		// Paused (it was within reach a moment ago, then the mob stepped back): set off again,
+		// even if the mob has barely moved. Otherwise it stood there staring, "walking" on paper.
+		if (chaseAim == null || chaseAim.distSqr(at) > 4 || !movement.isEngaged() || movement.isPaused()
+				|| movement.status() != MovementController.Status.MOVING) {
+			movement.engage(Sight.attackSpot(this, threat), at);
+			chaseAim = at;
+		}
+		return true;
+	}
+
+	/** Ranged attackers within range first (they keep shooting), else melee mobs within reach. */
+	private Mob pickThreat() {
+		List<Mob> threats = level().getEntitiesOfClass(Mob.class, getBoundingBox().inflate(RANGED_ENGAGE_RANGE),
+				m -> m.isAlive() && (m.getTarget() == this
+						|| (m == getLastHurtByMob() && tickCount - getLastHurtByMobTimestamp() < RECENT_HIT_TICKS))
+						&& !(m instanceof TamableAnimal pet && pet.isTame())
+						// Like a player, it can't hit what it can't see (e.g. a mob behind the wall).
+						&& hasLineOfSight(m));
+		Mob best = null;
+		for (Mob m : threats) {
+			boolean inReach = isWithinEntityInteractionRange(m, 0);
+			boolean ignored = ignoredUntil.getOrDefault(m.getUUID(), 0) > tickCount;
+			boolean ranged = isRanged(m) && distanceTo(m) <= RANGED_ENGAGE_RANGE && !ignored;
+			if (!(inReach || ranged)) {
+				continue;
+			}
+			if (best == null || betterThreat(m, best)) {
+				best = m;
+			}
+		}
+		return best;
+	}
+
+	private boolean betterThreat(Mob a, Mob b) {
+		if (isRanged(a) != isRanged(b)) {
+			return isRanged(a);
+		}
+		return distanceToSqr(a) < distanceToSqr(b);
+	}
+
+	private static boolean isRanged(Mob mob) {
+		return mob instanceof net.minecraft.world.entity.monster.RangedAttackMob
+				|| mob instanceof net.minecraft.world.entity.monster.CrossbowAttackMob;
+	}
+
+	/**
+	 * Hold the best weapon the player gave it (sword, else axe), if any. Does nothing if one of
+	 * that kind is already in hand: every swap resets the attack charge in vanilla.
+	 */
+	public void holdWeapon() {
+		int weapon = bestWeaponSlot();
+		if (weapon < 0) {
+			return;
+		}
+		ItemStack held = getMainHandItem();
+		boolean swordBest = getInventory().getItem(weapon).is(ItemTags.SWORDS);
+		if (held.is(ItemTags.SWORDS) || (!swordBest && held.is(ItemTags.AXES))) {
+			return;
+		}
+		movement.selectSlot(weapon);
+	}
+
+	private int bestWeaponSlot() {
+		Inventory inv = getInventory();
+		int axe = -1;
+		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+			ItemStack stack = inv.getItem(slot);
+			if (stack.is(ItemTags.SWORDS)) {
+				return slot;
+			}
+			if (axe < 0 && stack.is(ItemTags.AXES)) {
+				axe = slot;
+			}
+		}
+		return axe;
+	}
+
+	/** Eats food the player gave it when hungry, or when hurt and able to regenerate. */
+	private boolean tryEat() {
+		int food = getFoodData().getFoodLevel();
+		int missing = 20 - food;
+		// Keep enough to sprint (> 6); when hurt, keep 18+ so health regenerates.
+		boolean wantFood = food <= 14 || (getHealth() < getMaxHealth() && food < 18);
+		if (!wantFood || !movement.atRest()) {
+			return false;
+		}
+		// Don't waste food: pick the biggest that fits in the bar. If none fits but it's
+		// really hungry (can't sprint), eat the smallest.
+		Inventory inv = getInventory();
+		// What it's collecting for someone isn't its lunch (it once ate the sweet berries it was
+		// sent for). Only when starving, with health draining, is that fair game.
+		boolean starving = food == 0;
+		int bestSlot = -1, bestValue = -1, smallestSlot = -1, smallestValue = Integer.MAX_VALUE;
+		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+			ItemStack stack = inv.getItem(slot);
+			var props = stack.get(DataComponents.FOOD);
+			if (props == null || BAD_FOOD.contains(stack.getItem())
+					|| (!starving && task != null && task.wantsPickup(stack))) {
+				continue;
+			}
+			int value = props.nutrition();
+			if (value <= missing && value > bestValue) {
+				bestSlot = slot;
+				bestValue = value;
+			}
+			if (value < smallestValue) {
+				smallestSlot = slot;
+				smallestValue = value;
+			}
+		}
+		int slot = bestSlot >= 0 ? bestSlot : food <= 6 ? smallestSlot : -1;
+		if (slot < 0) {
+			return false;
+		}
+		movement.selectSlot(slot);
+		gameMode.useItem(this, level(), getMainHandItem(), InteractionHand.MAIN_HAND);
+		if (isUsingItem()) {
+			log("吃 " + getMainHandItem().getHoverName().getString() + "（饥饿值 " + food + "）");
+		}
+		return isUsingItem();
+	}
+
+	/** Vanilla physics is replaced by {@link MovementController}. */
+	@Override
+	public void travel(Vec3 input) {
+	}
+
+	@Override
+	public void die(DamageSource cause) {
+		super.die(cause);
+		BotTask current = task;
+		task = null;
+		movement.stop();
+		if (current != null) {
+			current.onEnd(this, BotTask.Status.FAILED);
+		}
+		level().getServer().execute(() -> {
+			setHealth(getMaxHealth());
+			BotManager.remove(level().getServer(), "机器人死亡，已移除。用 /bot spawn 重新召唤（死亡不掉落时背包会保留）。");
+		});
+	}
+
+	public void startTask(BotTask newTask) {
+		if (task != null) {
+			task.onEnd(this, BotTask.Status.CANCELLED);
+		}
+		movement.stop();
+		task = newTask;
+	}
+
+	public void cancelTask() {
+		if (task != null) {
+			task.onEnd(this, BotTask.Status.CANCELLED);
+			task = null;
+		}
+		movement.stop();
+	}
+
+	public BotTask getTask() {
+		return task;
+	}
+
+	public MovementController movement() {
+		return movement;
+	}
+
+	public Loot loot() {
+		return loot;
+	}
+
+	public boolean isDebugPath() {
+		return debugPath;
+	}
+
+	public void setDebugPath(boolean debugPath) {
+		this.debugPath = debugPath;
+	}
+
+	/** Building blocks kept for bridges and pillars; more than this aren't picked up, and get tidied away. */
+	private static final int BUILDING_BLOCK_STOCK = 128;
+	/** Tidy the bag when this few free slots are left. */
+	private static final int LOW_FREE_SLOTS = 2;
+	/** What the bot picked up itself (only this may be thrown away when tidying). */
+	private final java.util.Map<Item, Integer> pickedUp = new java.util.HashMap<>();
+
+	/**
+	 * What the current task collects, plus (open rules) a stock of building blocks for bridges and
+	 * pillars. Saplings, flowers, seeds and the like are left on the ground, so the bag doesn't
+	 * fill up with stuff nobody asked for.
+	 */
+	public boolean wantsPickup(ItemStack stack) {
+		if (task != null && task.wantsPickup(stack)) {
+			return true;
+		}
+		// Only while there's room, or it would pick up again what it just threw away to make room.
+		return Rules.open() && com.vale.helperbot.path.BuildingBlocks.isBuildingBlock(stack)
+				&& com.vale.helperbot.path.BuildingBlocks.count(getInventory()) < BUILDING_BLOCK_STOCK
+				&& freeSlots() > LOW_FREE_SLOTS + 1;
+	}
+
+	public void notePickedUp(Item item, int count) {
+		pickedUp.merge(item, count, Integer::sum);
+		loot.onPickup(item);
+	}
+
+	/**
+	 * Make room: throw away building blocks it picked up itself beyond its stock, then anything
+	 * else it picked up itself that the current task doesn't need. Never throws away what a player
+	 * gave it. Returns true if at least one slot is free afterwards.
+	 */
+	public boolean tidyInventory() {
+		Inventory inv = getInventory();
+		if (inv.getFreeSlot() >= 0 && freeSlots() > LOW_FREE_SLOTS) {
+			return true;
+		}
+		int dropped = 0;
+		for (int pass = 0; pass < 2 && freeSlots() <= LOW_FREE_SLOTS; pass++) {
+			for (int slot = Inventory.INVENTORY_SIZE - 1; slot >= 0 && freeSlots() <= LOW_FREE_SLOTS; slot--) {
+				ItemStack stack = inv.getItem(slot);
+				int mine = pickedUp.getOrDefault(stack.getItem(), 0);
+				if (stack.isEmpty() || mine <= 0 || slot == inv.getSelectedSlot()) {
+					continue;
+				}
+				boolean junk = pass == 0
+						? com.vale.helperbot.path.BuildingBlocks.isBuildingBlock(stack)
+						&& com.vale.helperbot.path.BuildingBlocks.count(inv) - stack.getCount() >= BUILDING_BLOCK_STOCK / 2
+						: task == null || !task.wantsPickup(stack);
+				if (!junk) {
+					continue;
+				}
+				int n = Math.min(mine, stack.getCount());
+				ItemStack thrown = stack.split(n);
+				pickedUp.merge(thrown.getItem(), -n, Integer::sum);
+				dropped += n;
+				drop(thrown, false);
+			}
+		}
+		if (dropped > 0) {
+			log("背包快满了，扔掉自己捡的 " + dropped + " 个没用的东西");
+		}
+		return inv.getFreeSlot() >= 0;
+	}
+
+	private int freeSlots() {
+		int free = 0;
+		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+			if (getInventory().getItem(slot).isEmpty()) {
+				free++;
+			}
+		}
+		return free;
+	}
+
+	private static final int LOG_SIZE = 40;
+	private final java.util.ArrayDeque<String> log = new java.util.ArrayDeque<>();
+
+	/**
+	 * Records a decision (re-plan and why, step failures, obstacles learned, attacks...) for
+	 * {@code /bot log}, so "it just stopped" can be traced to a reason.
+	 */
+	public void log(String event) {
+		if (log.size() >= LOG_SIZE) {
+			log.removeFirst();
+		}
+		log.addLast(String.format("[%.1fs] ", tickCount / 20.0) + event);
+	}
+
+	public java.util.List<String> recentLog(int n) {
+		java.util.List<String> all = new java.util.ArrayList<>(log);
+		return all.subList(Math.max(0, all.size() - n), all.size());
+	}
+
+	public void say(ServerPlayer to, String message) {
+		say(to, Component.literal(message));
+	}
+
+	/** Components let item and block names show in the player's own language. */
+	public void say(ServerPlayer to, Component message) {
+		if (to != null && !to.hasDisconnected()) {
+			to.sendSystemMessage(Component.literal("[" + getGameProfile().name() + "] ").append(message));
+		}
+	}
+}

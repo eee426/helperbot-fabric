@@ -1,0 +1,20 @@
+{
+	"schemaVersion": 1,
+	"id": "helperbot",
+	"version": "${version}",
+	"name": "Helper Bot",
+	"description": "A real-player helper bot that gathers hard-to-find materials using only the tools you give it.",
+	"authors": ["Vale"],
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": ["com.vale.helperbot.HelperBot"]
+	},
+	"mixins": ["helperbot.mixins.json"],
+	"depends": {
+		"fabricloader": ">=0.17.3",
+		"minecraft": "~1.21.11",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}

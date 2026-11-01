@@ -1,0 +1,791 @@
+package com.vale.helperbot.path;
+
+import com.vale.helperbot.guard.Guard;
+import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import net.minecraft.world.level.block.FallingBlock;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.shapes.VoxelShape;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.PriorityQueue;
+import java.util.function.LongPredicate;
+import java.util.function.Predicate;
+
+/**
+ * A* over foot cells inside a small window around the bot. A node is the block cell that
+ * contains the bot's feet; its "floor" is the exact height the feet rest at, so slabs, paths,
+ * snow layers and carpets all work as ground.
+ *
+ * <p>When the goal is outside the window it returns a partial path to the node closest to the
+ * target; the caller walks a few steps and plans again, which also picks up world changes.
+ *
+ * <p>A search is resumable: {@link #step(long)} runs it for a time budget, so large windows can
+ * be spread over several ticks instead of stalling the server.
+ */
+public final class LocalPathfinder {
+	/** Search window around the bot and how many nodes may be expanded in it. */
+	public record Limits(int radiusXZ, int up, int down, int maxNodes) {
+	}
+
+	/** Escalation levels: tried in order when the smaller window finds nothing useful. */
+	public static final Limits[] LEVELS = {
+			new Limits(16, 8, 16, 40_000),
+			new Limits(32, 16, 24, 100_000),
+			new Limits(64, 24, 32, 200_000),
+	};
+	/**
+	 * Under water the first try is a small cube: routes there are short anyway (air), the world
+	 * changes fast (sand falls, water floods in, kelp breaks off), and the bot re-plans often.
+	 * Each node also carries the air left, which multiplies the nodes; a small window keeps it cheap.
+	 */
+	public static final Limits[] WATER_LEVELS = {
+			new Limits(8, 8, 8, 30_000),
+			LEVELS[1],
+			LEVELS[2],
+	};
+
+	public static Limits[] levels(boolean underwater) {
+		return underwater ? WATER_LEVELS : LEVELS;
+	}
+	/** Vanilla auto step-up height. */
+	public static final double STEP_HEIGHT = 0.6;
+	/** Highest ledge a standing jump clears. */
+	public static final double JUMP_HEIGHT = 1.25;
+	private static final double PLAYER_HEIGHT = 1.8;
+	/** Extra ticks a jump takes over walking. */
+	private static final double ASCEND_EXTRA = 4.0;
+	private static final double BREAK_OVERHEAD = 3.0;
+	/** Feet height above the cell bottom when floating at a water surface. */
+	public static final double SWIM_FLOOR = 0.1;
+	/** Vanilla swimming speed is roughly 0.1-0.15 blocks/tick. */
+	public static final double SWIM_SPEED = 0.12;
+	/** Deepest {@link #surfaceDistance} looks. (Diving itself is limited by air, see {@link Air}.) */
+	public static final int MAX_DIVE_DEPTH = 10;
+	/** Air is tracked in steps of this many ticks: two routes to a cell differing by less are the same. */
+	private static final int AIR_BUCKET = 30;
+	/** Prefer the surface: swimming under water costs more (air). */
+	private static final double DIVE_COST_FACTOR = 1.4;
+	/** Vanilla right-click interval (4 ticks), plus a small charge for using a block up. */
+	private static final double PLACE_COST = 4 + 2;
+
+	/**
+	 * Weighted A* for partial searches: leans towards the target, expanding far fewer nodes.
+	 * Paths cost at most this factor more than the best one (usually much less).
+	 */
+	private static final double PARTIAL_HEURISTIC_WEIGHT = 1.4;
+	/** Expand at least this many nodes before a partial search may stop at the window edge. */
+	private static final int EARLY_STOP_MIN_NODES = 1_500;
+
+	public record Result(List<PathStep> steps, boolean reachesGoal) {
+		static final Result EMPTY = new Result(List.of(), false);
+	}
+
+	private static final class Node implements Comparable<Node> {
+		final BlockPos pos;
+		final double floor;
+		final double g;
+		final double f;
+		final Node parent;
+		final PathStep step;
+		/** Air budget left on arrival here (see {@link Air}). */
+		final int air;
+
+		Node(BlockPos pos, double floor, double g, double h, Node parent, PathStep step, int air) {
+			this.pos = pos;
+			this.floor = floor;
+			this.g = g;
+			this.f = g + h;
+			this.parent = parent;
+			this.step = step;
+			this.air = air;
+		}
+
+		@Override
+		public int compareTo(Node o) {
+			return Double.compare(f, o.f);
+		}
+	}
+
+	/**
+	 * A possible step. {@code cost} is what the search minimises: real time, plus preferences
+	 * (stay near the surface, dig less in safe mode, avoid risky breaks). {@code ticks} is just the
+	 * real time it takes, which is what air is charged with: preferences mustn't use up air that
+	 * isn't really used (it made the bot think it couldn't get back up when it could).
+	 */
+	private record Candidate(PathStep step, double floor, double cost, double ticks) {
+		Candidate(PathStep step, double floor, double cost) {
+			this(step, floor, cost, cost);
+		}
+	}
+
+	/** Real ticks of the digging priced by the {@link #clearCost} calls since it was last reset. */
+	private double digTicks;
+
+	private final Level level;
+	private final Inventory inventory;
+	private final Mode mode;
+	private final int maxDrop;
+	private final BlockPos origin;
+	private final BlockPos target;
+	/** The target's height is unknown (e.g. a far-away biome): steer by horizontal distance only. */
+	private final boolean horizontalOnly;
+	private final Limits limits;
+	private final Predicate<BlockPos> goal;
+	/** Cells the bot found blocked in practice (see MovementController#learnObstacle): treated as walls. */
+	private final LongPredicate avoid;
+	private final double walkCost;
+	private final boolean canBuild;
+	/** 0 = unknown, 1 = passable, 2 = blocked. */
+	private final Long2IntOpenHashMap passableCache = new Long2IntOpenHashMap();
+	private final Long2IntOpenHashMap breakCache = new Long2IntOpenHashMap();
+	private final Long2IntOpenHashMap lavaCache = new Long2IntOpenHashMap();
+	private final Long2DoubleOpenHashMap floorCache = new Long2DoubleOpenHashMap();
+
+	/**
+	 * The target is outside the window, so this search can only return a partial path. Exploring
+	 * the whole window for the best possible one is the expensive part, and the partial path gets
+	 * re-planned anyway, so these searches lean towards the target and stop early (see below).
+	 * Searches whose target is inside the window stay exact.
+	 */
+	private final boolean partial;
+	private final double heuristicWeight;
+
+	private final PriorityQueue<Node> open = new PriorityQueue<>();
+	/**
+	 * Best cost found per cell and air bucket. A route to a cell is only worth exploring if no
+	 * other route got there at least as cheaply with at least as much air left.
+	 */
+	private final Long2ObjectOpenHashMap<double[]> bestG = new Long2ObjectOpenHashMap<>();
+	private final Air.Profile air;
+	private final Escape escape;
+	private final int buckets;
+	private final Node startNode;
+	private Node closest;
+	private double closestH;
+	private int expanded;
+	private Result result;
+
+	/**
+	 * Prepares a search; call {@link #step(long)} until it returns true, then read {@link #result()}.
+	 *
+	 * @param startFloor the bot's actual feet Y
+	 * @param maxDrop    highest drop onto solid ground allowed right now (already limited by health);
+	 *                   drops into water are only limited by the search window
+	 * @param air        the bot's breath: under water, only routes it can always get back up from
+	 */
+	public LocalPathfinder(Level level, Inventory inventory, Mode mode, int maxDrop, BlockPos start, double startFloor,
+						   Predicate<BlockPos> goal, BlockPos target, boolean horizontalOnly, Limits limits,
+						   LongPredicate avoid, Air.Profile air) {
+		this.avoid = avoid;
+		this.air = air;
+		this.escape = new Escape(level, inventory, air.waterDigFactor());
+		this.buckets = air.limited() ? Math.max(1, Math.min(air.full(), Air.MAX_AIR * 4) / AIR_BUCKET + 1) : 1;
+		this.level = level;
+		this.inventory = inventory;
+		this.mode = mode;
+		this.maxDrop = maxDrop;
+		this.origin = start;
+		this.target = target;
+		this.horizontalOnly = horizontalOnly;
+		this.limits = limits;
+		this.goal = goal;
+		this.walkCost = 1.0 / mode.speed();
+		this.canBuild = com.vale.helperbot.guard.Rules.open() && BuildingBlocks.count(inventory) > 0;
+		breakCache.defaultReturnValue(Integer.MIN_VALUE);
+		floorCache.defaultReturnValue(Double.NEGATIVE_INFINITY);
+		this.partial = horizontalOnly
+				? Math.max(Math.abs(target.getX() - start.getX()), Math.abs(target.getZ() - start.getZ())) > limits.radiusXZ()
+				: !inWindow(target);
+		this.heuristicWeight = partial ? PARTIAL_HEURISTIC_WEIGHT : 1.0;
+
+		// Starting with the head in air counts as a full breath: the bot tops up before diving.
+		int startAir = Air.breathable(level, start) ? air.full() : air.now();
+		startNode = new Node(start, startFloor, 0, heuristic(start) * heuristicWeight, null, null, startAir);
+		open.add(startNode);
+		record(start.asLong(), bucket(startAir), 0);
+		closest = startNode;
+		closestH = heuristic(start);
+	}
+
+	/** Runs the search for at most {@code budgetNanos}. Returns true once it has finished. */
+	public boolean step(long budgetNanos) {
+		if (result != null) {
+			return true;
+		}
+		long deadline = System.nanoTime() + budgetNanos;
+		while (!open.isEmpty() && expanded < limits.maxNodes()) {
+			if ((expanded & 127) == 0 && System.nanoTime() > deadline) {
+				return false;
+			}
+			Node node = open.poll();
+			if (node.g > bestG.get(node.pos.asLong())[bucket(node.air)]) {
+				continue;
+			}
+			if (goal.test(node.pos)) {
+				result = new Result(reconstruct(node), true);
+				return true;
+			}
+			expanded++;
+			double h = heuristic(node.pos);
+			if (h < closestH) {
+				closestH = h;
+				closest = node;
+			}
+			// A partial search has done its job once it reaches the edge of the window: going
+			// further can't get closer to the target, only marginally improve the route here.
+			if (partial && expanded >= EARLY_STOP_MIN_NODES && atWindowEdge(closest.pos)) {
+				break;
+			}
+			for (Candidate c : neighbours(node.pos, node.floor)) {
+				int airLeft = airAfter(node, c);
+				if (airLeft < 0) {
+					continue; // couldn't get back up from there in time
+				}
+				double g = node.g + c.cost;
+				long key = c.step.to().asLong();
+				int b = bucket(airLeft);
+				if (!dominated(key, b, g)) {
+					record(key, b, g);
+					open.add(new Node(c.step.to(), c.floor, g, heuristic(c.step.to()) * heuristicWeight, node, c.step, airLeft));
+				}
+			}
+		}
+		result = closest == startNode ? Result.EMPTY : new Result(reconstruct(closest), false);
+		return true;
+	}
+
+	public Result result() {
+		return result;
+	}
+
+	private boolean atWindowEdge(BlockPos pos) {
+		int r = limits.radiusXZ() - 1;
+		if (Math.abs(pos.getX() - origin.getX()) >= r || Math.abs(pos.getZ() - origin.getZ()) >= r) {
+			return true;
+		}
+		int dy = pos.getY() - origin.getY();
+		return !horizontalOnly && (dy >= limits.up() - 1 || -dy >= limits.down() - 1);
+	}
+
+	/** How many blocks closer to the target the best path found so far gets us. */
+	public double progressBlocks() {
+		return (heuristic(origin) - closestH) / walkCost;
+	}
+
+	public Limits limits() {
+		return limits;
+	}
+
+	// ---- air ----------------------------------------------------------------------------
+
+	/**
+	 * Air budget left after taking this step, or -1 if the step isn't allowed: with the head under
+	 * water at the end of it, there must still be enough to get back up from there (see
+	 * {@link Air#reserve}). Ending with the head in air is a fresh breath. A step that digs a block
+	 * next to water ends under water too, whatever the cell looks like now: the water pours in.
+	 */
+	private int airAfter(Node from, Candidate c) {
+		BlockPos to = c.step.to();
+		boolean floods = false;
+		for (BlockPos b : c.step.toBreak()) {
+			if (Escape.floodsWhenDug(level, b)) {
+				floods = true;
+				break;
+			}
+		}
+		if (!floods && Air.breathable(level, to)) {
+			return air.full();
+		}
+		if (!air.limited()) {
+			return 0;
+		}
+		// Charged with the real time the step takes, not its cost (which includes preferences).
+		int left = from.air - (int) Math.ceil(c.ticks);
+		if (left < Air.reserve(escape.ticks(to)) + 20) {
+			return -1;
+		}
+		return left;
+	}
+
+	private int bucket(int airLeft) {
+		return Math.min(buckets - 1, Math.max(0, airLeft) / AIR_BUCKET);
+	}
+
+	/** Some route already reached this cell at no more cost with at least as much air left. */
+	private boolean dominated(long key, int b, double g) {
+		double[] best = bestG.get(key);
+		if (best == null) {
+			return false;
+		}
+		for (int i = b; i < best.length; i++) {
+			if (best[i] <= g) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private void record(long key, int b, double g) {
+		double[] best = bestG.get(key);
+		if (best == null) {
+			best = new double[buckets];
+			java.util.Arrays.fill(best, Double.MAX_VALUE);
+			bestG.put(key, best);
+		}
+		best[b] = Math.min(best[b], g);
+	}
+
+	/** Mining from feet in {@code p}: slower with the head under water, slower again floating. */
+	private double digPenalty(BlockPos p) {
+		return Air.digPenalty(level, p, air.waterDigFactor());
+	}
+
+	/** Ticks to fall {@code blocks} under vanilla gravity (0.08 blocks/tick²). */
+	private static double fallTicks(double blocks) {
+		return Math.sqrt(2 * blocks / 0.08);
+	}
+
+	private double heuristic(BlockPos pos) {
+		double dx = pos.getX() - target.getX();
+		double dz = pos.getZ() - target.getZ();
+		double dy = horizontalOnly ? 0 : pos.getY() - target.getY();
+		return Math.sqrt(dx * dx + dy * dy + dz * dz) * walkCost;
+	}
+
+	private static List<PathStep> reconstruct(Node node) {
+		List<PathStep> steps = new ArrayList<>();
+		for (Node n = node; n.step != null; n = n.parent) {
+			steps.add(n.step);
+		}
+		Collections.reverse(steps);
+		return steps;
+	}
+
+	// ---- neighbours ---------------------------------------------------------------------
+
+	private List<Candidate> neighbours(BlockPos p, double cur) {
+		List<Candidate> out = new ArrayList<>(16);
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if (dx != 0 || dz != 0) {
+					walkInto(p, cur, dx, dz, out);
+				}
+			}
+		}
+		double pen = digPenalty(p);
+		if (isWater(level, p)) {
+			swimInto(p, out, pen);
+		}
+		// Digging and building assume we stand on a full block (or hold still in water).
+		if (Math.abs(cur - p.getY()) < 1e-3) {
+			for (Direction d : Direction.Plane.HORIZONTAL) {
+				digInto(p, d, out, pen);
+				if (canBuild) {
+					bridgeInto(p, d, out);
+				}
+			}
+			if (canBuild) {
+				pillarUp(p, out, pen);
+			}
+			BlockPos below = p.below();
+			if (inWindow(below)) {
+				List<BlockPos> breaks = new ArrayList<>(1);
+				digTicks = 0;
+				double dig = clearCost(below, breaks, pen);
+				if (dig > 0 && isSupport(level, below.below()) && !nearLava(below)) {
+					out.add(new Candidate(new PathStep(PathStep.Type.DESCEND, p, below, breaks), below.getY(),
+							fallTicks(1) + dig, fallTicks(1) + digTicks));
+				}
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * From water, swim to any neighbouring water cell: level, diving down, or rising (3D). Also
+	 * dig straight up through a ceiling (sand that fell in, the sea floor from below).
+	 */
+	private void swimInto(BlockPos p, List<Candidate> out, double pen) {
+		BlockPos up = p.above();
+		BlockPos overHead = up.above();
+		if (inWindow(overHead) && swimmable(up) && !swimmable(overHead)) {
+			List<BlockPos> breaks = new ArrayList<>(1);
+			digTicks = 0;
+			double dig = clearCost(overHead, breaks, pen);
+			if (dig > 0) {
+				// Once dug, water pours in (or it's air, if the ceiling was the last thing in the way).
+				double f = Escape.floodsWhenDug(level, overHead) || isWater(level, up) ? up.getY() : up.getY() + SWIM_FLOOR;
+				out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, up, breaks), f,
+						dig + 1 / Air.SWIM_UP_SPEED, digTicks + 1 / Air.SWIM_UP_SPEED));
+			}
+		}
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dy = -1; dy <= 1; dy++) {
+				for (int dz = -1; dz <= 1; dz++) {
+					if ((dx == 0 && dy == 0 && dz == 0) || (dx != 0 && dz != 0)) {
+						continue;
+					}
+					BlockPos c = p.offset(dx, dy, dz);
+					if (!inWindow(c) || !isWater(level, c)) {
+						continue;
+					}
+					// Moving up/down and sideways at once: both corner cells must be open too.
+					if (dy != 0 && (dx != 0 || dz != 0)
+							&& !(swimmable(p.offset(dx, 0, dz)) && swimmable(p.offset(0, dy, 0)))) {
+						continue;
+					}
+					double f = floor(c);
+					if (Double.isNaN(f)) {
+						continue;
+					}
+					boolean submerged = isWater(level, c.above());
+					double ticks = Math.sqrt(dx * dx + dy * dy + dz * dz) / SWIM_SPEED;
+					out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, c, List.of()), f,
+							ticks * (submerged ? DIVE_COST_FACTOR : 1), ticks));
+				}
+			}
+		}
+	}
+
+	private boolean swimmable(BlockPos pos) {
+		return passable(pos) || isOpenWater(level, pos);
+	}
+
+	/** Moves into a neighbouring column without digging: walk, step up, jump up, or drop. */
+	private void walkInto(BlockPos p, double cur, int dx, int dz, List<Candidate> out) {
+		boolean diagonal = dx != 0 && dz != 0;
+		BlockPos col = p.offset(dx, 0, dz);
+		if (diagonal && !(columnOpen(p.offset(dx, 0, 0)) && columnOpen(p.offset(0, 0, dz)))) {
+			return;
+		}
+		boolean entryClear = passable(col) && passable(col.above());
+		int top = (int) Math.floor(cur + JUMP_HEIGHT);
+		// Scan the whole window down: solid landings are capped by maxDrop below, water isn't.
+		for (int y = top; y >= origin.getY() - limits.down(); y--) {
+			BlockPos c = new BlockPos(col.getX(), y, col.getZ());
+			if (!inWindow(c)) {
+				continue;
+			}
+			double f = floor(c);
+			if (!Double.isNaN(f)) {
+				double dy = f - cur;
+				boolean intoWater = isWater(level, c);
+				if (dy > JUMP_HEIGHT || (dy < -STEP_HEIGHT && !entryClear) || (diagonal && Math.abs(dy) > STEP_HEIGHT)
+						|| (-dy > maxDrop + 0.01 && !intoWater)) {
+					return;
+				}
+				PathStep.Type type;
+				boolean swimming = intoWater || isWater(level, p);
+				double cost = (swimming ? 1.0 / SWIM_SPEED : walkCost) * (diagonal ? Math.sqrt(2) : 1);
+				if (dy > STEP_HEIGHT) {
+					// Jumping needs headroom above where we stand now.
+					int headTop = (int) Math.floor(cur + JUMP_HEIGHT + PLAYER_HEIGHT - 1e-4);
+					for (int hy = p.getY() + 1; hy <= headTop; hy++) {
+						if (!passable(new BlockPos(p.getX(), hy, p.getZ()))) {
+							return;
+						}
+					}
+					type = PathStep.Type.ASCEND;
+					cost += ASCEND_EXTRA;
+				} else if (dy < -STEP_HEIGHT) {
+					type = PathStep.Type.DESCEND;
+					double drop = -dy;
+					// Water breaks the fall, so only solid landings pay for damage.
+					cost += fallTicks(drop) + (intoWater ? 0 : Math.max(0, drop - 3) * 10);
+				} else {
+					type = PathStep.Type.WALK;
+				}
+				out.add(new Candidate(new PathStep(type, p, c, List.of()), f, cost));
+				return;
+			}
+			if (!passable(c) && y <= p.getY()) {
+				return;
+			}
+		}
+	}
+
+	private boolean columnOpen(BlockPos pos) {
+		return passable(pos) && passable(pos.above());
+	}
+
+	/** Moves that need mining first: tunnel forward, dig a step up, dig a stair down. */
+	private void digInto(BlockPos p, Direction d, List<Candidate> out, double pen) {
+		BlockPos t = p.relative(d);
+		if (!inWindow(t)) {
+			return;
+		}
+		// Tunnel forward.
+		List<BlockPos> breaks = new ArrayList<>(2);
+		digTicks = 0;
+		double dig = clearCost(t, breaks, pen) + clearCost(t.above(), breaks, pen);
+		if (dig >= 0 && !breaks.isEmpty() && isSupport(level, t.below()) && !nearLava(t)) {
+			out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, t, breaks), t.getY(), walkCost + dig, walkCost + digTicks));
+		}
+
+		// Dig out a step and climb onto it.
+		BlockPos up = t.above();
+		breaks = new ArrayList<>(3);
+		digTicks = 0;
+		dig = clearCost(p.above(2), breaks, pen) + clearCost(up, breaks, pen) + clearCost(up.above(), breaks, pen);
+		if (dig >= 0 && !breaks.isEmpty() && isSupport(level, t) && !nearLava(up)) {
+			out.add(new Candidate(new PathStep(PathStep.Type.ASCEND, p, up, breaks), up.getY(),
+					walkCost + ASCEND_EXTRA + dig, walkCost + ASCEND_EXTRA + digTicks));
+		}
+
+		// Dig a stair down.
+		BlockPos down = t.below();
+		breaks = new ArrayList<>(3);
+		digTicks = 0;
+		dig = clearCost(t.above(), breaks, pen) + clearCost(t, breaks, pen) + clearCost(down, breaks, pen);
+		if (dig >= 0 && !breaks.isEmpty() && isSupport(level, down.below()) && !nearLava(down)) {
+			out.add(new Candidate(new PathStep(PathStep.Type.DESCEND, p, down, breaks), down.getY(),
+					walkCost + fallTicks(1) + dig, walkCost + fallTicks(1) + digTicks));
+		}
+	}
+
+	/**
+	 * Place a block in front, below foot level, and walk onto it (over a gap or water).
+	 *
+	 * <p>No "is there something to place against" check against the current world: we only get
+	 * here standing on a full block, and the new block goes right next to it. That block may be
+	 * one this same path places a step earlier (a bridge or pillar still in the plan), which the
+	 * world doesn't contain yet; checking the world would stop every bridge after its first block.
+	 */
+	private void bridgeInto(BlockPos p, Direction d, List<Candidate> out) {
+		BlockPos t = p.relative(d);
+		BlockPos under = t.below();
+		if (!inWindow(t) || !passable(t) || !passable(t.above()) || !Double.isNaN(floor(t))
+				|| !Guard.canPlace(level, under) || nearLava(t)) {
+			return;
+		}
+		out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, t, List.of(), under), t.getY(), walkCost + PLACE_COST));
+	}
+
+	/** Jump and place a block under ourselves. */
+	private void pillarUp(BlockPos p, List<Candidate> out, double pen) {
+		BlockPos up = p.above();
+		if (!inWindow(up) || !Guard.canPlace(level, p) || isWater(level, p)) {
+			return;
+		}
+		List<BlockPos> breaks = new ArrayList<>(1);
+		digTicks = 0;
+		double dig = clearCost(p.above(2), breaks, pen);
+		if (dig >= 0 && !nearLava(up)) {
+			out.add(new Candidate(new PathStep(PathStep.Type.PILLAR, p, up, breaks, p), up.getY(),
+					ASCEND_EXTRA + PLACE_COST + dig, ASCEND_EXTRA + PLACE_COST + digTicks));
+		}
+	}
+
+	public static boolean isWater(Level level, BlockPos pos) {
+		return level.getFluidState(pos).is(FluidTags.WATER);
+	}
+
+	private boolean inWindow(BlockPos pos) {
+		return Math.abs(pos.getX() - origin.getX()) <= limits.radiusXZ()
+				&& Math.abs(pos.getZ() - origin.getZ()) <= limits.radiusXZ()
+				&& pos.getY() - origin.getY() <= limits.up()
+				&& origin.getY() - pos.getY() <= limits.down();
+	}
+
+	// ---- terrain queries ----------------------------------------------------------------
+
+	/**
+	 * Height the feet rest at when standing with feet in cell {@code c}, or NaN if the bot
+	 * can't stand there (no ground, no headroom, liquid, hazard, or a block it must not step on).
+	 */
+	public static double floorHeight(Level level, BlockPos c) {
+		if (!level.hasChunkAt(c)) {
+			return Double.NaN;
+		}
+		BlockState state = level.getBlockState(c);
+		VoxelShape shape = state.getCollisionShape(level, c);
+		double base;
+		if (shape.isEmpty() && isWater(level, c)) {
+			if (Guard.isDangerous(state)) {
+				return Double.NaN;
+			}
+			if (isWater(level, c.above())) {
+				// Fully under water. How deep it may go is up to its air (see Air), not a fixed limit.
+				return isOpenWater(level, c.above()) ? c.getY() : Double.NaN;
+			}
+			// Swimming at the surface, head out of the water.
+			base = c.getY() + SWIM_FLOOR;
+		} else if (shape.isEmpty()) {
+			if (!isPassable(level, c) || !isSupport(level, c.below())) {
+				return Double.NaN;
+			}
+			base = c.getY();
+		} else {
+			// A low block in the feet cell (slab, path, snow layer, carpet) is the ground itself.
+			double top = shape.max(Direction.Axis.Y);
+			if (top > 0.9375 + 1e-4 || !state.getFluidState().isEmpty()
+					|| Guard.isDangerous(state) || Guard.isNoStep(state)) {
+				return Double.NaN;
+			}
+			base = c.getY() + top;
+		}
+		int headTop = (int) Math.floor(base + PLAYER_HEIGHT - 1e-4);
+		for (int y = c.getY() + 1; y <= headTop; y++) {
+			if (!isPassable(level, new BlockPos(c.getX(), y, c.getZ()))) {
+				return Double.NaN;
+			}
+		}
+		return base;
+	}
+
+	/** Feet height when swimming in water cell {@code c}: at the surface, or fully under. */
+	public static double swimHeight(Level level, BlockPos c) {
+		return isWater(level, c.above()) ? c.getY() : c.getY() + SWIM_FLOOR;
+	}
+
+	/** Water the bot can swim through: no collision, no bubble column or other hazard. */
+	public static boolean isOpenWater(Level level, BlockPos pos) {
+		if (!level.hasChunkAt(pos) || !isWater(level, pos)) {
+			return false;
+		}
+		BlockState state = level.getBlockState(pos);
+		return state.getCollisionShape(level, pos).isEmpty() && !Guard.isDangerous(state);
+	}
+
+	/**
+	 * Blocks of water to swim straight up from {@code pos} before reaching breathable air,
+	 * or -1 if that's more than {@link #MAX_DIVE_DEPTH} or blocked.
+	 */
+	public static int surfaceDistance(Level level, BlockPos pos) {
+		for (int d = 0; d <= MAX_DIVE_DEPTH; d++) {
+			BlockPos p = pos.above(d);
+			if (isPassable(level, p)) {
+				return d;
+			}
+			if (!isOpenWater(level, p)) {
+				return -1;
+			}
+		}
+		return -1;
+	}
+
+	public static boolean isPassable(Level level, BlockPos pos) {
+		if (!level.hasChunkAt(pos)) {
+			return false;
+		}
+		BlockState state = level.getBlockState(pos);
+		if (!state.getCollisionShape(level, pos).isEmpty()
+				|| !state.getFluidState().isEmpty()
+				|| Guard.isDangerous(state)
+				|| Guard.isNoStep(state)) {
+			return false;
+		}
+		// Fences and walls are 1.5 blocks tall: the one below sticks half a block up into this cell.
+		BlockPos below = pos.below();
+		VoxelShape belowShape = level.getBlockState(below).getCollisionShape(level, below);
+		return belowShape.isEmpty() || belowShape.max(Direction.Axis.Y) <= 1.0 + 1e-6;
+	}
+
+	/** A full-height block that can be stood on. */
+	public static boolean isSupport(Level level, BlockPos pos) {
+		if (!level.hasChunkAt(pos)) {
+			return false;
+		}
+		BlockState state = level.getBlockState(pos);
+		VoxelShape shape = state.getCollisionShape(level, pos);
+		return !shape.isEmpty()
+				&& shape.max(Direction.Axis.Y) >= 0.999
+				&& state.getFluidState().isEmpty()
+				&& !Guard.isDangerous(state)
+				&& !Guard.isNoStep(state);
+	}
+
+	private double floor(BlockPos c) {
+		long key = c.asLong();
+		double cached = floorCache.get(key);
+		if (cached == Double.NEGATIVE_INFINITY) {
+			cached = floorHeight(level, c);
+			if (!Double.isNaN(cached) && (nearLava(c) || avoid.test(key) || avoid.test(c.above().asLong()))) {
+				cached = Double.NaN;
+			}
+			floorCache.put(key, cached);
+		}
+		return cached;
+	}
+
+	private boolean passable(BlockPos pos) {
+		long key = pos.asLong();
+		int cached = passableCache.get(key);
+		if (cached == 0) {
+			cached = isPassable(level, pos) && !avoid.test(key) ? 1 : 2;
+			passableCache.put(key, cached);
+		}
+		return cached == 1;
+	}
+
+	/**
+	 * Ticks (scaled by mode) to clear this cell, 0 if already open, or a large negative
+	 * number if it may not be cleared. Adds the cell to {@code breaks} when mining is needed.
+	 */
+	private double clearCost(BlockPos pos, List<BlockPos> breaks, double penalty) {
+		if (passable(pos)) {
+			return 0;
+		}
+		long key = pos.asLong();
+		int ticks = breakCache.get(key);
+		if (ticks == Integer.MIN_VALUE) {
+			BlockState state = level.getBlockState(pos);
+			// Liquids and other non-solid cells can't be mined out of the way.
+			boolean allowed = level.hasChunkAt(pos)
+					&& !state.getCollisionShape(level, pos).isEmpty()
+					&& Guard.canBreak(level, pos, state)
+					&& !Guard.isDangerous(state);
+			ticks = allowed ? BreakTimes.estimateTicks(inventory, level, pos, state) : -1;
+			if (ticks == Integer.MAX_VALUE) {
+				ticks = -1;
+			}
+			breakCache.put(key, ticks);
+		}
+		if (ticks < 0) {
+			return -1e9;
+		}
+		breaks.add(pos);
+		// Sand or gravel overhead falls into the gap, one block after another: each must be dug too.
+		double fallers = 0;
+		BlockPos above = pos.above();
+		for (int i = 0; i < 16 && level.getBlockState(above).getBlock() instanceof FallingBlock; i++) {
+			int t = BreakTimes.estimateTicks(inventory, level, above, level.getBlockState(above));
+			fallers += t == Integer.MAX_VALUE ? 0 : t + BREAK_OVERHEAD;
+			above = above.above();
+		}
+		double real = (ticks + BREAK_OVERHEAD + fallers) * penalty;
+		digTicks += real;
+		return real * mode.digCostFactor + Guard.breakRiskCost(level, pos);
+	}
+
+	private boolean nearLava(BlockPos feet) {
+		long key = feet.asLong();
+		int cached = lavaCache.get(key);
+		if (cached == 0) {
+			cached = 2;
+			int m = mode.lavaMargin;
+			search:
+			for (int dx = -m; dx <= m; dx++) {
+				for (int dz = -m; dz <= m; dz++) {
+					for (int dy = -1; dy <= 2; dy++) {
+						if (level.getFluidState(feet.offset(dx, dy, dz)).is(FluidTags.LAVA)) {
+							cached = 1;
+							break search;
+						}
+					}
+				}
+			}
+			lavaCache.put(key, cached);
+		}
+		return cached == 1;
+	}
+}
