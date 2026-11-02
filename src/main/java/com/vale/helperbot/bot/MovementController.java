@@ -161,6 +161,7 @@ public final class MovementController {
 		engaged = false;
 		ignoreAir = false;
 		airRequested = false;
+		lastPath.clear(); // a new destination: the old route means nothing
 		status = Status.IDLE;
 		path = null;
 		search = null;
@@ -291,6 +292,7 @@ public final class MovementController {
 			savedTarget = target;
 			savedStatus = status;
 			savedHorizontalOnly = horizontalOnly;
+			lastPath.clear();
 			goal = chaseGoal;
 			target = chaseTarget;
 			horizontalOnly = false;
@@ -332,6 +334,16 @@ public final class MovementController {
 		boolean r = airRequested;
 		airRequested = false;
 		return r;
+	}
+
+	/** Ask the breathing layer for a full breath now (e.g. not enough air left to finish a block). */
+	public void requestAir() {
+		airRequested = true;
+	}
+
+	/** Already hitting this block (some progress made), as opposed to about to start on it. */
+	public boolean isBreaking(BlockPos pos) {
+		return pos.equals(breakingPos);
 	}
 
 	/**
@@ -400,6 +412,7 @@ public final class MovementController {
 		}
 		engaged = false;
 		ignoreAir = false;
+		lastPath.clear();
 		goal = savedGoal;
 		target = savedTarget;
 		status = savedStatus;
@@ -492,6 +505,9 @@ public final class MovementController {
 			}
 		}
 		if (path != null && index < path.size()) {
+			if (stepTimedOut(path.get(index)) || aheadChanged()) {
+				return;
+			}
 			executeStep(path.get(index));
 			advanceLookahead();
 		}
@@ -508,7 +524,7 @@ public final class MovementController {
 		}
 		searchLevel = levelIndex;
 		search = new LocalPathfinder(bot.level(), bot.getInventory(), mode, mode.maxDropFor(bot.getHealth()),
-				feet(), bot.getY(), goal, target, horizontalOnly, levels[levelIndex], this::isAvoided, airProfile());
+				feet(), bot.getY(), goal, target, horizontalOnly, levels[levelIndex], this::isAvoided, airProfile(), lastPath::contains);
 		plannedAt = bot.tickCount;
 	}
 
@@ -567,9 +583,7 @@ public final class MovementController {
 		}
 		bot.log("规划出 " + result.steps().size() + " 步（±" + radius + " 格，"
 				+ (result.reachesGoal() ? "能到终点" : "先走一段") + "）");
-		path = result.steps();
-		pathReachesGoal = result.reachesGoal();
-		index = 0;
+		adopt(result);
 		emptyPlans = 0;
 	}
 
@@ -599,7 +613,7 @@ public final class MovementController {
 			return;
 		}
 		lookahead = new LocalPathfinder(bot.level(), bot.getInventory(), mode, mode.maxDropFor(bot.getHealth()),
-				end, endFloor, goal, target, horizontalOnly, levels[minLevel], this::isAvoided, airProfile());
+				end, endFloor, goal, target, horizontalOnly, levels[minLevel], this::isAvoided, airProfile(), lastPath::contains);
 	}
 
 	/**
@@ -622,9 +636,7 @@ public final class MovementController {
 		if (!useful) {
 			return false; // let the normal planner try (and widen the search if needed)
 		}
-		path = result.steps();
-		pathReachesGoal = result.reachesGoal();
-		index = 0;
+		adopt(result);
 		emptyPlans = 0;
 		resetStep();
 		return true;
@@ -708,6 +720,7 @@ public final class MovementController {
 	}
 
 	private void resetStep() {
+		stepTicks = 0;
 		breakIndex = 0;
 		breakAttempts = 0;
 		stepStarted = false;
@@ -772,8 +785,117 @@ public final class MovementController {
 		resetStep();
 	}
 
+	// ---- borrowed from Baritone: step timeout, checking ahead, sticking to the route ------
+
+	/** Real ticks each step of the path should take. */
+	private List<Double> pathTicks = List.of();
+	/** Cells of the most recent path towards the current goal: favoured when planning again. */
+	private final it.unimi.dsi.fastutil.longs.LongOpenHashSet lastPath = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+	/** Ticks spent on the current step. */
+	private int stepTicks;
+	/** A step may take this much longer than its estimate before it's given up on. */
+	private static final int STEP_TIMEOUT_EXTRA = 100;
+	/** How many steps ahead are checked against the world as it is now. */
+	private static final int VERIFY_AHEAD = 5;
+	private static final int VERIFY_INTERVAL = 5;
+
+	private void adopt(LocalPathfinder.Result result) {
+		path = result.steps();
+		pathTicks = result.ticks();
+		pathReachesGoal = result.reachesGoal();
+		index = 0;
+		lastPath.clear();
+		for (PathStep s : path) {
+			lastPath.add(s.from().asLong());
+			lastPath.add(s.to().asLong());
+		}
+	}
+
+	/**
+	 * Whatever the reason a step is stuck (and there are endless ones), it shows as taking far
+	 * longer than planned: give up on it, keep away from where it was going for a while, plan
+	 * again. A catch-all next to the specific checks (blocked, frozen, fell off the path).
+	 */
+	private boolean stepTimedOut(PathStep step) {
+		double expected = index < pathTicks.size() ? pathTicks.get(index) : 20;
+		if (++stepTicks <= expected + STEP_TIMEOUT_EXTRA) {
+			return false;
+		}
+		avoidUntil.put(step.to().asLong(), bot.tickCount + AVOID_TICKS);
+		replan("这一步比预计慢太多（预计 " + (int) expected + " 刻，已用 " + stepTicks + " 刻），换条路");
+		return true;
+	}
+
+	/**
+	 * Check the next few steps against the world as it is now: sand fell in, water flowed in,
+	 * someone built or dug there. Plan again right away instead of walking up to it first. Only up
+	 * to the first step that changes the world itself: the ones after it count on that change.
+	 */
+	private boolean aheadChanged() {
+		if (path == null || bot.tickCount % VERIFY_INTERVAL != 0 || index >= path.size()) {
+			return false;
+		}
+		ServerLevel level = bot.level();
+		if (changesWorld(path.get(index))) {
+			return false;
+		}
+		for (int i = index + 1; i < Math.min(path.size(), index + 1 + VERIFY_AHEAD); i++) {
+			PathStep s = path.get(i);
+			if (changesWorld(s)) {
+				for (BlockPos b : s.toBreak()) {
+					BlockState state = level.getBlockState(b);
+					if (!LocalPathfinder.isPassable(level, b) && !LocalPathfinder.isOpenWater(level, b)
+							&& !Guard.canBreak(level, b, state)) {
+						replan("前方第 " + (i - index) + " 步要挖的方块现在不能挖了");
+						return true;
+					}
+				}
+				return false;
+			}
+			if (s.type() != PathStep.Type.PILLAR && Double.isNaN(LocalPathfinder.floorHeight(level, s.to()))
+					&& !LocalPathfinder.isOpenWater(level, s.to())) {
+				replan("前方第 " + (i - index) + " 步走不通了（那里变了）");
+				return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean changesWorld(PathStep s) {
+		return !s.toBreak().isEmpty() || s.place() != null;
+	}
+
+	/** The step that last ended in a replan, how often in a row, and when. */
+	private PathStep failedStep;
+	private int failedStepCount;
+	private int failedStepTick;
+	private static final int SAME_STEP_FAILURES = 3;
+	/** Failures of the same step further apart than this don't count as "in a row". */
+	private static final int SAME_STEP_WINDOW = 600;
+
 	private void replan(String why) {
 		bot.log("重新规划：" + why);
+		if (path != null && index < path.size()) {
+			// Whatever the reason, the same step from the same place going wrong again and again
+			// (e.g. in a waterfall: plan one step up, it fails, plan the same step...) means the plan's
+			// picture of it is wrong: keep out of where it leads for a while, so the next plan
+			// finds another way (or, going for air, the breathing layer swims/digs straight up).
+			PathStep step = path.get(index);
+			if (step.equals(failedStep) && bot.tickCount - failedStepTick <= SAME_STEP_WINDOW) {
+				failedStepCount++;
+			} else {
+				failedStep = step;
+				failedStepCount = 1;
+			}
+			failedStepTick = bot.tickCount;
+			if (failedStepCount >= SAME_STEP_FAILURES) {
+				avoidUntil.put(step.to().asLong(), bot.tickCount + AVOID_TICKS);
+				bot.log("同一步（" + step.from().toShortString() + " → " + step.to().toShortString() + "）连续失败 "
+						+ failedStepCount + " 次，暂时当它走不通");
+				failedStep = null;
+				failedStepCount = 0;
+			}
+		}
 		abortBreaking();
 		path = null;
 		search = null;

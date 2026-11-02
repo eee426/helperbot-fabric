@@ -28,7 +28,7 @@ public class AcquireTask implements BotTask {
 	private static final int MAX_REPEATS = 3;
 
 	private enum Phase {
-		PLAN, GATHER, HUNT, CRAFT, SMELT, RETURN
+		PLAN, GATHER, HUNT, FILL, CRAFT, SMELT, RETURN
 	}
 
 	private final ServerPlayer requester;
@@ -50,6 +50,7 @@ public class AcquireTask implements BotTask {
 	private Item huntItem;
 	private CraftStep craft;
 	private SmeltStep smelt;
+	private FetchWaterTask fill;
 
 	public AcquireTask(ServerPlayer requester, Item item, int wanted, Mode mode) {
 		this.requester = requester;
@@ -76,7 +77,10 @@ public class AcquireTask implements BotTask {
 				Status s = gather.tick(bot);
 				if (s != Status.RUNNING) {
 					gather.onEnd(bot, s);
-					if (s == Status.FAILED) {
+					if (gather.toolsGone()) {
+						// Not the source's fault: the next plan makes a new tool first.
+						bot.log("工具用坏了，重新规划（需要的话先做一把新的）");
+					} else if (s == Status.FAILED) {
 						stepFailed(bot, gatherItem, "采集");
 					} else {
 						failures.remove(gatherItem);
@@ -100,6 +104,15 @@ public class AcquireTask implements BotTask {
 						failures.remove(huntItem);
 					}
 					hunt = null;
+					phase = Phase.PLAN;
+				}
+				yield Status.RUNNING;
+			}
+			case FILL -> {
+				Status s = fill.tick(bot);
+				if (s != Status.RUNNING) {
+					fill.onEnd(bot, s);
+					fill = null;
 					phase = Phase.PLAN;
 				}
 				yield Status.RUNNING;
@@ -158,11 +171,19 @@ public class AcquireTask implements BotTask {
 		if (++steps > MAX_STEPS) {
 			return giveUp(bot, "步骤太多了，可能在原地打转");
 		}
+		// The planner ignores the target item in the bag: what's made counts in "got" above, and it
+		// is never material for its own plan (it used to dye finished white carpets blue and back).
 		Map<Item, Integer> inventory = CraftPlanner.counts(bot.getInventory());
-		// What was already in the bag before the task doesn't count towards the order.
-		inventory.merge(item, -startCount, Integer::sum);
+		long started = System.nanoTime();
 		CraftPlanner.Plan plan = new CraftPlanner(bot.level(), bot, bot.getInventory(), noGather)
 				.plan(item, wanted - got, inventory);
+		long ms = (System.nanoTime() - started) / 1_000_000;
+		if (plan.timedOut()) {
+			bot.log("规划超时（" + ms + " 毫秒），用目前找到的最好方案");
+			com.vale.helperbot.HelperBot.LOGGER.warn("HelperBot planning for {} hit the time limit ({} ms)", item, ms);
+		} else if (ms >= 50) {
+			bot.log("规划用了 " + ms + " 毫秒");
+		}
 		if (!plan.possible()) {
 			MutableComponent why = Component.literal("想不出怎么弄到").append(name(item));
 			if (lastFailure != null) {
@@ -203,6 +224,10 @@ public class AcquireTask implements BotTask {
 				hunt = new HuntTask(requester, h.item(), h.count(), mode, h.sources());
 				phase = Phase.HUNT;
 			}
+			case CraftPlanner.Fill f -> {
+				fill = new FetchWaterTask(requester, mode, true);
+				phase = Phase.FILL;
+			}
 			case CraftPlanner.Craft c -> {
 				bot.movement().stop();
 				craft = new CraftStep(requester, c);
@@ -225,6 +250,10 @@ public class AcquireTask implements BotTask {
 			switch (action) {
 				case CraftPlanner.Gather g -> planItems.add(g.item());
 				case CraftPlanner.Hunt h -> planItems.add(h.item());
+				case CraftPlanner.Fill f -> {
+					planItems.add(Items.BUCKET);
+					planItems.add(Items.WATER_BUCKET);
+				}
 				case CraftPlanner.Craft c -> {
 					planItems.add(c.recipe().result());
 					for (Ingredient ingredient : c.recipe().ingredients()) {
@@ -248,6 +277,7 @@ public class AcquireTask implements BotTask {
 			switch (actions.get(i)) {
 				case CraftPlanner.Gather g -> text.append("采集 ").append(name(g.item())).append(" ×" + g.count());
 				case CraftPlanner.Hunt h -> text.append("打猎 ").append(name(h.item())).append(" ×" + h.count());
+				case CraftPlanner.Fill f -> text.append("装水 ").append(name(Items.WATER_BUCKET)).append(" ×" + f.count());
 				case CraftPlanner.Craft c -> text.append("合成 ").append(name(c.recipe().result()))
 						.append(" ×" + c.times() * c.recipe().resultCount());
 				case CraftPlanner.Smelt s -> text.append("熔炼 ").append(name(s.recipe().result()))
@@ -311,6 +341,7 @@ public class AcquireTask implements BotTask {
 			case GATHER -> "获取 " + what + " → " + gather.describe();
 			case HUNT -> "获取 " + what + " → " + hunt.describe();
 			case CRAFT -> "获取 " + what + " → " + craft.describe().getString();
+			case FILL -> "获取 " + what + " → " + fill.describe();
 			case SMELT -> "获取 " + what + " → " + smelt.describe().getString();
 			case RETURN -> "获取 " + what + "：返回";
 		};

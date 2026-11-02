@@ -141,10 +141,17 @@ final class HuntTask {
 			return BotTask.Status.DONE;
 		}
 		phaseTicks++;
+		// Only stop to heal when health can come back (food at 18+, or something to eat): without
+		// food it just stood there doing nothing, for nothing.
 		if (phase != Phase.HEAL && bot.getHealth() < LOW_HEALTH) {
-			bot.log("血量太低，先停下回血");
-			bot.movement().stop();
-			setPhase(Phase.HEAL);
+			if (bot.canRegenerate()) {
+				bot.log("血量太低，先停下回血");
+				bot.movement().stop();
+				setPhase(Phase.HEAL);
+			} else if (!warnedNoFood) {
+				warnedNoFood = true;
+				bot.log("血量低但没有吃的，回不了血，继续（小心点）");
+			}
 		}
 		return switch (phase) {
 			case FIND -> find(bot);
@@ -153,13 +160,15 @@ final class HuntTask {
 			case WAIT -> waitForSpawns(bot);
 			case CHASE -> chase(bot);
 			case HEAL -> {
-				if (bot.getHealth() >= RESUME_HEALTH || phaseTicks > HEAL_MAX_TICKS) {
+				if (bot.getHealth() >= RESUME_HEALTH || phaseTicks > HEAL_MAX_TICKS || !bot.canRegenerate()) {
 					setPhase(Phase.FIND);
 				}
 				yield BotTask.Status.RUNNING;
 			}
 		};
 	}
+
+	private boolean warnedNoFood;
 
 	private void setPhase(Phase next) {
 		phase = next;

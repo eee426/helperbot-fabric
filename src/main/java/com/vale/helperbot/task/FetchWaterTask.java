@@ -56,9 +56,17 @@ public class FetchWaterTask implements BotTask {
 	private int travelTicks;
 	private int travelFailures;
 
+	/** Part of a bigger plan (see AcquireTask): done once filled, no walking back, no messages of its own. */
+	private final boolean asStep;
+
 	public FetchWaterTask(ServerPlayer requester, Mode mode) {
+		this(requester, mode, false);
+	}
+
+	FetchWaterTask(ServerPlayer requester, Mode mode, boolean asStep) {
 		this.requester = requester;
 		this.mode = mode;
+		this.asStep = asStep;
 		this.returnLeg = new ComeTask(requester, mode);
 	}
 
@@ -222,6 +230,9 @@ public class FetchWaterTask implements BotTask {
 			phase = Phase.FIND;
 			return Status.RUNNING;
 		}
+		if (asStep) {
+			return Status.DONE;
+		}
 		bot.say(requester, "装好水了，正在回来。");
 		phase = Phase.RETURN;
 		return Status.RUNNING;
@@ -291,6 +302,9 @@ public class FetchWaterTask implements BotTask {
 	public void onEnd(BotPlayer bot, Status status) {
 		if (locating != null) {
 			locating.cancel(false);
+		}
+		if (asStep) {
+			return;
 		}
 		switch (status) {
 			case DONE -> bot.say(requester, "水取回来了，右键我把水桶拿走吧。");

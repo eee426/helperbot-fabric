@@ -34,6 +34,18 @@ public final class BreakTimes {
 		return Math.max(1f, stack.getDestroySpeed(state)) / (correct ? 30f : 100f);
 	}
 
+	/** Estimated ticks to mine with this exact tool (empty = bare hand), ignoring enchantments and effects. */
+	public static int estimateTicksWith(ItemStack tool, BlockGetter level, BlockPos pos, BlockState state) {
+		float hardness = state.getDestroySpeed(level, pos);
+		if (hardness < 0) {
+			return Integer.MAX_VALUE;
+		}
+		if (hardness == 0) {
+			return 1;
+		}
+		return (int) Math.ceil(hardness / score(tool, state));
+	}
+
 	/** Estimated ticks to mine, ignoring enchantments and effects (planning only). */
 	public static int estimateTicks(Inventory inventory, BlockGetter level, BlockPos pos, BlockState state) {
 		float hardness = state.getDestroySpeed(level, pos);

@@ -46,7 +46,7 @@ public final class BotManager {
 					.ifPresent(created::load);
 		}
 		if (created.getHealth() <= 0) {
-			created.setHealth(created.getMaxHealth());
+			created.resetAfterDeath(); // saved while dead: come back like a respawned player
 		}
 		server.getPlayerList().placeNewPlayer(new FakeConnection(), created,
 				new CommonListenerCookie(profile, 0, created.clientInformation(), false));

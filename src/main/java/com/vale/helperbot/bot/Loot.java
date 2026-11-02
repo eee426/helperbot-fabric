@@ -160,7 +160,9 @@ public final class Loot {
 			all = all == null ? e.area() : all.minmax(e.area());
 		}
 		for (ItemEntity item : bot.level().getEntitiesOfClass(ItemEntity.class, all,
-				i -> i.isAlive() && !abandoned.contains(i.getUUID()) && bot.wantsPickup(i.getItem()))) {
+				// Only what the task needs: spare building blocks are picked up in passing, never
+				// fetched (it used to turn back, or dig out its own pillar, for one dropped block).
+				i -> i.isAlive() && !abandoned.contains(i.getUUID()) && bot.taskWants(i.getItem()))) {
 			for (Event e : events) {
 				if (item.getAge() <= bot.tickCount - e.tick + 2 && e.area().contains(item.position())) {
 					out.add(item);

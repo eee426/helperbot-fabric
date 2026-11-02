@@ -54,7 +54,8 @@ public class GatherTask implements BotTask {
 	private static final int TRAVEL_SCAN_CHUNKS = 3;
 	private static final int TRAVEL_SCAN_INTERVAL = 100;
 	private static final int MAX_DISTANCE = FetchWaterTask.MAX_DISTANCE;
-	private static final int MAX_REJECTS = 30;
+	/** Give up after this many targets in a row turned out unreachable (any success resets it). */
+	private static final int MAX_UNREACHABLE_IN_ROW = 15;
 	/** Looked through when already standing in the right biome (about the usual view distance). */
 	private static final int WIDE_SCAN_CHUNKS = 10;
 	private static final int MAX_TRAVEL_FAILURES = 4;
@@ -101,7 +102,10 @@ public class GatherTask implements BotTask {
 		double reach = bot.blockInteractionRange() - REACH_MARGIN;
 		Vec3 center = Vec3.atCenterOf(p);
 		BlockState state = level.getBlockState(p);
-		int dig = BreakTimes.estimateTicks(bot.getInventory(), level, p, state);
+		// With the tool it will really use for this block (not just the fastest in the bag).
+		int slot = toolFor.getOrDefault(state.getBlock(), MovementController.HAND);
+		ItemStack tool = slot >= 0 ? bot.getInventory().getItem(slot) : ItemStack.EMPTY;
+		int dig = BreakTimes.estimateTicksWith(tool, level, p, state);
 		if (dig == Integer.MAX_VALUE) {
 			return Double.NaN;
 		}
@@ -124,8 +128,10 @@ public class GatherTask implements BotTask {
 					}
 					double up = escape.ticks(q);
 					double mining = dig * Air.digPenalty(level, q, waterFactor);
-					// There, mine, back up; with the planner's safety margin on top.
-					if (up + mining + Air.reserve(up) + 20 > full) {
+					// Down there, mine, back up, on one breath; with the planner's safety margin on top.
+					// (The way down used to be left out: deep blocks passed, and every dive ran out of
+					// air halfway through the block, went up, came back and started over.)
+					if (2 * up + mining + Air.reserve(up) + 20 > full) {
 						continue;
 					}
 					double need = 2 * up + mining;
@@ -315,7 +321,7 @@ public class GatherTask implements BotTask {
 
 	private Status nextTarget(BotPlayer bot) {
 		if (!refreshTools(bot, new HashSet<>(toolFor.keySet()))) {
-			return giveUp(bot, "能用的工具都用坏了");
+			return toolsGone(bot);
 		}
 		ServerLevel level = bot.level();
 		BlockPos here = bot.blockPosition();
@@ -457,8 +463,8 @@ public class GatherTask implements BotTask {
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
 			bot.log("走不到 " + current.toShortString() + "（" + bot.movement().failReason() + "），换下一个目标");
 			reject(current);
-			if (rejected.size() > MAX_REJECTS) {
-				return giveUp(bot, "试了 " + MAX_REJECTS + " 处都够不着");
+			if (++unreachableInRow >= MAX_UNREACHABLE_IN_ROW) {
+				return giveUp(bot, "连续 " + unreachableInRow + " 处都走不到（最后一次：" + bot.movement().failReason() + "）");
 			}
 			return nextTarget(bot);
 		}
@@ -497,10 +503,20 @@ public class GatherTask implements BotTask {
 		// The slot was worked out earlier; the player may have rearranged the bag since.
 		if (tool >= 0 && bot.getInventory().getItem(tool).getItem() != toolItems.get(currentBlock)) {
 			bot.log("工具位置变了，重新确认工具");
-			if (!refreshTools(bot, new HashSet<>(toolFor.keySet())) || !toolFor.containsKey(currentBlock)) {
-				return giveUp(bot, "能用的工具不见了");
+			if (!refreshTools(bot, new HashSet<>(toolFor.keySet()))) {
+				return toolsGone(bot);
+			}
+			if (!toolFor.containsKey(currentBlock)) {
+				reject(current);
+				return nextTarget(bot); // no tool left for this kind of block, but for others
 			}
 			return Status.RUNNING;
+		}
+		if (!bot.movement().isBreaking(aim)) {
+			Status air = airCheck(bot, aim, tool);
+			if (air != null) {
+				return air;
+			}
 		}
 		// Before the first hit: with what's actually in hand, on the block as it actually is, would
 		// it drop the item? The plan says so; this catches the hand drifting from the plan for any
@@ -539,6 +555,7 @@ public class GatherTask implements BotTask {
 		}
 		if (result == MovementController.MineResult.DONE && !obstacle) {
 			blocksMined++;
+			unreachableInRow = 0;
 			// The drop tracker follows what came out (and the bot's loot layer collects it).
 			int brokeAt = bot.movement().lastBreakTick();
 			bot.loot().onBreak(current, brokeAt);
@@ -547,6 +564,44 @@ public class GatherTask implements BotTask {
 			lastBreakTick = brokeAt;
 			return nextTarget(bot);
 		}
+		return Status.RUNNING;
+	}
+
+	/**
+	 * Under water, before the first hit: is there air enough to break it and still get up? Mining
+	 * progress is lost when it leaves, so starting on half a breath means doing it all again. Like a
+	 * player: not enough left, go up for air first; not even on a full breath from here, skip it.
+	 * Null: go ahead and mine.
+	 */
+	private Status airCheck(BotPlayer bot, BlockPos aim, int tool) {
+		if (!bot.movement().headUnderwater()) {
+			return null;
+		}
+		int budget = Air.budget(bot);
+		if (budget >= Air.UNLIMITED) {
+			return null;
+		}
+		ServerLevel level = bot.level();
+		BlockState state = level.getBlockState(aim);
+		int dig = tool == MovementController.AUTO_TOOL
+				? BreakTimes.estimateTicks(bot.getInventory(), level, aim, state)
+				: BreakTimes.estimateTicksWith(tool >= 0 ? bot.getInventory().getItem(tool) : ItemStack.EMPTY, level, aim, state);
+		if (dig == Integer.MAX_VALUE) {
+			return null; // can't be mined at all: the mining step says so
+		}
+		// At the speed it will really go: under water, and 5x slower again when not standing.
+		double mining = dig * Air.waterDigFactor(bot) * (bot.onGround() ? 1 : 5);
+		double escape = bot.movement().escapeTicks();
+		if (budget - mining > Air.reserve(escape)) {
+			return null;
+		}
+		if (Air.fullBudget(bot) - escape - mining <= Air.reserve(escape)) {
+			bot.log(aim.toShortString() + " 在水下要挖 " + (int) mining / 20 + " 秒，一口气挖不完再游上去，跳过");
+			reject(current);
+			return nextTarget(bot);
+		}
+		bot.log("剩下的气不够挖完 " + aim.toShortString() + "（要 " + (int) mining / 20 + " 秒），先去换气再挖");
+		bot.movement().requestAir();
 		return Status.RUNNING;
 	}
 
@@ -645,6 +700,23 @@ public class GatherTask implements BotTask {
 	}
 
 	// ---- bookkeeping --------------------------------------------------------------------
+
+	/** True once it stopped because no tool it has can mine any source any more (worn out, taken). */
+	private boolean toolsGone;
+	private int unreachableInRow;
+
+	boolean toolsGone() {
+		return toolsGone;
+	}
+
+	/**
+	 * The tools for this ran out (worn out, or taken from the bag). Not a failure of the source:
+	 * the plan can make a new tool and carry on.
+	 */
+	private Status toolsGone(BotPlayer bot) {
+		toolsGone = true;
+		return giveUp(bot, "能挖" + itemName().getString() + "的工具用坏了（或者被拿走了）");
+	}
 
 	/** Stops searching. If anything was collected, still brings it back. */
 	private Status giveUp(BotPlayer bot, String reason) {

@@ -44,7 +44,75 @@ final class Station {
 		return failure;
 	}
 
-	/** Put it down next to the bot. False with {@link #failure()} set if it can't. */
+	/** Where it's walking to, to find room for the station (null: not walking). */
+	private BlockPos dryGround;
+	private int walks;
+	private static final int MAX_WALKS = 2;
+	private static final int DRY_SEARCH_RADIUS = 16;
+
+	/**
+	 * One tick of putting it down: next to the bot if there's room; if not (floating in water,
+	 * walled in), walk to the nearest dry ground first, like a player would, then try there. It
+	 * used to just try three times where it was, in the water, and give up.
+	 */
+	BotTask.Status placeTick(BotPlayer bot) {
+		if (bot.getInventory().findSlotMatchingItem(new ItemStack(item)) < 0) {
+			failure = "背包里没有" + new ItemStack(item).getHoverName().getString();
+			return BotTask.Status.FAILED;
+		}
+		if (dryGround == null) {
+			if (place(bot)) {
+				return BotTask.Status.DONE;
+			}
+			if (++walks > MAX_WALKS || (dryGround = findDryGround(bot)) == null) {
+				failure = "附近找不到能放" + new ItemStack(item).getHoverName().getString() + "的干地方";
+				return BotTask.Status.FAILED;
+			}
+			bot.log("这里放不下" + new ItemStack(item).getHoverName().getString() + "，先去 " + dryGround.toShortString());
+			BlockPos t = dryGround;
+			bot.movement().goTo(p -> p.equals(t), t, com.vale.helperbot.path.Mode.DEFAULT);
+			return BotTask.Status.RUNNING;
+		}
+		MovementController.Status status = bot.movement().status();
+		if (status == MovementController.Status.ARRIVED) {
+			dryGround = null; // try again from here next tick
+		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
+			failure = "去干地方的路走不通（" + bot.movement().failReason() + "）";
+			return BotTask.Status.FAILED;
+		}
+		return BotTask.Status.RUNNING;
+	}
+
+	/** Nearest spot to stand, out of the water, with room next to it for the station. */
+	private BlockPos findDryGround(BotPlayer bot) {
+		ServerLevel level = bot.level();
+		BlockPos feet = bot.movement().feet();
+		BlockPos best = null;
+		double bestDist = Double.MAX_VALUE;
+		for (int dx = -DRY_SEARCH_RADIUS; dx <= DRY_SEARCH_RADIUS; dx++) {
+			for (int dz = -DRY_SEARCH_RADIUS; dz <= DRY_SEARCH_RADIUS; dz++) {
+				for (int dy = -6; dy <= 6; dy++) {
+					BlockPos q = feet.offset(dx, dy, dz);
+					double d = q.distSqr(feet);
+					if (d >= bestDist || LocalPathfinder.isWater(level, q) || LocalPathfinder.isWater(level, q.above())
+							|| Double.isNaN(LocalPathfinder.floorHeight(level, q))) {
+						continue;
+					}
+					for (Direction dir : Direction.Plane.HORIZONTAL) {
+						BlockPos spot = q.relative(dir);
+						if (Guard.canPlaceStation(level, spot) && LocalPathfinder.isSupport(level, spot.below())) {
+							best = q;
+							bestDist = d;
+							break;
+						}
+					}
+				}
+			}
+		}
+		return best;
+	}
+
+	/** Put it down next to the bot, right now. False with {@link #failure()} set if it can't. */
 	boolean place(BotPlayer bot) {
 		Inventory inv = bot.getInventory();
 		int slot = inv.findSlotMatchingItem(new ItemStack(item));

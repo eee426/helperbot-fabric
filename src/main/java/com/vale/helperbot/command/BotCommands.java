@@ -165,7 +165,8 @@ public final class BotCommands {
 		}
 		BotTask task = bot.getTask();
 		String text = "位置 " + bot.blockPosition().toShortString()
-				+ "，生命 " + (int) bot.getHealth() + "/" + (int) bot.getMaxHealth()
+				// One decimal: 0.5 health showed as "0", which looked dead but wasn't.
+				+ "，生命 " + String.format(Locale.ROOT, "%.1f", bot.getHealth()) + "/" + (int) bot.getMaxHealth()
 				+ "，饥饿 " + bot.getFoodData().getFoodLevel()
 				+ "，任务：" + (task == null ? "空闲" : task.describe())
 				+ "，移动：" + bot.movement().describe()
@@ -198,11 +199,7 @@ public final class BotCommands {
 			return 0;
 		}
 		String modeName = mode.name().toLowerCase(Locale.ROOT);
-		if (item == Items.WATER_BUCKET) {
-			bot.startTask(new FetchWaterTask(player, mode));
-			ctx.getSource().sendSuccess(() -> Component.literal("任务已下达：取一桶水（" + modeName + "）"), false);
-			return 1;
-		}
+		// Water buckets too go through the planner now: it makes the bucket if it has none.
 		bot.startTask(new AcquireTask(player, item, count, mode));
 		ctx.getSource().sendSuccess(() -> Component.literal("任务已下达：获取 ").append(new ItemStack(item).getHoverName())
 				.append(" ×" + count + "（" + modeName + "）"), false);

@@ -79,6 +79,8 @@ public final class DropAnalysis {
 
 	/** Forget cached results, e.g. after /reload changed loot tables. */
 	public static void clearCache() {
+		toolItems = new HashMap<>();
+		dropAnswers.clear();
 		index = null;
 	}
 
@@ -349,8 +351,13 @@ public final class DropAnalysis {
 		Map<Block, Double> byBlock = rates == null ? null : rates.get(item);
 		double rate = byBlock == null ? 1.0 : byBlock.getOrDefault(block, 1.0);
 		int trials = (int) Math.max(TRIALS, Math.min(RARE_TRIALS, Math.ceil(3 / rate)));
+		// Of everything that gets the drop, the fastest: a shovel for clay, not the bare hand just
+		// because the hand works too (it used to stop at the first that worked, the hand).
+		int best = NONE;
+		float bestSpeed = 0;
 		if (drops(level, breaker, state, ItemStack.EMPTY, item, trials)) {
-			return HAND;
+			best = HAND;
+			bestSpeed = 1;
 		}
 		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
 			ItemStack stack = inventory.getItem(slot);
@@ -359,11 +366,53 @@ public final class DropAnalysis {
 					|| (stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1)) {
 				continue;
 			}
-			if (drops(level, breaker, state, stack, item, trials)) {
-				return slot;
+			float speed = stack.getDestroySpeed(state);
+			if (speed > bestSpeed && drops(level, breaker, state, stack, item, trials)) {
+				best = slot;
+				bestSpeed = speed;
 			}
 		}
-		return NONE;
+		return best;
+	}
+
+	private static Map<Item, Map<Block, List<Item>>> toolItems = new HashMap<>();
+	private static List<Item> allTools;
+
+	/**
+	 * Plain (unenchanted) tool items that make {@code block} drop {@code item}, or an empty list if
+	 * the bare hand does already or nothing plain does (silk touch only). For planning: tools are
+	 * something to make first, like any ingredient.
+	 */
+	public static List<Item> toolItemsFor(ServerLevel level, Entity breaker, Block block, Item item) {
+		return toolItems.computeIfAbsent(item, k -> new HashMap<>()).computeIfAbsent(block, b -> {
+			BlockState state = sampleState(item, b);
+			int trials = (int) Math.max(TRIALS, Math.min(RARE_TRIALS, Math.ceil(3 / rate(item, b))));
+			List<Item> out = new ArrayList<>();
+			if (drops(level, breaker, state, ItemStack.EMPTY, item, trials)) {
+				return out;
+			}
+			if (allTools == null) {
+				allTools = new ArrayList<>();
+				for (Item i : BuiltInRegistries.ITEM) {
+					if (new ItemStack(i).has(net.minecraft.core.component.DataComponents.TOOL)) {
+						allTools.add(i);
+					}
+				}
+			}
+			for (Item tool : allTools) {
+				if (drops(level, breaker, state, new ItemStack(tool), item, trials)) {
+					out.add(tool);
+				}
+			}
+			return out;
+		});
+	}
+
+	/** Does the bare hand get the drop? */
+	public static boolean handDrops(ServerLevel level, Entity breaker, Block block, Item item) {
+		BlockState state = sampleState(item, block);
+		int trials = (int) Math.max(TRIALS, Math.min(RARE_TRIALS, Math.ceil(3 / rate(item, block))));
+		return drops(level, breaker, state, ItemStack.EMPTY, item, trials);
 	}
 
 	public static final int HAND = -1;
@@ -389,12 +438,46 @@ public final class DropAnalysis {
 		return byBlock == null ? 1.0 : byBlock.getOrDefault(block, 1.0);
 	}
 
+	/** A tool as far as drops go: its kind and enchantments (wear doesn't change what drops). */
+	private record DropKey(BlockState state, Item tool, Object enchantments, Item item) {
+	}
+
+	/**
+	 * Answers of {@link #drops}, kept for good: the same block and tool always have the same loot
+	 * table. Asked afresh each time, a chance drop could come out differently: flint is 10% from
+	 * gravel, and 30 rolls miss it about once in 25, so the bot switched between the shovel and its
+	 * bare hand from one gravel block to the next.
+	 */
+	private static final Map<DropKey, Boolean> dropAnswers = new HashMap<>();
+
+	/** Rolls needed so that a drop with this chance is missed less than once in a million. */
+	private static int sureTrials(double rate) {
+		if (rate >= 1) {
+			return TRIALS;
+		}
+		return (int) Math.min(SURE_MAX_TRIALS, Math.max(TRIALS, Math.ceil(Math.log(1e-6) / Math.log(1 - rate))));
+	}
+
+	private static final int SURE_MAX_TRIALS = 2_000;
+
 	/** Would breaking {@code state} with {@code tool} (as a survival player) drop {@code item}? */
 	private static boolean drops(ServerLevel level, Entity breaker, BlockState state, ItemStack tool, Item item, int trials) {
 		// Blocks that need the right tool drop nothing without it (checked outside the loot table).
 		if (state.requiresCorrectToolForDrops() && !tool.isCorrectToolForDrops(state)) {
 			return false;
 		}
+		DropKey key = tool.isEmpty() ? new DropKey(state, null, null, item)
+				: new DropKey(state, tool.getItem(), tool.get(net.minecraft.core.component.DataComponents.ENCHANTMENTS), item);
+		Boolean known = dropAnswers.get(key);
+		if (known != null) {
+			return known;
+		}
+		boolean answer = roll(level, breaker, state, tool, item, Math.max(trials, sureTrials(rate(item, state.getBlock()))));
+		dropAnswers.put(key, answer);
+		return answer;
+	}
+
+	private static boolean roll(ServerLevel level, Entity breaker, BlockState state, ItemStack tool, Item item, int trials) {
 		BlockPos pos = breaker.blockPosition();
 		try {
 			for (int i = 0; i < trials; i++) {

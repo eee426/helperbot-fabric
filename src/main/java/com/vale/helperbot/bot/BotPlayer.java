@@ -429,9 +429,42 @@ public class BotPlayer extends ServerPlayer {
 			current.onEnd(this, BotTask.Status.FAILED);
 		}
 		level().getServer().execute(() -> {
-			setHealth(getMaxHealth());
+			resetAfterDeath();
 			BotManager.remove(level().getServer(), "机器人死亡，已移除。用 /bot spawn 重新召唤（死亡不掉落时背包会保留）。");
 		});
+	}
+
+	/**
+	 * What vanilla resets when a player respawns: full health, full food and some saturation, no
+	 * effects, air, fire. (It used to only refill health, and came back starving.)
+	 */
+	public void resetAfterDeath() {
+		setHealth(getMaxHealth());
+		getFoodData().setFoodLevel(20);
+		getFoodData().setSaturation(5.0f);
+		removeAllEffects();
+		setAirSupply(getMaxAirSupply());
+		clearFire();
+		resetFallDistance();
+	}
+
+	/**
+	 * Can it get health back right now: food at 18 or more (vanilla regenerates then), or
+	 * something to eat to get there. Waiting to heal without either just wastes time.
+	 */
+	public boolean canRegenerate() {
+		if (getFoodData().getFoodLevel() >= 18) {
+			return true;
+		}
+		Inventory inv = getInventory();
+		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+			ItemStack stack = inv.getItem(slot);
+			if (stack.get(DataComponents.FOOD) != null && !BAD_FOOD.contains(stack.getItem())
+					&& (task == null || !task.wantsPickup(stack))) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	public void startTask(BotTask newTask) {
@@ -483,14 +516,33 @@ public class BotPlayer extends ServerPlayer {
 	 * fill up with stuff nobody asked for.
 	 */
 	public boolean wantsPickup(ItemStack stack) {
-		if (task != null && task.wantsPickup(stack)) {
+		if (taskWants(stack)) {
 			return true;
 		}
+		if (!Rules.open() || !com.vale.helperbot.path.BuildingBlocks.isBuildingBlock(stack)) {
+			return false;
+		}
+		// Restock below the low mark, up to the full stock, with a gap in between: right at a single
+		// threshold, placing one block made it want the next one again, and it dug up the block it
+		// had just put down to fetch a dropped one, and so on forever.
+		int have = com.vale.helperbot.path.BuildingBlocks.count(getInventory());
+		if (have < BUILDING_BLOCK_LOW) {
+			restocking = true;
+		} else if (have >= BUILDING_BLOCK_STOCK) {
+			restocking = false;
+		}
 		// Only while there's room, or it would pick up again what it just threw away to make room.
-		return Rules.open() && com.vale.helperbot.path.BuildingBlocks.isBuildingBlock(stack)
-				&& com.vale.helperbot.path.BuildingBlocks.count(getInventory()) < BUILDING_BLOCK_STOCK
-				&& freeSlots() > LOW_FREE_SLOTS + 1;
+		return restocking && freeSlots() > LOW_FREE_SLOTS + 1;
 	}
+
+	/** Things the current task needs: only these are worth going out of the way for (see Loot). */
+	public boolean taskWants(ItemStack stack) {
+		return task != null && task.wantsPickup(stack);
+	}
+
+	/** Start picking up building blocks again below this. */
+	private static final int BUILDING_BLOCK_LOW = 64;
+	private boolean restocking = true;
 
 	public void notePickedUp(Item item, int count) {
 		pickedUp.merge(item, count, Integer::sum);
@@ -557,6 +609,9 @@ public class BotPlayer extends ServerPlayer {
 			log.removeFirst();
 		}
 		log.addLast(String.format("[%.1fs] ", tickCount / 20.0) + event);
+		// Also into the server log (latest.log): the in-memory one is gone once the bot dies or is
+		// removed, which is exactly when a rare bug needs looking into.
+		com.vale.helperbot.HelperBot.LOGGER.info("[{}] {}", getGameProfile().name(), event);
 	}
 
 	public java.util.List<String> recentLog(int n) {

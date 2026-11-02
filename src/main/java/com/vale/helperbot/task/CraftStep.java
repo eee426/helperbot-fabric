@@ -51,11 +51,14 @@ final class CraftStep {
 	BotTask.Status tick(BotPlayer bot) {
 		return switch (phase) {
 			case PLACE_TABLE -> {
-				if (!table.place(bot)) {
+				BotTask.Status s = table.placeTick(bot);
+				if (s == BotTask.Status.FAILED) {
 					failure = table.failure();
 					yield BotTask.Status.FAILED;
 				}
-				phase = Phase.CRAFT;
+				if (s == BotTask.Status.DONE) {
+					phase = Phase.CRAFT;
+				}
 				yield BotTask.Status.RUNNING;
 			}
 			case CRAFT -> craft(bot);

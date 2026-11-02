@@ -85,9 +85,30 @@ public final class LocalPathfinder {
 	/** Expand at least this many nodes before a partial search may stop at the window edge. */
 	private static final int EARLY_STOP_MIN_NODES = 1_500;
 
-	public record Result(List<PathStep> steps, boolean reachesGoal) {
-		static final Result EMPTY = new Result(List.of(), false);
+	/**
+	 * @param ticks for each step, the real time it should take (no preferences): the walker gives
+	 *              up on a step that takes far longer than this (see MovementController)
+	 */
+	public record Result(List<PathStep> steps, boolean reachesGoal, List<Double> ticks) {
+		static final Result EMPTY = new Result(List.of(), false, List.of());
 	}
+
+	/**
+	 * Cost factor for cells the previous path went through, when planning again towards the same
+	 * goal: the new plan sticks to the old one unless something else is clearly better, instead of
+	 * swinging to a different route at every re-plan (borrowed from Baritone).
+	 */
+	private static final double FAVOR_PREVIOUS = 0.5;
+	/**
+	 * A partial path is picked by trading progress against cost at several weights (lowest first),
+	 * taking the first that gets at least {@link #MIN_PARTIAL_BLOCKS} away from the start: not
+	 * just "closest to the target", which could be an expensive dead end (borrowed from Baritone).
+	 */
+	private static final double[] PARTIAL_WEIGHTS = {1.5, 2, 2.5, 3, 4, 5, 10};
+	private static final double MIN_PARTIAL_BLOCKS = 5;
+	/** Long partial paths lose their last tenth: the far end, at the edge of what was searched, is the least sure part. */
+	private static final int CUTOFF_MIN_STEPS = 30;
+	private static final double CUTOFF_KEEP = 0.9;
 
 	private static final class Node implements Comparable<Node> {
 		final BlockPos pos;
@@ -98,6 +119,8 @@ public final class LocalPathfinder {
 		final PathStep step;
 		/** Air budget left on arrival here (see {@link Air}). */
 		final int air;
+		/** Real ticks of the step that led here. */
+		double ticks;
 
 		Node(BlockPos pos, double floor, double g, double h, Node parent, PathStep step, int air) {
 			this.pos = pos;
@@ -171,6 +194,11 @@ public final class LocalPathfinder {
 	private final Node startNode;
 	private Node closest;
 	private double closestH;
+	private final double[] bestPartialValue = new double[PARTIAL_WEIGHTS.length];
+	private final Node[] bestPartial = new Node[PARTIAL_WEIGHTS.length];
+	/** Cells of the previous path towards the same goal (see {@link #FAVOR_PREVIOUS}). */
+	private final LongPredicate favored;
+	private double progress;
 	private int expanded;
 	private Result result;
 
@@ -184,8 +212,9 @@ public final class LocalPathfinder {
 	 */
 	public LocalPathfinder(Level level, Inventory inventory, Mode mode, int maxDrop, BlockPos start, double startFloor,
 						   Predicate<BlockPos> goal, BlockPos target, boolean horizontalOnly, Limits limits,
-						   LongPredicate avoid, Air.Profile air) {
+						   LongPredicate avoid, Air.Profile air, LongPredicate favored) {
 		this.avoid = avoid;
+		this.favored = favored;
 		this.air = air;
 		this.escape = new Escape(level, inventory, air.waterDigFactor());
 		this.buckets = air.limited() ? Math.max(1, Math.min(air.full(), Air.MAX_AIR * 4) / AIR_BUCKET + 1) : 1;
@@ -214,6 +243,8 @@ public final class LocalPathfinder {
 		record(start.asLong(), bucket(startAir), 0);
 		closest = startNode;
 		closestH = heuristic(start);
+		java.util.Arrays.fill(bestPartialValue, closestH);
+		java.util.Arrays.fill(bestPartial, startNode);
 	}
 
 	/** Runs the search for at most {@code budgetNanos}. Returns true once it has finished. */
@@ -231,7 +262,8 @@ public final class LocalPathfinder {
 				continue;
 			}
 			if (goal.test(node.pos)) {
-				result = new Result(reconstruct(node), true);
+				result = reconstruct(node, true);
+				progress = (heuristic(origin) - heuristic(node.pos)) / walkCost;
 				return true;
 			}
 			expanded++;
@@ -239,6 +271,13 @@ public final class LocalPathfinder {
 			if (h < closestH) {
 				closestH = h;
 				closest = node;
+			}
+			for (int i = 0; i < PARTIAL_WEIGHTS.length; i++) {
+				double v = h + node.g / PARTIAL_WEIGHTS[i];
+				if (v < bestPartialValue[i] - 0.01) {
+					bestPartialValue[i] = v;
+					bestPartial[i] = node;
+				}
 			}
 			// A partial search has done its job once it reaches the edge of the window: going
 			// further can't get closer to the target, only marginally improve the route here.
@@ -250,17 +289,31 @@ public final class LocalPathfinder {
 				if (airLeft < 0) {
 					continue; // couldn't get back up from there in time
 				}
-				double g = node.g + c.cost;
 				long key = c.step.to().asLong();
+				double g = node.g + c.cost * (favored.test(key) ? FAVOR_PREVIOUS : 1);
 				int b = bucket(airLeft);
 				if (!dominated(key, b, g)) {
 					record(key, b, g);
-					open.add(new Node(c.step.to(), c.floor, g, heuristic(c.step.to()) * heuristicWeight, node, c.step, airLeft));
+					Node next = new Node(c.step.to(), c.floor, g, heuristic(c.step.to()) * heuristicWeight, node, c.step, airLeft);
+					next.ticks = c.ticks;
+					open.add(next);
 				}
 			}
 		}
-		result = closest == startNode ? Result.EMPTY : new Result(reconstruct(closest), false);
+		Node end = partialEnd();
+		result = end == startNode ? Result.EMPTY : reconstruct(end, false);
+		progress = (heuristic(origin) - heuristic(end.pos)) / walkCost;
 		return true;
+	}
+
+	/** Where a path that doesn't reach the goal should end (see {@link #PARTIAL_WEIGHTS}). */
+	private Node partialEnd() {
+		for (Node n : bestPartial) {
+			if (n.pos.distSqr(origin) >= MIN_PARTIAL_BLOCKS * MIN_PARTIAL_BLOCKS) {
+				return n;
+			}
+		}
+		return closest;
 	}
 
 	public Result result() {
@@ -276,9 +329,9 @@ public final class LocalPathfinder {
 		return !horizontalOnly && (dy >= limits.up() - 1 || -dy >= limits.down() - 1);
 	}
 
-	/** How many blocks closer to the target the best path found so far gets us. */
+	/** How many blocks closer to the target the path found gets us. */
 	public double progressBlocks() {
-		return (heuristic(origin) - closestH) / walkCost;
+		return progress;
 	}
 
 	public Limits limits() {
@@ -361,13 +414,21 @@ public final class LocalPathfinder {
 		return Math.sqrt(dx * dx + dy * dy + dz * dz) * walkCost;
 	}
 
-	private static List<PathStep> reconstruct(Node node) {
+	private static Result reconstruct(Node node, boolean reachesGoal) {
 		List<PathStep> steps = new ArrayList<>();
+		List<Double> ticks = new ArrayList<>();
 		for (Node n = node; n.step != null; n = n.parent) {
 			steps.add(n.step);
+			ticks.add(n.ticks);
 		}
 		Collections.reverse(steps);
-		return steps;
+		Collections.reverse(ticks);
+		if (!reachesGoal && steps.size() >= CUTOFF_MIN_STEPS) {
+			int keep = (int) (steps.size() * CUTOFF_KEEP);
+			steps = new ArrayList<>(steps.subList(0, keep));
+			ticks = new ArrayList<>(ticks.subList(0, keep));
+		}
+		return new Result(steps, reachesGoal, ticks);
 	}
 
 	// ---- neighbours ---------------------------------------------------------------------

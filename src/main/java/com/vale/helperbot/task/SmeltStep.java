@@ -53,11 +53,14 @@ final class SmeltStep {
 	BotTask.Status tick(BotPlayer bot) {
 		switch (phase) {
 			case PLACE -> {
-				if (!furnace.place(bot)) {
+				BotTask.Status s = furnace.placeTick(bot);
+				if (s == BotTask.Status.FAILED) {
 					failure = furnace.failure();
 					return BotTask.Status.FAILED;
 				}
-				phase = Phase.LOAD;
+				if (s == BotTask.Status.DONE) {
+					phase = Phase.LOAD;
+				}
 			}
 			case LOAD -> {
 				return load(bot);
