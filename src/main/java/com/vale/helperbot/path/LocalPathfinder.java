@@ -100,6 +100,13 @@ public final class LocalPathfinder {
 	 */
 	private static final double FAVOR_PREVIOUS = 0.5;
 	/**
+	 * Experimental: every step that ends in water (swimming, diving, digging under water) counts
+	 * this many times its time. Water is slow, risky (air, drowning, drops floating off) and a
+	 * player keeps to dry land when there's a reasonable way round; a much shorter swim still wins.
+	 * Only the preference changes: air is still charged by real ticks.
+	 */
+	public static final double WATER_COST_FACTOR = 2.0;
+	/**
 	 * A partial path is picked by trading progress against cost at several weights (lowest first),
 	 * taking the first that gets at least {@link #MIN_PARTIAL_BLOCKS} away from the start: not
 	 * just "closest to the target", which could be an expensive dead end (borrowed from Baritone).
@@ -290,7 +297,8 @@ public final class LocalPathfinder {
 					continue; // couldn't get back up from there in time
 				}
 				long key = c.step.to().asLong();
-				double g = node.g + c.cost * (favored.test(key) ? FAVOR_PREVIOUS : 1);
+				double g = node.g + c.cost * (favored.test(key) ? FAVOR_PREVIOUS : 1)
+						* (isWater(level, c.step.to()) ? WATER_COST_FACTOR : 1);
 				int b = bucket(airLeft);
 				if (!dominated(key, b, g)) {
 					record(key, b, g);

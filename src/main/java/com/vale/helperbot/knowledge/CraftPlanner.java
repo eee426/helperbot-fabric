@@ -587,8 +587,12 @@ public final class CraftPlanner {
 			BlockPos prev = breaker.blockPosition();
 			for (int k = 0; k < found.size(); k++) {
 				BlockPos p = found.get(k);
-				cost[k + 1] = cost[k] + Math.sqrt(prev.distSqr(p)) / WALK_SPEED
+				double leg = Math.sqrt(prev.distSqr(p)) / WALK_SPEED
 						+ buried(p, sourceBlocks.get(item)) * DIG_PER_BLOCK + MINE_PER_BLOCK;
+				// Experimental: sources in or under water count extra, as in the path planner.
+				boolean wet = com.vale.helperbot.path.LocalPathfinder.isWater(level, p)
+						|| com.vale.helperbot.path.LocalPathfinder.isWater(level, p.above());
+				cost[k + 1] = cost[k] + (wet ? leg * com.vale.helperbot.path.LocalPathfinder.WATER_COST_FACTOR : leg);
 				yield[k + 1] = yield[k] + DropAnalysis.rate(item, level.getBlockState(p).getBlock());
 				prev = p;
 			}
