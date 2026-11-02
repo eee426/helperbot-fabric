@@ -68,23 +68,28 @@ public class BotPlayer extends ServerPlayer {
 		loot.observe();
 		// Survival first: air, then fighting back. The task waits meanwhile.
 		if (breathe()) {
+			hand(Layer.BREATH);
 			return; // it moved itself this tick
 		}
 		if (combat()) {
+			hand(Layer.COMBAT);
 			movement.tick();
 			return;
 		}
 		// Eating takes its 1.6 s like for anyone. It keeps walking meanwhile, slowed down the
 		// way vanilla slows a player who's eating; the task itself waits.
 		if (isUsingItem() || tryEat()) {
+			hand(Layer.EAT);
 			movement.tick();
 			return;
 		}
 		// Collect what its kills and its mining dropped before going back to the task.
 		if (loot.tick()) {
+			hand(Layer.LOOT);
 			movement.tick();
 			return;
 		}
+		hand(Layer.TASK);
 		if (tickCount % 40 == 0 && freeSlots() <= LOW_FREE_SLOTS) {
 			tidyInventory();
 		}
@@ -104,6 +109,48 @@ public class BotPlayer extends ServerPlayer {
 	public void awardKillScore(net.minecraft.world.entity.Entity killed, DamageSource source) {
 		super.awardKillScore(killed, source);
 		loot.onKill(killed);
+	}
+
+	// ---- who's in charge ----------------------------------------------------------------
+
+	/**
+	 * Who drives the bot this tick, most urgent first. The reflexes (air, fighting back, eating,
+	 * collecting drops) each decide for themselves when they're needed and when they're done; this
+	 * only keeps track of who has control, says so in the log whenever it changes hands (so a
+	 * tug-of-war shows up as such), and holds the rules between them: each one, once it has
+	 * control, keeps it until it says it's done (see e.g. {@link Breath}, {@link #CALM_TICKS}),
+	 * and a reflex that has just handed control back doesn't grab it again for the same thing
+	 * (see {@link Loot}).
+	 */
+	public enum Layer {
+		BREATH("换气"), COMBAT("打架"), EAT("吃东西"), LOOT("捡掉落物"), TASK("任务");
+
+		final String label;
+
+		Layer(String label) {
+			this.label = label;
+		}
+	}
+
+	private Layer owner = Layer.TASK;
+	/** Times control changed hands, for tests and diagnostics. */
+	private int handovers;
+
+	private void hand(Layer to) {
+		if (to == owner) {
+			return;
+		}
+		log("控制权：" + owner.label + " → " + to.label);
+		owner = to;
+		handovers++;
+	}
+
+	public Layer owner() {
+		return owner;
+	}
+
+	public int handovers() {
+		return handovers;
 	}
 
 	/** How it's getting air: a planned way up, sealed in a shaft waiting for it to drain, or straight up. */

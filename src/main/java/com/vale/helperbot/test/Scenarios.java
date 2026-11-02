@@ -90,6 +90,27 @@ public final class Scenarios {
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
+				new Scenario("X1", "挖圆石时被两只尸壳打（打完接着挖，不来回抢控制权）", 6 * MINUTE, (a, bot, me) -> {
+					for (int i = 0; i < 2; i++) {
+						net.minecraft.world.entity.monster.zombie.Husk husk = a.spawn(EntityType.HUSK, 6 + i, Arena.SURFACE, 3);
+						if (husk != null) {
+							husk.setTarget(bot);
+						}
+					}
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COBBLESTONE, 16, Mode.NORMAL);
+				}, Scenario.has(Items.COBBLESTONE, 16, c -> c.logCount("控制权") <= 100, "控制权换手超过 100 次（各层在来回抢）")),
+
+				new Scenario("X2", "饿着肚子挖圆石（边干边吃，不来回抢控制权）", 4 * MINUTE, (a, bot, me) -> {
+					bot.getFoodData().setFoodLevel(4);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COBBLESTONE, 8, Mode.NORMAL);
+				}, Scenario.has(Items.COBBLESTONE, 8, c -> c.logHas("吃 ") && c.logCount("控制权") <= 60,
+						"没吃东西，或者控制权换手超过 60 次")),
+
 				new Scenario("C33", "白色地毯：做好的不拿去染色", 5 * MINUTE, (a, bot, me) -> {
 					for (int i = 0; i < 4; i++) {
 						a.spawn(EntityType.SHEEP, 6 + i, Arena.SURFACE, 4);

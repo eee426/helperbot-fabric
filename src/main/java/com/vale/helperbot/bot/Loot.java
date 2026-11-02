@@ -91,6 +91,7 @@ public final class Loot {
 	private Event add(Vec3 pos, int tick) {
 		Event e = new Event(pos, tick);
 		events.addLast(e);
+		eventCount++;
 		while (events.size() > MAX_EVENTS) {
 			events.removeFirst();
 		}
@@ -173,8 +174,21 @@ public final class Loot {
 		return out;
 	}
 
+	/**
+	 * After handing control back, this long before taking it again for drops it already knew
+	 * about; a new break or kill may take it right away. (Without this, drops it couldn't get to
+	 * made it go "collect, done, collect" with the task every few ticks.)
+	 */
+	private static final int RETAKE_COOLDOWN = 100;
+	private int releasedAt = Integer.MIN_VALUE / 2;
+	/** Events added so far, and how many there were when it last handed control back. */
+	private int eventCount, eventsAtRelease;
+
 	/** One tick of collecting. Returns true while busy with that (the task waits meanwhile). */
 	boolean tick() {
+		if (!collecting && bot.tickCount - releasedAt < RETAKE_COOLDOWN && eventCount == eventsAtRelease) {
+			return false;
+		}
 		ItemEntity drop = nextDrop();
 		if (drop == null) {
 			if (collecting) {
@@ -242,6 +256,8 @@ public final class Loot {
 		collecting = false;
 		aimedAt = null;
 		aimedCell = null;
+		releasedAt = bot.tickCount;
+		eventsAtRelease = eventCount;
 		// Time spent on each drop is kept (it used to be reset here, so a drop it kept going back
 		// and forth over was never given up on): only forget the ones that are gone.
 		aimTicks.keySet().removeIf(id -> !(bot.level().getEntity(id) instanceof ItemEntity i) || !i.isAlive());
