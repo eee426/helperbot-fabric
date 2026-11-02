@@ -6,6 +6,7 @@ import com.vale.helperbot.path.Mode;
 import com.vale.helperbot.task.AcquireTask;
 import com.vale.helperbot.task.ComeTask;
 import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -377,6 +378,40 @@ public final class Scenarios {
 				}, c -> c.bot().isInvisible() ? Scenario.Outcome.fail("在保护区块里变成隐身了（只看得见装备）")
 						: c.ticks() >= 5 * 20 ? Scenario.Outcome.pass("效果加上、消失后都没隐身") : null),
 
+				new Scenario("N1", "叫机器人名字的玩家/假人会被处死；同名的生物（命名牌）不受影响", 8 * 20, (a, bot, me) -> {
+					var server = a.level.getServer();
+					// An impostor in the player list (like a Carpet fake player): "helperbot", another case.
+					var profile = new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "helperbot");
+					var impostor = new net.minecraft.server.level.ServerPlayer(server, a.level, profile,
+							net.minecraft.server.level.ClientInformation.createDefault());
+					server.getPlayerList().placeNewPlayer(new com.vale.helperbot.bot.FakeConnection(), impostor,
+							new net.minecraft.server.network.CommonListenerCookie(profile, 0, impostor.clientInformation(), false));
+					impostor.teleportTo(a.level, a.origin.getX() + 5.5, Arena.SURFACE, a.origin.getZ() + 5.5, Set.of(), 0, 0, true);
+					impostor.setGameMode(net.minecraft.world.level.GameType.SURVIVAL);
+					impostor.setItemSlot(net.minecraft.world.entity.EquipmentSlot.CHEST, new ItemStack(Items.NETHERITE_CHESTPLATE));
+					NAME_TEST[0] = impostor;
+					// A mob with the same name tag: must be left alone.
+					var golem = a.spawn(EntityType.IRON_GOLEM, -5, Arena.SURFACE, -5);
+					golem.setCustomName(Component.literal("HelperBot"));
+					NAME_TEST[1] = golem;
+					return null;
+				}, c -> {
+					var impostor = (net.minecraft.server.level.ServerPlayer) NAME_TEST[0];
+					var golem = (net.minecraft.world.entity.LivingEntity) NAME_TEST[1];
+					if (golem.getHealth() < golem.getMaxHealth()) {
+						return Scenario.Outcome.fail("同名的铁傀儡（命名牌）也受了伤");
+					}
+					if (!c.bot().isAlive()) {
+						return Scenario.Outcome.fail("真机器人也被打了");
+					}
+					if (!impostor.isAlive() || impostor.isDeadOrDying()) {
+						var chest = impostor.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.CHEST);
+						impostor.connection.disconnect(Component.literal("测试结束"));
+						return Scenario.Outcome.pass("冒名假人死了（下界合金胸甲耐久没掉：" + (chest.isEmpty() ? "已掉落" : chest.getDamageValue() == 0) + "）；同名铁傀儡和真机器人都没事");
+					}
+					return c.ticks() >= 6 * 20 ? Scenario.Outcome.fail("冒名假人 6 秒还活着") : null;
+				}),
+
 				new Scenario("C33", "白色地毯：做好的不拿去染色", 5 * MINUTE, (a, bot, me) -> {
 					for (int i = 0; i < 4; i++) {
 						// White: spawned sheep get random colours, and only white ones drop white wool.
@@ -567,6 +602,9 @@ public final class Scenarios {
 		}, c -> c.bot().position().distanceTo(c.arena().at(25, Arena.SURFACE, 0).getBottomCenter()) <= 3
 				? Scenario.Outcome.pass("到了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null);
 	}
+
+	/** N1: [0] the impostor, [1] the golem with the bot's name. */
+	private static final net.minecraft.world.entity.Entity[] NAME_TEST = new net.minecraft.world.entity.Entity[2];
 
 	private static final net.minecraft.world.entity.Entity[] ZONE_HUSK = new net.minecraft.world.entity.Entity[1];
 	private static final int[] ZONE_TARGETED = {0};
