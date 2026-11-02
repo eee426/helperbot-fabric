@@ -153,7 +153,8 @@ public final class ScenarioRunner {
 		startedAt = System.nanoTime();
 	}
 
-	private static final int SETTLE = 40;
+	/** Long enough for a waterfall 20 high to finish forming (water falls a block every 5 ticks). */
+	private static final int SETTLE = 120;
 
 	private void unload() {
 		if (arena == null) {
@@ -184,8 +185,20 @@ public final class ScenarioRunner {
 			record(s, false, "现实时间超过 " + REAL_TIME_LIMIT / 60_000_000_000L + " 分钟，只跑了 " + ticks / 20
 					+ " 秒游戏时间（每刻约 " + (System.nanoTime() - startedAt) / 1_000_000 / Math.max(1, ticks) + " 毫秒，可能在空转）");
 		} else if (ticks >= s.timeout()) {
-			record(s, false, "超时（" + s.timeout() / 20 + " 秒游戏时间）；任务：" + (bot.getTask() == null ? "无" : bot.getTask().describe()));
+			record(s, false, "超时（" + s.timeout() / 20 + " 秒游戏时间）；任务：" + (bot.getTask() == null ? "无" : bot.getTask().describe())
+					+ "；最后在 " + where(bot));
 		}
+	}
+
+	/** Where the bot is, relative to the scene, and what it's in: enough to picture where it got stuck. */
+	private String where(BotPlayer bot) {
+		BlockPos feet = bot.blockPosition();
+		var level = bot.level();
+		return String.format("场景内 (%.2f, %.2f, %.2f)，脚：%s，头：%s，头顶：%s，气 %d",
+				bot.getX() - arena.origin.getX(), bot.getY(), bot.getZ() - arena.origin.getZ(),
+				level.getBlockState(feet).getBlock().getName().getString(),
+				level.getBlockState(feet.above()).getBlock().getName().getString(),
+				level.getBlockState(feet.above(2)).getBlock().getName().getString(), bot.getAirSupply());
 	}
 
 	private void record(Scenario s, boolean pass, String reason) {

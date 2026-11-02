@@ -149,8 +149,74 @@ public final class Scenarios {
 					give(bot, Items.COBBLESTONE, 64);
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.RAW_IRON, 3, Mode.NORMAL);
-				}, Scenario.has(Items.RAW_IRON, 3))
+				}, Scenario.has(Items.RAW_IRON, 3)),
+
+				new Scenario("W23", "从悬崖顶下到底（悬崖面上有一道单层瀑布）", 4 * MINUTE, (a, bot, me) -> {
+					cliffWithWaterfall(a);
+					teleport(bot, a, 11, 61, 0); // on the cliff top, right above the spring
+					me.teleportTo(a.level, a.origin.getX() - 6.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.bot().position().distanceTo(c.arena().at(-7, Arena.SURFACE, 0).getBottomCenter()) <= 3
+						? Scenario.Outcome.pass("到了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null),
+
+				new Scenario("W24", "从悬崖底上到顶（悬崖面上有一道单层瀑布）", 4 * MINUTE, (a, bot, me) -> {
+					cliffWithWaterfall(a);
+					teleport(bot, a, -2, Arena.SURFACE, 0);
+					me.teleportTo(a.level, a.origin.getX() + 14.5, 61, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.bot().position().distanceTo(c.arena().at(14, 61, 0).getBottomCenter()) <= 3
+						? Scenario.Outcome.pass("到了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null),
+
+				new Scenario("W25", "钻石在瀑布后面的崖壁里（半山腰）", 6 * MINUTE, (a, bot, me) -> {
+					cliffWithWaterfall(a);
+					a.set(10, 50, 0, Blocks.DIAMOND_ORE); // right behind the falling water
+					teleport(bot, a, -2, Arena.SURFACE, 0);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.DIAMOND, 1, Mode.NORMAL);
+				}, Scenario.has(Items.DIAMOND, 1)),
+
+				new Scenario("W26", "结冰的池塘里抓鳕鱼（鱼在冰下，离洞口远）", 5 * MINUTE, (a, bot, me) -> {
+					a.fill(4, 36, -6, 18, 39, 6, Blocks.WATER); // a pond 4 deep
+					a.fill(4, 40, -6, 18, 40, 6, Blocks.ICE); // frozen over
+					teleport(bot, a, 5, Arena.SURFACE, 0);
+					for (int i = 0; i < 3; i++) {
+						a.spawn(EntityType.COD, 15 + i % 2, 37, 3 + i);
+					}
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COD, 1, Mode.NORMAL);
+				}, Scenario.has(Items.COD, 1)),
+
+				new Scenario("W27", "刚凿开冰洞下到水里，抓冰下的鳕鱼", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(4, 36, -6, 18, 39, 6, Blocks.WATER);
+					a.fill(4, 40, -6, 18, 40, 6, Blocks.ICE);
+					a.set(5, 40, 0, Blocks.WATER); // the hole it just broke
+					teleport(bot, a, 5, 39, 0);
+					for (int i = 0; i < 3; i++) {
+						a.spawn(EntityType.COD, 15 + i % 2, 37, 3 + i);
+					}
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COD, 1, Mode.NORMAL);
+				}, Scenario.has(Items.COD, 1))
 		);
+	}
+
+	/**
+	 * A stone cliff 20 high (x 10..20, top at y=60) with a spring in its face: one source block in a
+	 * notch at y=58 pours out and down the face as a single sheet, one block thick, into a puddle.
+	 */
+	private static void cliffWithWaterfall(Arena a) {
+		a.fill(10, 41, -6, 20, 60, 6, Blocks.STONE);
+		a.set(10, 58, 0, Blocks.WATER);
 	}
 
 	/** Result of the plan-only scene: [0] failure reason or null, [1] description. */
