@@ -58,9 +58,12 @@
 | `/bot confirm` / `/bot cancel` | 确认或取消计划 |
 | `/bot status` | 当前任务、进度、背包概况 |
 | `/bot come` | 回到玩家身边 |
-| `/bot protect` | 保护你所在的整个区块（再输一次取消）；聊天里有 [撤销] [显示边界] 按钮 |
+| `/bot protect` | 保护你所在的整个区块，告诉你它的 ID；聊天里有 [显示边界] 按钮 |
 | `/bot protect show` | 用粒子标出附近保护区块的边界（15 秒） |
-| `/bot protect list` | 列出这个维度的保护区块 |
+| `/bot protect list` | 列出这个维度的保护区块（ID 和区块坐标） |
+| `/bot protect remove <ID>` | 取消保护，**只能在服务器后台**（权限 4） |
+| `/bot protect chunks x,z x,z …` / `query x z 半径` | 给遥控模组的地图用：批量保护、查询附近保护区块 |
+| 遥控模组（Helper Bot Remote，按 H） | 手机友好的按钮界面：获取物品（先选中再"下一步"）、保护区块地图（俯视、点选、一键应用）、过来/停止/状态等。不装也能用上面的指令 |
 | `/bot restrict` | （管理员）查看临时限制；默认全关 |
 | `/bot restrict block <方块>` | （管理员）开/关"不挖也不放这种方块"，例如 `minecraft:obsidian` |
 | `/bot restrict portals on\|off` | （管理员）开/关"不被任何传送门传走" |

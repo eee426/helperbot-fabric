@@ -1,13 +1,11 @@
 package com.vale.helperbot.client;
 
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 
-/** The first menu: what to tell the bot. "获取物品" opens the item picker, the rest send right away. */
-public class BotMenuScreen extends Screen {
-	private static final int W = 150, H = 20, GAP = 4;
+/** The first menu: what to tell the bot. "获取物品" and "保护区块" open their own screens, the rest send right away. */
+public class BotMenuScreen extends TouchScreen {
+	private static final int ROWS = 7;
 
 	public BotMenuScreen() {
 		super(Component.literal("机器人助手"));
@@ -15,39 +13,32 @@ public class BotMenuScreen extends Screen {
 
 	@Override
 	protected void init() {
-		int left = width / 2 - W - GAP / 2, right = width / 2 + GAP / 2;
-		int y = height / 2 - 70;
-		addRenderableWidget(Button.builder(Component.literal("§l获取物品…"), b -> minecraft.setScreen(new ItemPickerScreen(this)))
-				.bounds(width / 2 - W, y, W * 2 + GAP - 4, H).build());
-		y += H + GAP * 2;
-		button(left, y, "过来（走到我身边）", "bot come");
-		button(right, y, "取消当前任务", "bot cancel");
-		y += H + GAP;
-		button(left, y, "状态", "bot status");
-		button(right, y, "最近日志", "bot log");
-		y += H + GAP;
-		button(left, y, "召唤机器人", "bot spawn");
-		button(right, y, "移除机器人", "bot remove");
-		y += H + GAP;
-		button(left, y, "路线显示 开/关", "bot debug path");
-		button(right, y, "查看规则", "bot rules");
-		y += H + GAP * 2;
-		addRenderableWidget(Button.builder(Component.literal("关闭"), b -> onClose())
-				.bounds(width / 2 - 50, y, 100, H).build());
-	}
-
-	private void button(int x, int y, String label, String command) {
-		addRenderableWidget(Button.builder(Component.literal(label), b -> HelperBotClient.send(command)).bounds(x, y, W, H).build());
+		super.init();
+		int w = panelWidth(320), x = panelLeft(w);
+		int top = 22, rowH = rowHeight(height - top - 8, ROWS), h = rowH - GAP;
+		int y = top;
+		big("§l获取物品…", x, y, w, h, () -> minecraft.setScreen(new ItemPickerScreen(this)));
+		y += rowH;
+		big("§l保护区块（地图）…", x, y, w, h, () -> minecraft.setScreen(new ChunkMapScreen(this)));
+		y += rowH;
+		row(x, y, w, h, new String[]{"过来（到我身边）", "停止当前任务"},
+				new Runnable[]{() -> HelperBotClient.send("bot come"), () -> HelperBotClient.send("bot cancel")});
+		y += rowH;
+		row(x, y, w, h, new String[]{"状态", "最近日志"},
+				new Runnable[]{() -> HelperBotClient.send("bot status"), () -> HelperBotClient.send("bot log")});
+		y += rowH;
+		row(x, y, w, h, new String[]{"召唤机器人", "移除机器人"},
+				new Runnable[]{() -> HelperBotClient.send("bot spawn"), () -> HelperBotClient.send("bot remove")});
+		y += rowH;
+		row(x, y, w, h, new String[]{"路线显示 开/关", "查看规则"},
+				new Runnable[]{() -> HelperBotClient.send("bot debug path"), () -> HelperBotClient.send("bot rules")});
+		y += rowH;
+		big("关闭", x + w / 4, y, w / 2, h, this::onClose);
 	}
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
 		super.render(g, mouseX, mouseY, partialTick);
-		g.drawCenteredString(font, title, width / 2, height / 2 - 92, 0xFFFFFFFF);
-	}
-
-	@Override
-	public boolean isPauseScreen() {
-		return false;
+		g.drawCenteredString(font, title, width / 2, 8, 0xFFFFFFFF);
 	}
 }

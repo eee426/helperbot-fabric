@@ -299,6 +299,50 @@ public final class Scenarios {
 						? Scenario.Outcome.fail("被传送到了 " + c.bot().level().dimension().identifier())
 						: c.ticks() >= 8 * 20 ? Scenario.Outcome.pass("在传送门里待了 8 秒，还在主世界") : null),
 
+				new Scenario("P1", "遥控地图用的指令：批量保护、查询；普通玩家不能取消保护，服务器后台可以按 ID 取消", 20, (a, bot, me) -> {
+					var server = a.level.getServer();
+					net.minecraft.world.level.ChunkPos base = new net.minecraft.world.level.ChunkPos(a.at(0, 0, 0));
+					int bx = base.x + 3, bz = base.z + 3;
+					server.getCommands().performPrefixedCommand(me.createCommandSourceStack(),
+							"bot protect chunks " + bx + "," + bz + " " + (bx + 1) + "," + bz + " " + bx + "," + (bz + 1));
+					int id = com.vale.helperbot.guard.ProtectionZones.idOf(a.level, new net.minecraft.world.level.ChunkPos(bx, bz));
+					boolean three = id != 0
+							&& com.vale.helperbot.guard.ProtectionZones.isProtected(a.level, new net.minecraft.world.level.ChunkPos(bx + 1, bz))
+							&& com.vale.helperbot.guard.ProtectionZones.isProtected(a.level, new net.minecraft.world.level.ChunkPos(bx, bz + 1));
+					// The query answers with the marked line.
+					StringBuilder reply = new StringBuilder();
+					server.getCommands().performPrefixedCommand(me.createCommandSourceStack()
+									.withSource(new net.minecraft.commands.CommandSource() {
+										public void sendSystemMessage(net.minecraft.network.chat.Component message) {
+											reply.append(message.getString());
+										}
+
+										public boolean acceptsSuccess() {
+											return true;
+										}
+
+										public boolean acceptsFailure() {
+											return true;
+										}
+
+										public boolean shouldInformAdmins() {
+											return false;
+										}
+									}),
+							"bot protect query " + bx + " " + bz + " 2");
+					boolean answered = reply.toString().startsWith(com.vale.helperbot.command.BotCommands.ZONES_MARKER)
+							&& reply.toString().contains(id + "," + bx + "," + bz + ";");
+					// A player (no operator rights) may not take protection off; the console may.
+					server.getCommands().performPrefixedCommand(me.createCommandSourceStack(), "bot protect remove " + id);
+					boolean stillAfterPlayer = com.vale.helperbot.guard.ProtectionZones.idOf(a.level, new net.minecraft.world.level.ChunkPos(bx, bz)) == id;
+					server.getCommands().performPrefixedCommand(server.createCommandSourceStack(), "bot protect remove " + id);
+					boolean goneAfterConsole = !com.vale.helperbot.guard.ProtectionZones.isProtected(a.level, new net.minecraft.world.level.ChunkPos(bx, bz));
+					PLAN_RESULT[0] = !three ? "批量保护没生效" : !answered ? "查询的回复不对：" + reply
+							: !stillAfterPlayer ? "普通玩家取消了保护" : !goneAfterConsole ? "后台按 ID 取消没生效" : null;
+					PLAN_RESULT[1] = "批量保护 3 个、查询回复正确、玩家取消被拒、后台按 ID " + id + " 取消成功";
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
 				new Scenario("C33", "白色地毯：做好的不拿去染色", 5 * MINUTE, (a, bot, me) -> {
 					for (int i = 0; i < 4; i++) {
 						a.spawn(EntityType.SHEEP, 6 + i, Arena.SURFACE, 4);
@@ -483,10 +527,7 @@ public final class Scenarios {
 
 	/** Protects the chunk holding arena cell (x, z), if it isn't already. */
 	private static void protect(Arena a, int x, int z) {
-		net.minecraft.world.level.ChunkPos chunk = new net.minecraft.world.level.ChunkPos(a.at(x, 0, z));
-		if (!com.vale.helperbot.guard.ProtectionZones.isProtected(a.level, chunk)) {
-			com.vale.helperbot.guard.ProtectionZones.toggle(a.level, chunk);
-		}
+		com.vale.helperbot.guard.ProtectionZones.protect(a.level, new net.minecraft.world.level.ChunkPos(a.at(x, 0, z)));
 	}
 
 	/** Oak logs in the chunk holding arena cell (x, z), surface and up. */

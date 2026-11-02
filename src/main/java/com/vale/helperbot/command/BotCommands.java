@@ -112,8 +112,28 @@ public final class BotCommands {
 								.then(Commands.literal("on").executes(ctx -> setPortals(ctx, true)))
 								.then(Commands.literal("off").executes(ctx -> setPortals(ctx, false)))))
 				.then(Commands.literal("protect")
-						.executes(BotCommands::toggleChunk)
+						.executes(BotCommands::protectChunk)
 						.then(Commands.literal("list").executes(BotCommands::listChunks))
+						// For the remote's chunk map (Helper Bot Remote): protect several chunks, and ask
+						// which are protected around a spot. The answer is one marked line the remote
+						// reads and hides; typed by hand it's just a list.
+						.then(Commands.literal("chunks")
+								.then(Commands.argument("list", StringArgumentType.greedyString()).executes(BotCommands::protectChunks)))
+						.then(Commands.literal("query")
+								.then(Commands.argument("x", IntegerArgumentType.integer())
+										.then(Commands.argument("z", IntegerArgumentType.integer())
+												.then(Commands.argument("radius", IntegerArgumentType.integer(0, 32))
+														.executes(BotCommands::queryChunks)))))
+						// Taking protection off: the server console only (permission 4), by number.
+						.then(Commands.literal("remove")
+								.requires(Commands.hasPermission(Commands.LEVEL_OWNERS))
+								.then(Commands.argument("id", IntegerArgumentType.integer(1)).executes(ctx -> {
+									int id = IntegerArgumentType.getInteger(ctx, "id");
+									boolean ok = ProtectionZones.remove(id);
+									ctx.getSource().sendSuccess(() -> Component.literal(ok ? "已取消保护区块 ID " + id
+											: "没有 ID 为 " + id + " 的保护区块"), true);
+									return ok ? 1 : 0;
+								})))
 						.then(Commands.literal("show").executes(ctx -> {
 							ZoneDisplay.show(ctx.getSource().getPlayerOrException());
 							ctx.getSource().sendSuccess(() -> Component.literal("附近保护区块的边界用绿色粒子标出来了（15 秒）。"), false);
@@ -224,23 +244,65 @@ public final class BotCommands {
 		return 1;
 	}
 
-	/** Protects the chunk the player stands in, or unprotects it if it already was. */
-	private static int toggleChunk(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+	/** Protects the chunk the player stands in. Taking it off is for the server console (by number). */
+	private static int protectChunk(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
 		ServerPlayer player = ctx.getSource().getPlayerOrException();
 		ChunkPos chunk = player.chunkPosition();
-		boolean now = ProtectionZones.toggle(player.level(), chunk);
+		boolean was = ProtectionZones.isProtected(player.level(), chunk);
+		int id = ProtectionZones.protect(player.level(), chunk);
 		String where = "区块 " + chunk.x + ", " + chunk.z + "（x " + chunk.getMinBlockX() + "~" + chunk.getMaxBlockX()
 				+ "，z " + chunk.getMinBlockZ() + "~" + chunk.getMaxBlockZ() + "）";
-		Component text = Component.literal(now
-						? "已保护" + where + "：机器人可以路过，但不碰里面任何东西，路过时也不会触发机关、不会被怪盯上。"
-						: "已取消保护" + where + "。")
-				.append(button(" [撤销]", "/bot protect"))
+		Component text = Component.literal(was
+						? where + "已经是保护区块，ID " + id + "。"
+						: "已保护" + where + "，ID " + id + "：机器人可以路过，但不碰里面任何东西，路过时也不会触发机关、不会被怪盯上。"
+						+ "（取消保护只能在服务器后台：/bot protect remove " + id + "）")
 				.append(button(" [显示边界]", "/bot protect show"));
-		ctx.getSource().sendSuccess(() -> text, true);
-		if (now) {
-			ZoneDisplay.show(player);
-		}
+		ctx.getSource().sendSuccess(() -> text, !was);
+		ZoneDisplay.show(player);
 		return 1;
+	}
+
+	/** Start of the reply to /bot protect query: the remote hides lines starting with this. */
+	public static final String ZONES_MARKER = "[helperbot-zones]";
+	/** Most chunks one /bot protect chunks may protect. */
+	private static final int MAX_CHUNKS_AT_ONCE = 64;
+
+	/** "/bot protect chunks x,z x,z ...": protect each (adding only). */
+	private static int protectChunks(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+		ServerPlayer player = ctx.getSource().getPlayerOrException();
+		int added = 0, already = 0, bad = 0;
+		String[] parts = StringArgumentType.getString(ctx, "list").trim().split("\\s+");
+		for (int i = 0; i < parts.length && i < MAX_CHUNKS_AT_ONCE; i++) {
+			String[] xz = parts[i].split(",");
+			try {
+				ChunkPos chunk = new ChunkPos(Integer.parseInt(xz[0]), Integer.parseInt(xz[1]));
+				if (ProtectionZones.isProtected(player.level(), chunk)) {
+					already++;
+				} else {
+					ProtectionZones.protect(player.level(), chunk);
+					added++;
+				}
+			} catch (RuntimeException e) {
+				bad++;
+			}
+		}
+		String text = "已保护 " + added + " 个区块" + (already > 0 ? "（另有 " + already + " 个本来就是）" : "")
+				+ (bad > 0 ? "，" + bad + " 个写法不对没处理" : "") + "。取消保护只能在服务器后台按 ID 执行。";
+		ctx.getSource().sendSuccess(() -> Component.literal(text), true);
+		return added;
+	}
+
+	/** "/bot protect query x z radius": the protected chunks around chunk (x, z), as "id,x,z;...". */
+	private static int queryChunks(CommandContext<CommandSourceStack> ctx) {
+		ChunkPos center = new ChunkPos(IntegerArgumentType.getInteger(ctx, "x"), IntegerArgumentType.getInteger(ctx, "z"));
+		var near = ProtectionZones.near(ctx.getSource().getLevel(), center, IntegerArgumentType.getInteger(ctx, "radius"));
+		StringBuilder sb = new StringBuilder(ZONES_MARKER);
+		for (ProtectionZones.Entry e : near) {
+			sb.append(e.id()).append(',').append(e.x()).append(',').append(e.z()).append(';');
+		}
+		String text = sb.toString();
+		ctx.getSource().sendSuccess(() -> Component.literal(text), false);
+		return near.size();
 	}
 
 	private static Component button(String label, String command) {
@@ -249,14 +311,14 @@ public final class BotCommands {
 	}
 
 	private static int listChunks(CommandContext<CommandSourceStack> ctx) {
-		var chunks = ProtectionZones.all(ctx.getSource().getLevel());
+		var chunks = ProtectionZones.entries(ctx.getSource().getLevel());
 		if (chunks.isEmpty()) {
 			ctx.getSource().sendSuccess(() -> Component.literal("这个维度还没有保护区块。站在要保护的区块里输入 /bot protect。"), false);
 			return 0;
 		}
-		StringBuilder sb = new StringBuilder("保护区块（" + chunks.size() + " 个）：");
-		for (ChunkPos c : chunks) {
-			sb.append(" [").append(c.x).append(", ").append(c.z).append("]");
+		StringBuilder sb = new StringBuilder("保护区块（" + chunks.size() + " 个，ID：区块坐标）：");
+		for (ProtectionZones.Entry c : chunks) {
+			sb.append(" ").append(c.id()).append(":[").append(c.x()).append(", ").append(c.z()).append("]");
 		}
 		String text = sb.toString();
 		ctx.getSource().sendSuccess(() -> Component.literal(text).append(button(" [显示边界]", "/bot protect show")), false);

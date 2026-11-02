@@ -4,6 +4,7 @@ import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
@@ -12,7 +13,8 @@ import org.lwjgl.glfw.GLFW;
 
 /**
  * Client side only: press H for a menu that builds /bot commands from buttons and sends them, so
- * nothing has to be typed. The server needs the Helper Bot mod; this one only sends commands.
+ * nothing has to be typed. The server needs the Helper Bot mod; this one only sends commands (and
+ * reads the server's answer about protected chunks, see {@link ClientZones}).
  */
 public class HelperBotClient implements ClientModInitializer {
 	private static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
@@ -30,6 +32,15 @@ public class HelperBotClient implements ClientModInitializer {
 				}
 			}
 		});
+		// The server's answer about protected chunks: read it, don't show it in chat.
+		ClientReceiveMessageEvents.ALLOW_GAME.register((message, overlay) -> {
+			String text = message.getString();
+			if (text.startsWith(ClientZones.MARKER)) {
+				ClientZones.read(text);
+				return false;
+			}
+			return true;
+		});
 	}
 
 	/** Sends a /bot command (without the slash) as the player, then closes the menu. */
@@ -41,5 +52,13 @@ public class HelperBotClient implements ClientModInitializer {
 		mc.player.connection.sendCommand(command);
 		mc.player.displayClientMessage(Component.literal("§7已发送：/" + command), false);
 		mc.setScreen(null);
+	}
+
+	/** Sends a /bot command and stays on the current screen, without saying so in chat. */
+	static void sendQuietly(String command) {
+		Minecraft mc = Minecraft.getInstance();
+		if (mc.player != null) {
+			mc.player.connection.sendCommand(command);
+		}
 	}
 }

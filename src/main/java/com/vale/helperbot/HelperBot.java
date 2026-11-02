@@ -31,8 +31,7 @@ public class HelperBot implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
-		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> BotCommands.register(dispatcher, registryAccess));
-		// Loot tables and world-gen data can change on /reload: forget what we derived from them.
+		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> BotCommands.register(dispatcher, registryAccess));		// Loot tables and world-gen data can change on /reload: forget what we derived from them.
 		ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, success) -> {
 			DropAnalysis.clearCache();
 			BiomeHints.clearCache();

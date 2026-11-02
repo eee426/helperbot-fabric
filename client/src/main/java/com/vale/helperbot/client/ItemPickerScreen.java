@@ -22,18 +22,20 @@ import java.util.Set;
 /**
  * Second level: pick an item. The categories are the game's own creative-inventory tabs (building
  * blocks, natural blocks, tools, food...), so other mods' items show up too; a search box looks
- * through all of them. Clicking an item asks how many.
+ * through all of them. Touching an item only selects it; "下一步" goes on to how many. (Going on
+ * at the first touch made a finger jump straight through to "send to the bot?".)
  */
-public class ItemPickerScreen extends Screen {
-	private static final int CELL = 18;
-	private static final int TAB_W = 96, TAB_H = 18;
+public class ItemPickerScreen extends TouchScreen {
+	private static final int CELL = 24;
 
 	private final Screen parent;
 	private final List<CreativeModeTab> tabs = new ArrayList<>();
-	private CreativeModeTab selected;
+	private int tab;
 	private EditBox search;
 	private List<ItemStack> shown = List.of();
-	private int scroll;
+	private int page;
+	private ItemStack picked;
+	private Button next, prevPage, nextPage;
 	// Grid area, worked out in init().
 	private int gridX, gridY, cols, rows;
 
@@ -44,45 +46,69 @@ public class ItemPickerScreen extends Screen {
 
 	@Override
 	protected void init() {
+		super.init();
 		// The creative tabs fill themselves on demand; make sure they're filled for this world.
 		if (minecraft.player != null && minecraft.level != null) {
 			CreativeModeTabs.tryRebuildTabContents(minecraft.player.connection.enabledFeatures(), false,
 					minecraft.level.registryAccess());
 		}
 		tabs.clear();
-		for (CreativeModeTab tab : CreativeModeTabs.tabs()) {
-			if (tab.getType() == CreativeModeTab.Type.CATEGORY && tab.shouldDisplay() && !items(tab).isEmpty()) {
-				tabs.add(tab);
+		for (CreativeModeTab t : CreativeModeTabs.tabs()) {
+			if (t.getType() == CreativeModeTab.Type.CATEGORY && t.shouldDisplay() && !items(t).isEmpty()) {
+				tabs.add(t);
 			}
 		}
-		int y = 30;
-		for (CreativeModeTab tab : tabs) {
-			addRenderableWidget(Button.builder(tab.getDisplayName(), b -> select(tab)).bounds(8, y, TAB_W, TAB_H).build());
-			y += TAB_H + 2;
-		}
-		addRenderableWidget(Button.builder(Component.literal("返回"), b -> minecraft.setScreen(parent))
-				.bounds(8, height - 26, TAB_W, 20).build());
+		tab = Math.min(tab, Math.max(0, tabs.size() - 1));
 
-		gridX = TAB_W + 18;
-		gridY = 34;
-		cols = Math.max(1, (width - gridX - 10) / CELL);
-		rows = Math.max(1, (height - gridY - 12) / CELL);
+		int w = panelWidth(420), x = panelLeft(w);
+		int rowH = rowHeight(height / 6, 1), h = rowH - GAP;
+		int y = 6;
+		// Category: ◀ name ▶
+		big("◀", x, y, 40, h, () -> switchTab(-1));
+		big("▶", x + w - 40, y, 40, h, () -> switchTab(1));
+		y += rowH;
 		String old = search == null ? "" : search.getValue();
-		search = new EditBox(font, gridX, 10, Math.min(cols * CELL, 220), 16, Component.literal("搜索"));
-		search.setHint(Component.literal("搜索物品（名字或 ID）"));
+		search = new EditBox(font, x, y, w, h - 4, Component.literal("搜索"));
+		search.setHint(Component.literal("搜索物品（名字或 ID），不填就看上面的分类"));
 		search.setValue(old);
 		search.setResponder(text -> refresh());
 		addRenderableWidget(search);
-		if (selected == null && !tabs.isEmpty()) {
-			selected = tabs.get(0);
-		}
+		y += rowH;
+
+		// Two rows of buttons at the bottom, the selected item's name just above them.
+		int bottom = height - 6 - 2 * rowH;
+		gridY = y;
+		cols = Math.max(1, w / CELL);
+		rows = Math.max(1, (bottom - 14 - gridY) / CELL);
+		gridX = x + (w - cols * CELL) / 2;
+		Button[] pages = row(x, bottom, w, h, new String[]{"上一页", "下一页"},
+				new Runnable[]{() -> turn(-1), () -> turn(1)});
+		prevPage = pages[0];
+		nextPage = pages[1];
+		Button[] last = row(x, bottom + rowH, w, h, new String[]{"§a下一步：选数量", "返回"},
+				new Runnable[]{this::goOn, () -> minecraft.setScreen(parent)});
+		next = last[0];
 		refresh();
 	}
 
-	private void select(CreativeModeTab tab) {
-		selected = tab;
+	private void switchTab(int d) {
+		if (tabs.isEmpty()) {
+			return;
+		}
+		tab = (tab + d + tabs.size()) % tabs.size();
 		search.setValue("");
 		refresh();
+	}
+
+	private void turn(int d) {
+		page = Math.max(0, Math.min(maxPage(), page + d));
+		updateButtons();
+	}
+
+	private void goOn() {
+		if (picked != null) {
+			minecraft.setScreen(new AmountScreen(this, picked.copy()));
+		}
 	}
 
 	/** What a tab offers that a bot could be asked for: no spawn eggs, nothing creative-only. */
@@ -97,84 +123,90 @@ public class ItemPickerScreen extends Screen {
 	}
 
 	private void refresh() {
-		scroll = 0;
+		page = 0;
 		String q = search == null ? "" : search.getValue().trim().toLowerCase(Locale.ROOT);
 		if (q.isEmpty()) {
-			shown = selected == null ? List.of() : items(selected);
-			return;
-		}
-		// Search through every category; the same item can be listed in several.
-		Set<String> seen = new LinkedHashSet<>();
-		List<ItemStack> found = new ArrayList<>();
-		for (CreativeModeTab tab : tabs) {
-			for (ItemStack stack : items(tab)) {
-				String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-				String name = stack.getHoverName().getString().toLowerCase(Locale.ROOT);
-				if ((name.contains(q) || id.contains(q)) && seen.add(id + stack.getComponentsPatch())) {
-					found.add(stack);
+			shown = tabs.isEmpty() ? List.of() : items(tabs.get(tab));
+		} else {
+			// Search through every category; the same item can be listed in several.
+			Set<String> seen = new LinkedHashSet<>();
+			List<ItemStack> found = new ArrayList<>();
+			for (CreativeModeTab t : tabs) {
+				for (ItemStack stack : items(t)) {
+					String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+					String name = stack.getHoverName().getString().toLowerCase(Locale.ROOT);
+					if ((name.contains(q) || id.contains(q)) && seen.add(id + stack.getComponentsPatch())) {
+						found.add(stack);
+					}
 				}
 			}
+			shown = found;
 		}
-		shown = found;
+		updateButtons();
 	}
 
-	private int maxScroll() {
-		int totalRows = (shown.size() + cols - 1) / cols;
-		return Math.max(0, totalRows - rows);
+	private void updateButtons() {
+		if (next != null) {
+			next.active = picked != null;
+			prevPage.active = page > 0;
+			nextPage.active = page < maxPage();
+		}
+	}
+
+	private int perPage() {
+		return rows * cols;
+	}
+
+	private int maxPage() {
+		return Math.max(0, (shown.size() - 1) / perPage());
 	}
 
 	@Override
 	public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
 		super.render(g, mouseX, mouseY, partialTick);
-		g.drawString(font, selected != null && search.getValue().isBlank() ? selected.getDisplayName() : Component.literal("搜索结果"),
-				8, 14, 0xFFFFFFFF);
-		ItemStack hovered = null;
-		for (int i = 0; i < rows * cols; i++) {
-			int index = (scroll * cols) + i;
+		int rowH = rowHeight(height / 6, 1);
+		String heading = search.getValue().isBlank() && !tabs.isEmpty() ? tabs.get(tab).getDisplayName().getString() : "搜索结果";
+		g.drawCenteredString(font, heading + "（" + (page + 1) + "/" + (maxPage() + 1) + " 页）", width / 2, 6 + (rowH - GAP) / 2 - 4, 0xFFFFFFFF);
+		for (int i = 0; i < perPage(); i++) {
+			int index = page * perPage() + i;
 			if (index >= shown.size()) {
 				break;
 			}
 			int x = gridX + (i % cols) * CELL, y = gridY + (i / cols) * CELL;
-			boolean over = mouseX >= x && mouseX < x + CELL && mouseY >= y && mouseY < y + CELL;
-			g.fill(x, y, x + CELL - 1, y + CELL - 1, over ? 0x80FFFFFF : 0x40000000);
-			g.renderItem(shown.get(index), x + 1, y + 1);
-			if (over) {
-				hovered = shown.get(index);
-			}
+			ItemStack stack = shown.get(index);
+			boolean chosen = picked != null && ItemStack.isSameItemSameComponents(stack, picked);
+			g.fill(x + 1, y + 1, x + CELL - 1, y + CELL - 1, chosen ? 0xC0E0C040 : 0x50000000);
+			g.renderItem(stack, x + (CELL - 16) / 2, y + (CELL - 16) / 2);
 		}
 		if (shown.isEmpty()) {
-			g.drawString(font, "没有找到", gridX, gridY + 4, 0xFFAAAAAA);
+			g.drawCenteredString(font, "没有找到", width / 2, gridY + 8, 0xFFAAAAAA);
 		}
-		if (maxScroll() > 0) {
-			g.drawString(font, "滚轮翻页 " + (scroll + 1) + "/" + (maxScroll() + 1), width - 90, 14, 0xFFAAAAAA);
-		}
-		if (hovered != null) {
-			g.setTooltipForNextFrame(font, hovered, mouseX, mouseY);
-		}
+		int bottom = height - 6 - 2 * rowH;
+		g.drawCenteredString(font, picked == null ? "点一个物品选中它，再按\"下一步\"" : "已选：" + picked.getHoverName().getString(),
+				width / 2, bottom - 11, picked == null ? 0xFFAAAAAA : 0xFFFFFF80);
 	}
 
 	@Override
 	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		if (guarded()) {
+			return true;
+		}
 		double mx = event.x(), my = event.y();
 		if (mx >= gridX && mx < gridX + cols * CELL && my >= gridY && my < gridY + rows * CELL) {
 			int i = ((int) (my - gridY) / CELL) * cols + (int) (mx - gridX) / CELL;
-			int index = scroll * cols + i;
+			int index = page * perPage() + i;
 			if (index < shown.size()) {
-				minecraft.setScreen(new AmountScreen(this, shown.get(index).copy()));
-				return true;
+				picked = shown.get(index).copy(); // select only: going on is the button's job
+				updateButtons();
 			}
+			return true;
 		}
 		return super.mouseClicked(event, doubleClick);
 	}
 
 	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-		scroll = Math.max(0, Math.min(maxScroll(), scroll - (int) Math.signum(scrollY)));
+		turn(scrollY > 0 ? -1 : 1);
 		return true;
-	}
-
-	@Override
-	public boolean isPauseScreen() {
-		return false;
 	}
 }

@@ -14,7 +14,8 @@
 | 🔴 | 默认规则 | `OPEN`：什么都能挖、能搭 | 默认改为 `STRICT`，或者改成读配置文件 | `guard/Rules.java` |
 | 🔴 | `/bot rules` 指令 | **任何玩家**都能切换成 open | 要求 OP 权限，或者正式版里直接删掉 open | `command/BotCommands.java` |
 | 🔴 | 规则不持久化 | 重启后恢复默认 | 存进配置文件，避免"以为是 strict，其实是 open" | `guard/Rules.java` |
-| 🔴 | `/bot protect`（保护/取消保护当前区块） | 任何玩家都能保护或**取消保护**任何区块（包括别人的基地） | 记录是谁保护的；取消保护只允许本人或 OP；多人服考虑每人只能管自己保护的区块 | `command/BotCommands.java#toggleChunk` |
+| 🟢 | `/bot protect`（保护区块） | 任何玩家都能**增加**保护（指令或遥控模组的地图）；**取消**只能在服务器后台按 ID（`/bot protect remove <ID>`，权限 4） | 2026-11-02 已按这个做。以后可考虑记录是谁保护的 | `command/BotCommands.java#protectChunk` |
+| 🟡 | 公共机器人（测试阶段） | 全服一只，谁都能召唤、移除、下任务、打断别人的任务 | 测试阶段有意如此；正式服再考虑"只能停自己的任务" | `command/BotCommands.java` |
 | 🟡 | 保护区块里的灵魂状态 | 机器人在保护区块里对服务器来说算旁观者（不触发机关、不被怪盯、不被推、不捡东西、不攻击），但仍是生存模式、别人看得见；会受伤（比如岩浆）。依赖服务器设置 `spectatorsGenerateChunks` 为默认的 true，否则它在保护区块里时周围区块可能不加载 | 正式服确认这个设置；确认显示正常（不同客户端模组下） | `bot/BotPlayer.java#isGhost` |
 | 🔴 | 空手跟远程怪打 | 被骷髅这类远程怪盯上时，没有武器也会追过去打，测试里被"Parched"（1.21.11 的新骷髅）射死过 | 没武器时远离远程怪，或者先躲起来 | `bot/BotPlayer.java#combat` |
 | 🟡 | `/bot spawn / remove / get / come / cancel` | 任何玩家都能用，而且只有一个全局机器人，谁都能指挥、谁都能取消别人的任务 | 改成每人一个机器人，或者记录主人、只听主人的 | `bot/BotManager.java` |
