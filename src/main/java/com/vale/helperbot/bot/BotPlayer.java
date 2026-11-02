@@ -166,6 +166,15 @@ public class BotPlayer extends ServerPlayer {
 		return isGhost() || super.broadcastToPlayer(viewer);
 	}
 
+	/**
+	 * With portals restricted, no portal takes it anywhere, however it got in (pushed, fell, a path
+	 * mistake). Paths already keep out of portal blocks (see Guard#isNoStep).
+	 */
+	@Override
+	public boolean canUsePortal(boolean allowPassengers) {
+		return !com.vale.helperbot.guard.Restrictions.noPortals() && super.canUsePortal(allowPassengers);
+	}
+
 	/** A ghost hits nothing (a spectator's "attack" would be looking through the target's eyes). */
 	@Override
 	public void attack(net.minecraft.world.entity.Entity target) {

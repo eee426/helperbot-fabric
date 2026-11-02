@@ -69,7 +69,7 @@ public final class Guard {
 
 	/** May the bot break this block? */
 	public static boolean canBreak(Level level, BlockPos pos, BlockState state) {
-		if (ProtectionZones.isProtected(level, pos) || state.getDestroySpeed(level, pos) < 0
+		if (ProtectionZones.isProtected(level, pos) || Restrictions.isBlocked(state.getBlock()) || state.getDestroySpeed(level, pos) < 0
 				|| state.is(Blocks.TNT) || isNextTo(level, pos, true)) {
 			return false;
 		}
@@ -87,7 +87,7 @@ public final class Guard {
 	 * task targets is allowed (there is no placement log yet, see LAUNCH_CHECKLIST).
 	 */
 	public static boolean canHarvest(Level level, BlockPos pos, BlockState state) {
-		if (ProtectionZones.isProtected(level, pos) || state.getDestroySpeed(level, pos) < 0
+		if (ProtectionZones.isProtected(level, pos) || Restrictions.isBlocked(state.getBlock()) || state.getDestroySpeed(level, pos) < 0
 				|| state.is(Blocks.TNT) || isNextTo(level, pos, true)) {
 			return false;
 		}

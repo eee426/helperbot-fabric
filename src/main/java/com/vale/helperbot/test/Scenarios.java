@@ -263,6 +263,42 @@ public final class Scenarios {
 					return null;
 				}),
 
+				new Scenario("R1", "临时限制黑曜石：被关在黑曜石盒子里也不挖（有钻石镐）", 2 * MINUTE, (a, bot, me) -> {
+					restrictObsidian(true);
+					a.fill(-2, Arena.SURFACE - 1, -2, 2, Arena.SURFACE + 3, 2, Blocks.OBSIDIAN);
+					a.fill(-1, Arena.SURFACE, -1, 1, Arena.SURFACE + 2, 1, Blocks.AIR);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					me.teleportTo(a.level, a.origin.getX() + 12.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.DIAMOND_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					ZONE_COUNT[0] = countObsidian(a);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> countObsidian(c.arena()) != ZONE_COUNT[0] ? Scenario.Outcome.fail("挖了黑曜石")
+						: c.ended() ? Scenario.Outcome.pass("一块黑曜石没挖，说出不去") : null),
+
+				new Scenario("R2", "临时限制黑曜石：要附魔台，规划里说明是被限制了（只规划）", 20, (a, bot, me) -> {
+					restrictObsidian(true);
+					give(bot, Items.DIAMOND, 2);
+					give(bot, Items.BOOK, 1);
+					CraftPlanner planner = new CraftPlanner(a.level, bot, bot.getInventory(), new HashSet<>());
+					CraftPlanner.Plan plan = planner.plan(Items.ENCHANTING_TABLE, 1, CraftPlanner.counts(bot.getInventory()));
+					List<String> problems = plan.problems().stream().map(x -> x.getString()).toList();
+					PLAN_RESULT[0] = plan.possible() ? "居然规划出来了：" + plan.actions()
+							: problems.stream().noneMatch(p -> p.contains("临时限制")) ? "失败原因里没提临时限制：" + problems : null;
+					PLAN_RESULT[1] = "做不了，原因里有：" + problems.stream().filter(p -> p.contains("临时限制")).findFirst().orElse("");
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
+				new Scenario("R3", "临时限制传送门：直接站进末地传送门，也不会被传走", 10 * 20, (a, bot, me) -> {
+					com.vale.helperbot.guard.Restrictions.setNoPortals(true);
+					a.set(5, Arena.SURFACE - 1, 0, Blocks.END_PORTAL);
+					bot.teleportTo(a.level, a.origin.getX() + 5.5, Arena.SURFACE - 0.6, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.BREAD, 16);
+					return null;
+				}, c -> c.bot().level().dimension() != net.minecraft.world.level.Level.OVERWORLD
+						? Scenario.Outcome.fail("被传送到了 " + c.bot().level().dimension().identifier())
+						: c.ticks() >= 8 * 20 ? Scenario.Outcome.pass("在传送门里待了 8 秒，还在主世界") : null),
+
 				new Scenario("C33", "白色地毯：做好的不拿去染色", 5 * MINUTE, (a, bot, me) -> {
 					for (int i = 0; i < 4; i++) {
 						a.spawn(EntityType.SHEEP, 6 + i, Arena.SURFACE, 4);
@@ -468,6 +504,22 @@ public final class Scenarios {
 		int n = 0;
 		for (BlockPos p : BlockPos.betweenClosed(chunk.getMinBlockX(), y0, chunk.getMinBlockZ(), chunk.getMaxBlockX(), y1, chunk.getMaxBlockZ())) {
 			if (what.test(a.level.getBlockState(p))) {
+				n++;
+			}
+		}
+		return n;
+	}
+
+	private static void restrictObsidian(boolean on) {
+		if (com.vale.helperbot.guard.Restrictions.isBlocked(Blocks.OBSIDIAN) != on) {
+			com.vale.helperbot.guard.Restrictions.toggle(Blocks.OBSIDIAN);
+		}
+	}
+
+	private static int countObsidian(Arena a) {
+		int n = 0;
+		for (BlockPos p : BlockPos.betweenClosed(a.at(-2, Arena.SURFACE - 1, -2), a.at(2, Arena.SURFACE + 3, 2))) {
+			if (a.level.getBlockState(p).is(Blocks.OBSIDIAN)) {
 				n++;
 			}
 		}

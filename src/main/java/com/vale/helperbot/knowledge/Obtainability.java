@@ -41,6 +41,6 @@ public final class Obtainability {
 		if (CREATIVE_ONLY.contains(item)) {
 			return "这个东西生存模式里拿不到（只能用创造模式或指令获得）。";
 		}
-		return null;
+		return com.vale.helperbot.guard.Restrictions.refusal(item);
 	}
 }

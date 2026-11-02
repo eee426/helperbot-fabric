@@ -30,6 +30,9 @@ public final class BuildingBlocks {
 			return -1;
 		}
 		Block block = item.getBlock();
+		if (com.vale.helperbot.guard.Restrictions.isBlocked(block)) {
+			return -1;
+		}
 		if (JUNK.contains(block)) {
 			return 0;
 		}

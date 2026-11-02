@@ -8,6 +8,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.vale.helperbot.bot.BotManager;
 import com.vale.helperbot.bot.BotPlayer;
 import com.vale.helperbot.guard.ProtectionZones;
+import com.vale.helperbot.guard.Restrictions;
 import com.vale.helperbot.guard.Rules;
 import com.vale.helperbot.guard.ZoneDisplay;
 import net.minecraft.world.level.ChunkPos;
@@ -92,6 +93,24 @@ public final class BotCommands {
 							}
 							return 1;
 						})))
+				.then(Commands.literal("restrict")
+						.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+						.executes(ctx -> {
+							ctx.getSource().sendSuccess(() -> Component.literal(Restrictions.describe()), false);
+							return 1;
+						})
+						.then(Commands.literal("block")
+								.then(Commands.argument("block", net.minecraft.commands.arguments.blocks.BlockStateArgument.block(buildContext))
+										.executes(ctx -> {
+											var block = net.minecraft.commands.arguments.blocks.BlockStateArgument.getBlock(ctx, "block").getState().getBlock();
+											boolean now = Restrictions.toggle(block);
+											ctx.getSource().sendSuccess(() -> Component.literal((now ? "已限制：不挖也不放 " : "已取消限制：")
+													+ block.getName().getString()), true);
+											return 1;
+										})))
+						.then(Commands.literal("portals")
+								.then(Commands.literal("on").executes(ctx -> setPortals(ctx, true)))
+								.then(Commands.literal("off").executes(ctx -> setPortals(ctx, false)))))
 				.then(Commands.literal("protect")
 						.executes(BotCommands::toggleChunk)
 						.then(Commands.literal("list").executes(BotCommands::listChunks))
@@ -195,6 +214,13 @@ public final class BotCommands {
 		bot.startTask(new AcquireTask(player, item, count, mode));
 		ctx.getSource().sendSuccess(() -> Component.literal("任务已下达：获取 ").append(new ItemStack(item).getHoverName())
 				.append(" ×" + count + "（" + modeName + "）"), false);
+		return 1;
+	}
+
+	private static int setPortals(CommandContext<CommandSourceStack> ctx, boolean restrict) {
+		Restrictions.setNoPortals(restrict);
+		ctx.getSource().sendSuccess(() -> Component.literal(restrict ? "已限制：机器人不会被任何传送门传走（不去下界、末地）"
+				: "已取消传送门限制"), true);
 		return 1;
 	}
 

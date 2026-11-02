@@ -61,6 +61,9 @@
 | `/bot protect` | 保护你所在的整个区块（再输一次取消）；聊天里有 [撤销] [显示边界] 按钮 |
 | `/bot protect show` | 用粒子标出附近保护区块的边界（15 秒） |
 | `/bot protect list` | 列出这个维度的保护区块 |
+| `/bot restrict` | （管理员）查看临时限制；默认全关 |
+| `/bot restrict block <方块>` | （管理员）开/关"不挖也不放这种方块"，例如 `minecraft:obsidian` |
+| `/bot restrict portals on\|off` | （管理员）开/关"不被任何传送门传走" |
 | `/bot log` / `/bot undo` | 查看最近操作，撤销上一个任务破坏的方块 |
 | `/bot debug path` | 用粒子显示计划路线 |
 

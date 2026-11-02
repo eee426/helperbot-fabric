@@ -43,6 +43,7 @@ public class HelperBot implements ModInitializer {
 
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			ProtectionZones.load(server);
+			com.vale.helperbot.guard.Restrictions.load(server);
 			// One pass over every block's loot table, so the first /bot get doesn't stall the game.
 			long start = System.nanoTime();
 			DropAnalysis.warmUp(server.overworld());

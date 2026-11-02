@@ -476,8 +476,15 @@ public final class CraftPlanner {
 
 	/** Some block drops it, and it may be gathered at all. */
 	private boolean gatherable(Item item) {
-		return gatherable.computeIfAbsent(item, i -> !noGather.contains(i) && Obtainability.refusal(level, i) == null
-				&& !DropAnalysis.candidates(level, breaker, i).isEmpty());
+		return gatherable.computeIfAbsent(item, i -> {
+			String restricted = com.vale.helperbot.guard.Restrictions.refusal(i);
+			if (restricted != null) {
+				problems.add(Component.literal(restricted)); // say so, so it isn't taken for "can't find any"
+				return false;
+			}
+			return !noGather.contains(i) && Obtainability.refusal(level, i) == null
+					&& !DropAnalysis.candidates(level, breaker, i).isEmpty();
+		});
 	}
 
 	private final Map<Item, Boolean> gatherable = new HashMap<>();

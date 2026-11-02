@@ -1248,7 +1248,7 @@ public final class MovementController {
 	 */
 	public boolean placeItem(BlockPos pos, int slot) {
 		ServerLevel level = bot.level();
-		if (bot.isGhost()) {
+		if (bot.isGhost() || com.vale.helperbot.guard.Restrictions.isBlocked(bot.getInventory().getItem(slot).getItem())) {
 			return false;
 		}
 		Direction[] order = {Direction.DOWN, Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP};
