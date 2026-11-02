@@ -182,10 +182,20 @@ public final class Escape {
 		return ticks == Integer.MAX_VALUE ? -1 : ticks;
 	}
 
-	/** Would water pour into this cell once it's dug out (water above or beside it)? */
+	/**
+	 * Would this cell be water once it's dug out: water pouring in from above or beside, or ice,
+	 * which turns into water when broken over anything solid or liquid (vanilla). Ice over a pond
+	 * dug from below used to count as "head in the air"; it drowned digging it, floating.
+	 */
 	public static boolean floodsWhenDug(Level level, BlockPos pos) {
 		if (LocalPathfinder.isWater(level, pos.above())) {
 			return true;
+		}
+		if (level.getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.IceBlock) {
+			BlockPos below = pos.below();
+			if (level.getBlockState(below).blocksMotion() || !level.getFluidState(below).isEmpty()) {
+				return true;
+			}
 		}
 		for (Direction dir : Direction.Plane.HORIZONTAL) {
 			if (LocalPathfinder.isWater(level, pos.relative(dir))) {

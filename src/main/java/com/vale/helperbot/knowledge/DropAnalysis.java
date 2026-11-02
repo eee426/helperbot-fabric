@@ -363,7 +363,7 @@ public final class DropAnalysis {
 			ItemStack stack = inventory.getItem(slot);
 			// Plain items (blocks, food...) act like a bare hand, which was just tried.
 			if (stack.isEmpty() || (!stack.isDamageableItem() && !stack.isEnchanted())
-					|| (stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1)) {
+					|| com.vale.helperbot.path.BreakTimes.usedUp(stack)) {
 				continue;
 			}
 			float speed = stack.getDestroySpeed(state);

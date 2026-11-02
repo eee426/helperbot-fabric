@@ -354,7 +354,11 @@ public final class MovementController {
 		BlockPos f = feet();
 		ServerLevel level = bot.level();
 		ignoreAir = true; // read when it plans, next tick
-		engage(p -> Air.breathable(level, p), f.above(Math.max(2, waterAbove())), "去换气");
+		// A cell whose head space is still a block to dig only counts if it won't be water once dug
+		// (the goal sees the world as it is now, not as the path will leave it).
+		engage(p -> Air.breathable(level, p)
+				&& (LocalPathfinder.isPassable(level, p.above()) || !Escape.floodsWhenDug(level, p.above())),
+				f.above(Math.max(2, waterAbove())), "去换气");
 	}
 
 	/** Walking somewhere below where it is now (e.g. digging down to a cave under the sea). */

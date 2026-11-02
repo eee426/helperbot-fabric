@@ -86,8 +86,16 @@ public final class CraftPlanner {
 	private static final double HUNT_NEARBY = 400;
 	private static final double HUNT_IN_BIOME = 2_500;
 	private static final double HUNT_WAIT_FOR_SPAWN = 3_500;
-	/** Ticks per kill: chase, fight, pick up. */
+	/** Ticks per kill of prey already around: find, chase, fight, pick up. */
 	private static final double HUNT_PER_KILL = 150;
+	/**
+	 * Ticks per kill once the prey around is used up: animals, a walk to the next herd; monsters,
+	 * waiting for them to spawn (only in the dark, a few at a time). A rare drop takes many kills,
+	 * and those go at this rate: 3 iron ingots from zombies (1 in 30) is ~90 zombies, nights of
+	 * it, not 90 quick kills (it used to plan that over mining iron ore).
+	 */
+	private static final double HUNT_PER_KILL_ANIMAL_AWAY = 400;
+	private static final double HUNT_PER_KILL_SPAWNING = 900;
 	private static final double CRAFT_PER_OP = 10;
 	private static final double SMELT_FIXED = 40;
 	/** Deep enough for e.g. diamond pickaxe <- diamond <- iron pickaxe <- iron <- stone pickaxe <- cobblestone <- wooden pickaxe <- planks <- log. */
@@ -157,12 +165,12 @@ public final class CraftPlanner {
 		this.fuel = level.fuelValues();
 	}
 
-	/** Snapshot of an inventory as item counts. */
+	/** Snapshot of an inventory as item counts. Used-up tools don't count: they won't be used. */
 	public static Map<Item, Integer> counts(Inventory inventory) {
 		Map<Item, Integer> counts = new HashMap<>();
 		for (int i = 0; i < inventory.getContainerSize(); i++) {
 			ItemStack stack = inventory.getItem(i);
-			if (!stack.isEmpty()) {
+			if (!stack.isEmpty() && !com.vale.helperbot.path.BreakTimes.usedUp(stack)) {
 				counts.merge(stack.getItem(), stack.getCount(), Integer::sum);
 			}
 		}
@@ -287,9 +295,8 @@ public final class CraftPlanner {
 			problems.add(huntProblem.get(item));
 		}
 		if (!prey.isEmpty()) {
-			double perKill = prey.values().stream().mapToDouble(Double::doubleValue).max().orElse(1.0);
 			State t = s.copy();
-			t.cost += huntCost(prey) + HUNT_PER_KILL * n / Math.min(perKill, 1.0);
+			t.cost += huntCost(prey, n);
 			t.actions.add(new Hunt(item, n, prey));
 			if (best == null || t.cost < best.cost) {
 				best = t;
@@ -663,7 +670,6 @@ public final class CraftPlanner {
 	}
 
 	private final Map<Item, Double> estimates = new HashMap<>();
-
 	/**
 	 * Fills in {@link #estimates} for {@code root} and everything it could be made from: collect
 	 * that part of the recipe graph, then lower the estimates until nothing changes (recipes go in
@@ -723,7 +729,7 @@ public final class CraftPlanner {
 				return Double.isNaN(g) ? Double.POSITIVE_INFINITY : g;
 			});
 			List<Item> tools = gatherTools(item);
-			double tool = tools.isEmpty() ? 0 : Double.POSITIVE_INFINITY;
+			double tool = tools.isEmpty() && tools != NO_PLAIN_TOOL ? 0 : Double.POSITIVE_INFINITY;
 			for (Item t : tools) {
 				tool = Math.min(tool, estimates.getOrDefault(t, Double.POSITIVE_INFINITY));
 			}
@@ -734,8 +740,7 @@ public final class CraftPlanner {
 		}
 		Map<EntityType<?>, Double> prey = huntSources(item);
 		if (!prey.isEmpty()) {
-			double perKill = prey.values().stream().mapToDouble(Double::doubleValue).max().orElse(1.0);
-			best = Math.min(best, huntCost(prey) + HUNT_PER_KILL / Math.min(perKill, 1.0));
+			best = Math.min(best, huntCost(prey, 1));
 		}
 		for (RecipeIndex.Craft craft : recipes(item)) {
 			best = Math.min(best, craftEstimate(craft, 0));
@@ -754,14 +759,22 @@ public final class CraftPlanner {
 		return all.size() > MAX_RECIPES ? all.subList(0, MAX_RECIPES) : all;
 	}
 
-	/** Tools to make before gathering it; empty if the hand or something in the bag will do. */
+	/**
+	 * Tools to make before gathering it; empty if the hand or something in the bag will do;
+	 * {@link #NO_PLAIN_TOOL} if only something that can't be made does (silk touch: the iron ore
+	 * block itself). That last one used to come back empty too, so the estimate read it as "by
+	 * hand": smelting iron ore looked cheapest, failed in the full search, and pushed the real way
+	 * (raw iron) out of range, leaving hunting zombies for ingots.
+	 */
 	private List<Item> gatherTools(Item item) {
 		return gatherTools.computeIfAbsent(item, i -> {
 			long started = System.nanoTime();
 			List<Item> tools = new ArrayList<>();
+			boolean ready = false;
 			for (Block block : DropAnalysis.candidates(level, breaker, i).keySet()) {
 				if (DropAnalysis.handDrops(level, breaker, block, i)
 						|| DropAnalysis.toolSlotFor(level, breaker, realInventory, block, i) != DropAnalysis.NONE) {
+					ready = true;
 					tools.clear();
 					break;
 				}
@@ -772,9 +785,12 @@ public final class CraftPlanner {
 				}
 			}
 			tDrops += System.nanoTime() - started;
-			return tools;
+			return !ready && tools.isEmpty() ? NO_PLAIN_TOOL : tools;
 		});
 	}
+
+	/** See {@link #gatherTools}: compared by identity. */
+	private static final List<Item> NO_PLAIN_TOOL = java.util.Collections.unmodifiableList(new ArrayList<>());
 
 	private final Map<Item, List<Item>> gatherTools = new HashMap<>();
 
@@ -849,7 +865,7 @@ public final class CraftPlanner {
 		Map<EntityType<?>, Double> all = MobDrops.sources(level, killer, item);
 		Map<EntityType<?>, Double> usable = new HashMap<>();
 		for (Map.Entry<EntityType<?>, Double> e : all.entrySet()) {
-			if (!MobDrops.spawnBiomes(level, e.getKey()).isEmpty() || nearbyPrey(Map.of(e.getKey(), 1.0))) {
+			if (!MobDrops.spawnBiomes(level, e.getKey()).isEmpty() || nearbyPrey(Map.of(e.getKey(), 1.0)) > 0) {
 				usable.put(e.getKey(), e.getValue());
 			}
 		}
@@ -875,34 +891,39 @@ public final class CraftPlanner {
 	/** Why an item can't be hunted here, shown only if it's actually considered. */
 	private final Map<Item, Component> huntProblem = new HashMap<>();
 
-	/** Fixed cost of a hunting trip: prey in sight, animals in a known biome, or waiting for monsters. */
-	private double huntCost(Map<EntityType<?>, Double> prey) {
-		if (nearbyPrey(prey)) {
-			return HUNT_NEARBY;
-		}
+	/**
+	 * Ticks to hunt {@code n} of something: the trip (prey in sight, animals in a known biome, or
+	 * waiting for monsters), then the kills it takes at its drop rate, the ones around first.
+	 */
+	private double huntCost(Map<EntityType<?>, Double> prey, double n) {
+		double perKill = Math.min(1.0, prey.values().stream().mapToDouble(Double::doubleValue).max().orElse(1.0));
+		double kills = n / Math.max(1e-3, perKill);
+		int around = nearbyPrey(prey);
 		boolean animals = prey.keySet().stream().anyMatch(t -> t.getCategory() != MobCategory.MONSTER);
-		return animals ? HUNT_IN_BIOME : HUNT_WAIT_FOR_SPAWN;
+		double trip = around > 0 ? HUNT_NEARBY : animals ? HUNT_IN_BIOME : HUNT_WAIT_FOR_SPAWN;
+		double near = Math.min(kills, around);
+		return trip + near * HUNT_PER_KILL + (kills - near) * (animals ? HUNT_PER_KILL_ANIMAL_AWAY : HUNT_PER_KILL_SPAWNING);
 	}
 
-	private boolean nearbyPrey(Map<EntityType<?>, Double> prey) {
+	/** How many of this prey are within 64 blocks. */
+	private int nearbyPrey(Map<EntityType<?>, Double> prey) {
 		if (nearbyTypes == null) {
 			// One look around per plan (it used to search for mobs every time a hunt was costed).
-			nearbyTypes = new HashSet<>();
+			nearbyTypes = new HashMap<>();
 			for (Mob m : level.getEntitiesOfClass(Mob.class, breaker.getBoundingBox().inflate(64),
 					m -> m.isAlive() && MobDrops.mayHunt(m))) {
-				nearbyTypes.add(m.getType());
+				nearbyTypes.merge(m.getType(), 1, Integer::sum);
 			}
 		}
+		int n = 0;
 		for (EntityType<?> type : prey.keySet()) {
-			if (nearbyTypes.contains(type)) {
-				return true;
-			}
+			n += nearbyTypes.getOrDefault(type, 0);
 		}
-		return false;
+		return n;
 	}
 
-	/** Kinds of huntable mobs within 64 blocks, looked up once per plan. */
-	private Set<EntityType<?>> nearbyTypes;
+	/** Huntable mobs within 64 blocks, by kind, looked up once per plan. */
+	private Map<EntityType<?>, Integer> nearbyTypes;
 
 	private static Map<Ingredient, Integer> group(List<Ingredient> ingredients) {
 		Map<Ingredient, Integer> grouped = new LinkedHashMap<>();

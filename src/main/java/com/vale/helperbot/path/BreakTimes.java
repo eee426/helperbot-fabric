@@ -11,13 +11,23 @@ public final class BreakTimes {
 	private BreakTimes() {
 	}
 
+	/**
+	 * Worn down to its last point: the bot never uses it (the next use would break the player's
+	 * tool), so it's as good as not there. The one rule for this, used by mining, tool choice and
+	 * the planner alike (the planner used to count it as a tool it had, planned no new one, and
+	 * the mining step then had nothing to mine with).
+	 */
+	public static boolean usedUp(ItemStack stack) {
+		return stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1;
+	}
+
 	/** Inventory slot (0-35) of the fastest tool for this block, or -1 to use the bare hand. */
 	public static int bestToolSlot(Inventory inventory, BlockState state) {
 		int best = -1;
 		float bestScore = score(ItemStack.EMPTY, state);
 		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
 			ItemStack stack = inventory.getItem(slot);
-			if (stack.isEmpty() || (stack.isDamageableItem() && stack.getDamageValue() >= stack.getMaxDamage() - 1)) {
+			if (stack.isEmpty() || usedUp(stack)) {
 				continue;
 			}
 			float s = score(stack, state);

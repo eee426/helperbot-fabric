@@ -60,8 +60,33 @@ public final class Scenarios {
 					PLAN_RESULT[0] = !plan.possible() ? "规划失败：" + plan.problems().stream().limit(4).map(x -> x.getString()).toList()
 							: ms > 500 ? "太慢：" + ms + " 毫秒，" + planner.stats()
 							: plan.actions().stream().noneMatch(x -> x instanceof CraftPlanner.Gather g && g.item() == Items.DIAMOND)
-							? "计划里没有挖钻石" : null;
-					PLAN_RESULT[1] = ms + " 毫秒，" + plan.actions().size() + " 步";
+							? "计划里没有挖钻石"
+							: plan.actions().stream().anyMatch(x -> x instanceof CraftPlanner.Hunt)
+							? "计划里要打怪（例如打僵尸掉铁锭，一个要打约 30 只）：" + plan.actions().stream()
+									.filter(x -> x instanceof CraftPlanner.Hunt).toList() : null;
+					PLAN_RESULT[1] = ms + " 毫秒，" + (plan.possible() ? plan.actions().size() : 0) + " 步";
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
+				new Scenario("C37", "镐都快坏了（耐久 1）还要钻石镐：规划里要先做新铁镐（只规划）", 20, (a, bot, me) -> {
+					a.tree(6, 6, 5);
+					a.tree(-7, 5, 5);
+					a.fill(3, 30, -3, 4, 31, -2, Blocks.IRON_ORE);
+					a.fill(-3, 32, 3, -2, 33, 4, Blocks.COAL_ORE);
+					a.fill(0, -40, 0, 1, -40, 1, Blocks.DIAMOND_ORE);
+					for (Item pick : List.of(Items.WOODEN_PICKAXE, Items.STONE_PICKAXE, Items.IRON_PICKAXE)) {
+						ItemStack worn = new ItemStack(pick);
+						worn.setDamageValue(worn.getMaxDamage() - 1);
+						bot.getInventory().add(worn);
+					}
+					give(bot, Items.BREAD, 16);
+					CraftPlanner planner = new CraftPlanner(a.level, bot, bot.getInventory(), new HashSet<>());
+					CraftPlanner.Plan plan = planner.plan(Items.DIAMOND_PICKAXE, 1, CraftPlanner.counts(bot.getInventory()));
+					PLAN_RESULT[0] = !plan.possible() ? "规划失败：" + plan.problems().stream().limit(4).map(x -> x.getString()).toList()
+							: plan.actions().stream().noneMatch(x -> x instanceof CraftPlanner.Craft c && c.recipe().result() == Items.IRON_PICKAXE)
+							? "计划里没有做新铁镐（把快坏的那把当成能用的了）"
+							: plan.actions().stream().anyMatch(x -> x instanceof CraftPlanner.Hunt) ? "计划里要打怪拿铁锭" : null;
+					PLAN_RESULT[1] = plan.possible() ? plan.actions().size() + " 步，含做新铁镐" : "";
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
