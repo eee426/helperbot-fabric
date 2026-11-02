@@ -155,7 +155,14 @@ public class GatherTask implements BotTask {
 		}
 		// Per item it gives, not per block: a dead bush (about a stick each) before leaves (1 in 50).
 		double perBlock = Math.max(0.01, Math.min(1.0, DropAnalysis.rate(item, state.getBlock())));
-		return (Math.sqrt(p.distSqr(bot.blockPosition())) * 5 + bestNeed) / perBlock;
+		double cost = (Math.sqrt(p.distSqr(bot.blockPosition())) * 5 + bestNeed) / perBlock;
+		// Experimental: like the path planner, prefer dry land (see LocalPathfinder#WATER_COST_FACTOR).
+		return inWater(level, p) ? cost * LocalPathfinder.WATER_COST_FACTOR : cost;
+	}
+
+	/** In or under water (as opposed to on dry land, or at the water's edge from the shore). */
+	private static boolean inWater(ServerLevel level, BlockPos p) {
+		return LocalPathfinder.isWater(level, p) || LocalPathfinder.isWater(level, p.above());
 	}
 
 	/** Most cells looked at along a tunnel (beyond that it's too far to dig anyway). */
@@ -390,9 +397,23 @@ public class GatherTask implements BotTask {
 		Escape escape = bot.movement().newEscape();
 		BlockPos best = null;
 		double bestCost = Double.MAX_VALUE;
+		// The nearest few; and if some of those are in water, also the nearest few on dry land, even
+		// if further away (otherwise a near patch under water always wins against plenty on land).
 		int checked = 0;
-		for (java.util.Iterator<BlockPos> it = targets.iterator(); it.hasNext() && checked < TARGETS_COMPARED; checked++) {
+		int dryChecked = 0;
+		boolean sawWater = false;
+		for (java.util.Iterator<BlockPos> it = targets.iterator(); it.hasNext()
+				&& (checked < TARGETS_COMPARED || (sawWater && dryChecked < TARGETS_COMPARED)); ) {
 			BlockPos p = it.next();
+			boolean wet = inWater(level, p);
+			if (checked >= TARGETS_COMPARED && wet) {
+				continue; // past the nearest few: only looking for dry ones now
+			}
+			checked++;
+			sawWater |= wet;
+			if (!wet) {
+				dryChecked++;
+			}
 			double cost = targetCost(bot, p, escape);
 			if (Double.isNaN(cost)) {
 				it.remove();
