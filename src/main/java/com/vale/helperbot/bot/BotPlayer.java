@@ -160,6 +160,23 @@ public class BotPlayer extends ServerPlayer {
 		return isGhost() || super.isSpectator();
 	}
 
+	/**
+	 * Invisible only from an invisibility potion. Vanilla also makes spectators invisible whenever
+	 * this runs (on joining, and when effects change), so a bot summoned inside a protected chunk
+	 * was invisible from then on, only its armour showing; one walking in wasn't (this didn't run).
+	 */
+	@Override
+	protected void updateInvisibilityStatus() {
+		if (isGhost() && !super.isSpectator()) {
+			if (getActiveEffects().isEmpty()) {
+				removeEffectParticles();
+			}
+			setInvisible(hasEffect(net.minecraft.world.effect.MobEffects.INVISIBILITY));
+			return;
+		}
+		super.updateInvisibilityStatus();
+	}
+
 	/** Players see it even as a ghost (vanilla doesn't send spectators to non-spectators at all). */
 	@Override
 	public boolean broadcastToPlayer(ServerPlayer viewer) {

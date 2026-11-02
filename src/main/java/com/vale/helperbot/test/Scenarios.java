@@ -197,6 +197,17 @@ public final class Scenarios {
 						}
 					}
 					ZONE_HUSK[0] = a.spawn(EntityType.HUSK, 30, Arena.SURFACE, 4);
+					// 1.21.11 husks may come armed (a spear) and with company (a camel, a parched): this
+					// scene is about the protected chunk, so just a plain husk, nothing else around.
+					if (ZONE_HUSK[0] instanceof net.minecraft.world.entity.Mob husk) {
+						husk.stopRiding();
+						husk.ejectPassengers();
+						husk.setItemSlot(net.minecraft.world.entity.EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+						for (net.minecraft.world.entity.Mob other : a.level.getEntitiesOfClass(net.minecraft.world.entity.Mob.class,
+								new net.minecraft.world.phys.AABB(a.at(-20, 0, -40).getCenter(), a.at(100, 80, 40).getCenter()), m -> m != husk)) {
+							other.discard();
+						}
+					}
 					ZONE_TARGETED[0] = 0;
 					me.teleportTo(a.level, a.origin.getX() + 70.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
 					// Outside the protected chunks it fights back as usual (a husk may come with company).
@@ -356,9 +367,20 @@ public final class Scenarios {
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
+				new Scenario("Z5", "在保护区块里召唤（或药水效果变化）：不会变隐身", 6 * 20, (a, bot, me) -> {
+					protect(a, 0, 0);
+					// Vanilla works out "invisible?" on joining and whenever effects change: a short effect
+					// coming and going inside the protected chunk sets that off, like being summoned there.
+					bot.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.SPEED, 40));
+					give(bot, Items.BREAD, 16);
+					return null;
+				}, c -> c.bot().isInvisible() ? Scenario.Outcome.fail("在保护区块里变成隐身了（只看得见装备）")
+						: c.ticks() >= 5 * 20 ? Scenario.Outcome.pass("效果加上、消失后都没隐身") : null),
+
 				new Scenario("C33", "白色地毯：做好的不拿去染色", 5 * MINUTE, (a, bot, me) -> {
 					for (int i = 0; i < 4; i++) {
-						a.spawn(EntityType.SHEEP, 6 + i, Arena.SURFACE, 4);
+						// White: spawned sheep get random colours, and only white ones drop white wool.
+						a.spawn(EntityType.SHEEP, 6 + i, Arena.SURFACE, 4).setColor(net.minecraft.world.item.DyeColor.WHITE);
 					}
 					give(bot, Items.IRON_SWORD, 1);
 					give(bot, Items.BREAD, 16);
