@@ -567,7 +567,13 @@ public class GatherTask implements BotTask {
 			BlockState blockerState = level.getBlockState(blocker);
 			if (toolFor.containsKey(blockerState.getBlock()) && DropAnalysis.dropsFrom(item, blockerState)
 					&& Guard.canHarvest(level, blocker, blockerState)) {
-				// The blocker is something we want too: take it instead.
+				// The blocker is something we want too: take it first, and the one behind it next
+				// (back on the list: it was taken off when picked, and used to be forgotten, leaving
+				// part of an ore vein behind).
+				if (!targets.contains(current)) {
+					targets.add(current);
+				}
+				targets.remove(blocker);
 				current = blocker;
 				currentBlock = blockerState.getBlock();
 				return Status.RUNNING;

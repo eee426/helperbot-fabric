@@ -5,6 +5,7 @@ import com.vale.helperbot.knowledge.CraftPlanner;
 import com.vale.helperbot.path.Mode;
 import com.vale.helperbot.task.AcquireTask;
 import com.vale.helperbot.task.ComeTask;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -110,6 +111,28 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.COBBLESTONE, 8, Mode.NORMAL);
 				}, Scenario.has(Items.COBBLESTONE, 8, c -> c.logHas("吃 ") && c.logCount("控制权") <= 60,
 						"没吃东西，或者控制权换手超过 60 次")),
+
+				new Scenario("T22", "挖 10 个钻石：一处 4 个的矿堆要挖干净再去下一处", 8 * MINUTE, (a, bot, me) -> {
+					a.fill(5, -50, 5, 6, -50, 6, Blocks.DEEPSLATE_DIAMOND_ORE); // 4, the nearer vein
+					a.fill(25, -50, 25, 28, -49, 25, Blocks.DEEPSLATE_DIAMOND_ORE); // 8, further off
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.DIAMOND, 10, Mode.NORMAL);
+				}, c -> {
+					int leftNear = 0;
+					for (BlockPos p : BlockPos.betweenClosed(c.arena().at(5, -50, 5), c.arena().at(6, -50, 6))) {
+						if (c.arena().level.getBlockState(p).is(Blocks.DEEPSLATE_DIAMOND_ORE)) {
+							leftNear++;
+						}
+					}
+					if (c.bot().getInventory().countItem(Items.DIAMOND) >= 10) {
+						return leftNear == 0 ? Scenario.Outcome.pass("拿到 10 个，近处矿堆挖干净了")
+								: Scenario.Outcome.fail("拿到 10 个，但近处矿堆还剩 " + leftNear + " 个");
+					}
+					return c.ended() ? Scenario.Outcome.fail("任务结束了，只有 " + c.bot().getInventory().countItem(Items.DIAMOND)
+							+ " 个；近处矿堆剩 " + leftNear + " 个") : null;
+				}),
 
 				new Scenario("C33", "白色地毯：做好的不拿去染色", 5 * MINUTE, (a, bot, me) -> {
 					for (int i = 0; i < 4; i++) {
