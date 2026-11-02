@@ -144,7 +144,9 @@ public class GatherTask implements BotTask {
 		if (Double.isNaN(bestNeed)) {
 			return Double.NaN;
 		}
-		return Math.sqrt(p.distSqr(bot.blockPosition())) * 5 + bestNeed;
+		// Per item it gives, not per block: a dead bush (about a stick each) before leaves (1 in 50).
+		double perBlock = Math.max(0.01, Math.min(1.0, DropAnalysis.rate(item, state.getBlock())));
+		return (Math.sqrt(p.distSqr(bot.blockPosition())) * 5 + bestNeed) / perBlock;
 	}
 
 	/** Blocks that drop the item with a tool we have, and the inventory slot (or HAND) to use. */

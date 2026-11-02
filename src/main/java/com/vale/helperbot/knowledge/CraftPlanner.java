@@ -96,11 +96,31 @@ public final class CraftPlanner {
 	private static final int SEARCH_BUDGET = 40_000;
 	private int budget = SEARCH_BUDGET;
 	/**
-	 * Safety net: planning runs on the server thread, so it never takes longer than this. Normally
-	 * a plan takes milliseconds; if this is ever hit, the best plan found so far is used (and logged).
+	 * Safety net only: planning runs on the server thread, so it never takes longer than this.
+	 * Normally a plan takes tens of milliseconds (a diamond pickaxe from an empty bag: ~70 ms, the
+	 * very first plan after start a few hundred while caches fill). If this is ever hit, the best
+	 * plan found so far is used and it's logged: that's a bug to look into, not a normal case.
 	 */
-	private static final long TIME_LIMIT_NANOS = 300_000_000L;
+	private static final long TIME_LIMIT_NANOS = 2_000_000_000L;
+	private long timeLimit = TIME_LIMIT_NANOS;
 	private long deadline;
+	/** Where the time went (nanoseconds), for {@link #stats()}. */
+	private long tScan, tRoute, tDrops, tHunt, tBiome;
+	private final Map<Item, Long> scanTimes = new HashMap<>();
+
+	/** For measuring: plan without the time limit. */
+	public CraftPlanner unlimited() {
+		timeLimit = Long.MAX_VALUE / 4;
+		return this;
+	}
+
+	/** Search nodes, and time spent looking at the world and at loot tables, of the last plan. */
+	public String stats() {
+		String slowest = scanTimes.entrySet().stream().sorted(Map.Entry.<Item, Long>comparingByValue().reversed()).limit(4)
+				.map(e -> e.getKey() + "=" + e.getValue() / 1_000_000).toList().toString();
+		return "节点 " + (SEARCH_BUDGET - budget) + "，扫描资源 " + scanTimes.size() + " 种 " + tScan / 1_000_000 + " ms " + slowest + "，估路线 " + tRoute / 1_000_000
+				+ " ms，掉落判断 " + tDrops / 1_000_000 + " ms，猎物 " + tHunt / 1_000_000 + " ms，群系 " + tBiome / 1_000_000 + " ms";
+	}
 	private boolean timedOut;
 	/**
 	 * What the plan is for. Never taken from the bag as an ingredient, fuel or anything else inside
@@ -157,7 +177,7 @@ public final class CraftPlanner {
 		Map<Item, Integer> inv = new HashMap<>(inventory);
 		inv.remove(item);
 		reserved = item;
-		deadline = System.nanoTime() + TIME_LIMIT_NANOS;
+		deadline = System.nanoTime() + timeLimit;
 		State state = new State(inv);
 		if (!acquire(state, item, count, 0, new HashSet<>())) {
 			if (timedOut) {
@@ -275,19 +295,37 @@ public final class CraftPlanner {
 				best = t;
 			}
 		}
+		// Recipes, cheapest-looking first (see estimate), and only those that could compete: a way
+		// estimated at more than SLACK times the cheapest isn't searched at all. Exploring every
+		// recipe of every ingredient used up the whole search budget even for a stone pickaxe.
+		List<Object> ways = new ArrayList<>();
+		Map<Object, Double> wayCost = new HashMap<>();
 		int tried = 0;
 		for (RecipeIndex.Craft craft : RecipeIndex.craftsFor(level, item)) {
 			if (tried++ >= MAX_RECIPES) {
 				break;
 			}
-			State t = s.copy();
-			if (craftInto(t, craft, n, depth, resolving, limit(best)) && (best == null || t.cost < best.cost)) {
-				best = t;
-			}
+			ways.add(craft);
+			wayCost.put(craft, craftEstimate(craft, depth) * n);
 		}
 		for (RecipeIndex.Smelt smelt : RecipeIndex.smeltsFor(level, item)) {
+			ways.add(smelt);
+			wayCost.put(smelt, smeltEstimate(smelt, depth) * n);
+		}
+		ways.sort(Comparator.comparingDouble(wayCost::get));
+		double cheapest = best == null ? Double.POSITIVE_INFINITY : best.cost - s.cost;
+		for (Object way : ways) {
+			cheapest = Math.min(cheapest, wayCost.get(way));
+		}
+		for (Object way : ways) {
+			if (best != null && wayCost.get(way) > SLACK * cheapest) {
+				break; // sorted: the rest look even worse
+			}
 			State t = s.copy();
-			if (smeltInto(t, smelt, n, depth, resolving, limit(best)) && (best == null || t.cost < best.cost)) {
+			boolean ok = way instanceof RecipeIndex.Craft craft
+					? craftInto(t, craft, n, depth, resolving, limit(best))
+					: smeltInto(t, (RecipeIndex.Smelt) way, n, depth, resolving, limit(best));
+			if (ok && (best == null || t.cost < best.cost)) {
 				best = t;
 			}
 		}
@@ -366,12 +404,7 @@ public final class CraftPlanner {
 		// Only a few alternatives get a full search, so try the likely-cheap ones: for "any wool but
 		// pink", white wool from a sheep, not black wool that first needs dyeing (the recipe lists
 		// white last).
-		List<Item> ranked = new ArrayList<>(options);
-		Map<Item, Double> quick = new HashMap<>();
-		for (Item option : ranked) {
-			quick.put(option, quickCost(option));
-		}
-		ranked.sort(Comparator.comparingDouble(quick::get));
+		List<Item> ranked = promising(options, depth);
 		State best = null;
 		int tried = 0;
 		for (Item option : ranked) {
@@ -449,14 +482,25 @@ public final class CraftPlanner {
 	 * bot happened to own one already). The tool is kept, not used up. False if none can be had.
 	 */
 	private boolean ensureGatherTool(State t, Item item, int depth, Set<Item> resolving) {
+		long started = System.nanoTime();
 		Map<Block, List<String>> candidates = DropAnalysis.candidates(level, breaker, item);
-		List<Item> tools = new ArrayList<>();
+		Map<Block, List<Item>> toolsFor = new LinkedHashMap<>();
+		boolean ready = false;
 		for (Block block : candidates.keySet()) {
 			if (DropAnalysis.handDrops(level, breaker, block, item)
 					|| DropAnalysis.toolSlotFor(level, breaker, realInventory, block, item) != DropAnalysis.NONE) {
-				return true;
+				ready = true;
+				break;
 			}
-			for (Item tool : DropAnalysis.toolItemsFor(level, breaker, block, item)) {
+			toolsFor.put(block, DropAnalysis.toolItemsFor(level, breaker, block, item));
+		}
+		tDrops += System.nanoTime() - started;
+		if (ready) {
+			return true;
+		}
+		List<Item> tools = new ArrayList<>();
+		for (List<Item> forBlock : toolsFor.values()) {
+			for (Item tool : forBlock) {
 				if (t.have(tool) > 0) {
 					return true;
 				}
@@ -472,7 +516,7 @@ public final class CraftPlanner {
 		}
 		State best = null;
 		int tried = 0;
-		for (Item tool : tools) {
+		for (Item tool : promising(tools, depth)) {
 			if (tried++ > MAX_ALTERNATIVES) {
 				break;
 			}
@@ -501,45 +545,59 @@ public final class CraftPlanner {
 	 * a trip to a biome that makes it, or NaN if none does (structures only, player-placed).
 	 */
 	private double gatherCost(Item item, int n, boolean quiet) {
-		double rate = Math.max(1e-3, gatherRate(item));
-		int blocks = (int) Math.ceil(n / rate);
 		List<BlockPos> found = sites(item);
 		if (found.isEmpty()) {
-			if (BiomeHints.biomesFor(level, sourceBlocks.get(item)).isEmpty()) {
+			long started = System.nanoTime();
+			boolean nowhere = BiomeHints.biomesFor(level, sourceBlocks.get(item)).isEmpty();
+			tBiome += System.nanoTime() - started;
+			if (nowhere) {
 				if (!quiet) problems.add(Component.literal("附近没有").append(name(item)).append("，也不知道该去哪找"));
 				return Double.NaN;
 			}
+			int blocks = (int) Math.ceil(n / Math.max(1e-3, gatherRate(item)));
 			return GATHER_IN_BIOME + GATHER_PER_ITEM * blocks;
 		}
-		int m = Math.min(blocks, found.size());
-		double cost = route(item, found)[m];
-		if (m < blocks) {
-			// More than there are nearby: assume the rest are as far apart again, and a bit worse.
-			cost += (blocks - m) * (cost / m) * 1.5;
+		Route r = route(item, found);
+		int all = found.size();
+		for (int k = 1; k <= all; k++) {
+			if (r.yield[k] >= n) {
+				return r.cost[k];
+			}
 		}
-		return cost;
+		// More than the nearby ones give: the rest at the same cost per item again, and a bit worse.
+		return r.cost[all] + (n - r.yield[all]) * (r.cost[all] / Math.max(1e-3, r.yield[all])) * 1.5;
+	}
+
+	/** Visiting the first k sources, nearest first: what that costs, and how many of the item it gives. */
+	private record Route(double[] cost, double[] yield) {
 	}
 
 	/**
-	 * Cost of visiting the first k sources, for every k: worked out once per item and plan. (It used
-	 * to be redone, columns of blocks counted again, every time an option was costed: thousands of
-	 * times for a dyed carpet, which froze the server for half a minute.)
+	 * {@link Route} for every k, worked out once per item and plan. (It used to be redone, columns
+	 * of blocks counted again, every time an option was costed: thousands of times for a dyed
+	 * carpet, which froze the server for half a minute.) Each source counts what its own block gives:
+	 * sticks are 1 per dead bush but 1 in 50 leaves (it used to count every source at the best
+	 * rate, so two leaves looked like two sticks, and it went for leaves instead of making sticks).
 	 */
-	private double[] route(Item item, List<BlockPos> found) {
+	private Route route(Item item, List<BlockPos> found) {
 		return routes.computeIfAbsent(item, i -> {
-			double[] prefix = new double[found.size() + 1];
+			long started = System.nanoTime();
+			double[] cost = new double[found.size() + 1];
+			double[] yield = new double[found.size() + 1];
 			BlockPos prev = breaker.blockPosition();
 			for (int k = 0; k < found.size(); k++) {
 				BlockPos p = found.get(k);
-				prefix[k + 1] = prefix[k] + Math.sqrt(prev.distSqr(p)) / WALK_SPEED
+				cost[k + 1] = cost[k] + Math.sqrt(prev.distSqr(p)) / WALK_SPEED
 						+ buried(p, sourceBlocks.get(item)) * DIG_PER_BLOCK + MINE_PER_BLOCK;
+				yield[k + 1] = yield[k] + DropAnalysis.rate(item, level.getBlockState(p).getBlock());
 				prev = p;
 			}
-			return prefix;
+			tRoute += System.nanoTime() - started;
+			return new Route(cost, yield);
 		});
 	}
 
-	private final Map<Item, double[]> routes = new HashMap<>();
+	private final Map<Item, Route> routes = new HashMap<>();
 
 	/** Expected items per broken block (capped at 1: a block giving several still takes a break). */
 	private double gatherRate(Item item) {
@@ -549,11 +607,16 @@ public final class CraftPlanner {
 
 	private List<BlockPos> sites(Item item) {
 		return sites.computeIfAbsent(item, i -> {
+			long started = System.nanoTime();
 			Set<Block> blocks = DropAnalysis.candidates(level, breaker, i).keySet();
 			sourceBlocks.put(i, blocks);
 			gatherRate.put(i, Math.min(1.0, DropAnalysis.bestRate(i, blocks)));
-			return BlockScanner.find(level, breaker.blockPosition(), NEARBY_CHUNKS,
+			List<BlockPos> found = BlockScanner.find(level, breaker.blockPosition(), NEARBY_CHUNKS,
 					state -> blocks.contains(state.getBlock()) && DropAnalysis.dropsFrom(i, state), p -> true, MAX_SITES);
+			long took = System.nanoTime() - started;
+			tScan += took;
+			scanTimes.put(i, took);
+			return found;
 		});
 	}
 
@@ -572,33 +635,192 @@ public final class CraftPlanner {
 		return solid;
 	}
 
-	/** Rough cost of getting one, without a full search: for ranking alternatives. */
-	private double quickCost(Item item) {
-		Double known = quickCosts.get(item);
-		if (known != null) {
-			return known;
+	// ---- estimates ----------------------------------------------------------------------
+
+	/**
+	 * Ways estimated at more than this many times the cheapest one aren't searched. Estimates leave
+	 * out what the bag already holds and stations shared between steps, hence the room.
+	 */
+	private static final double SLACK = 2.0;
+
+	/**
+	 * Estimated cost of one {@code item} from nothing: the cheapest of gathering it (with the tool
+	 * it needs), hunting it, or making it from the estimated cost of its ingredients, worked out
+	 * through the whole recipe graph once per plan. The full search uses it to try the likely-cheap
+	 * ways first and skip hopeless ones. (It used to rank everything that has to be made as one
+	 * flat "expensive" number, so it couldn't tell sticks-from-planks from sticks-from-leaves, and
+	 * searched every recipe of every ingredient until the search budget ran out.)
+	 */
+	private double estimate(Item item, int depth) {
+		if (!estimates.containsKey(item)) {
+			estimateFrom(item);
 		}
-		double best = Double.MAX_VALUE;
-		double gather = gatherable(item) ? gatherCost(item, 1, true) : Double.NaN;
-		if (!Double.isNaN(gather)) {
-			best = gather;
+		return estimates.get(item);
+	}
+
+	private final Map<Item, Double> estimates = new HashMap<>();
+
+	/**
+	 * Fills in {@link #estimates} for {@code root} and everything it could be made from: collect
+	 * that part of the recipe graph, then lower the estimates until nothing changes (recipes go in
+	 * circles, e.g. wool dyed from wool of another colour, so a single recursive pass would get
+	 * some of them wrong).
+	 */
+	private void estimateFrom(Item root) {
+		List<Item> items = new ArrayList<>();
+		java.util.ArrayDeque<Item> queue = new java.util.ArrayDeque<>();
+		queue.add(root);
+		for (Item extra : List.of(Items.CRAFTING_TABLE, Items.FURNACE)) {
+			queue.add(extra);
+		}
+		while (!queue.isEmpty()) {
+			Item item = queue.poll();
+			if (estimates.containsKey(item)) {
+				continue;
+			}
+			estimates.put(item, Double.POSITIVE_INFINITY);
+			items.add(item);
+			if (item == Items.WATER_BUCKET) {
+				queue.add(Items.BUCKET);
+			}
+			for (RecipeIndex.Craft craft : recipes(item)) {
+				for (Ingredient ingredient : craft.ingredients()) {
+					queue.addAll(RecipeIndex.options(ingredient));
+				}
+			}
+			for (RecipeIndex.Smelt smelt : RecipeIndex.smeltsFor(level, item)) {
+				queue.addAll(RecipeIndex.options(smelt.input()));
+			}
+			if (gatherable(item)) {
+				queue.addAll(gatherTools(item));
+			}
+		}
+		for (int round = 0; round < 64; round++) {
+			boolean changed = false;
+			for (Item item : items) {
+				double v = localEstimate(item);
+				if (v < estimates.get(item) - 1e-6) {
+					estimates.put(item, v);
+					changed = true;
+				}
+			}
+			if (!changed) {
+				break;
+			}
+		}
+	}
+
+	/** One item's estimate from the current estimates of what it's made from. */
+	private double localEstimate(Item item) {
+		double best = Double.POSITIVE_INFINITY;
+		if (gatherable(item)) {
+			double gather = gatherBase.computeIfAbsent(item, i -> {
+				double g = gatherCost(i, 1, true);
+				return Double.isNaN(g) ? Double.POSITIVE_INFINITY : g;
+			});
+			List<Item> tools = gatherTools(item);
+			double tool = tools.isEmpty() ? 0 : Double.POSITIVE_INFINITY;
+			for (Item t : tools) {
+				tool = Math.min(tool, estimates.getOrDefault(t, Double.POSITIVE_INFINITY));
+			}
+			best = gather + tool;
+		}
+		if (item == Items.WATER_BUCKET) {
+			best = Math.min(best, estimates.getOrDefault(Items.BUCKET, Double.POSITIVE_INFINITY) + FILL_FIXED + FILL_PER_ITEM);
 		}
 		Map<EntityType<?>, Double> prey = huntSources(item);
 		if (!prey.isEmpty()) {
-			best = Math.min(best, huntCost(prey));
+			double perKill = prey.values().stream().mapToDouble(Double::doubleValue).max().orElse(1.0);
+			best = Math.min(best, huntCost(prey) + HUNT_PER_KILL / Math.min(perKill, 1.0));
 		}
-		if (best == Double.MAX_VALUE
-				&& (!RecipeIndex.craftsFor(level, item).isEmpty() || !RecipeIndex.smeltsFor(level, item).isEmpty())) {
-			best = QUICK_COST_MADE; // has to be made, from who knows what
+		for (RecipeIndex.Craft craft : recipes(item)) {
+			best = Math.min(best, craftEstimate(craft, 0));
 		}
-		quickCosts.put(item, best);
+		for (RecipeIndex.Smelt smelt : RecipeIndex.smeltsFor(level, item)) {
+			best = Math.min(best, smeltEstimate(smelt, 0));
+		}
 		return best;
 	}
 
-	private final Map<Item, Double> quickCosts = new HashMap<>();
+	private final Map<Item, Double> gatherBase = new HashMap<>();
 
-	/** {@link #quickCost} of something that can only be crafted or smelted: after anything gatherable. */
-	private static final double QUICK_COST_MADE = 10_000;
+	/** The recipes the search would try for this item. */
+	private List<RecipeIndex.Craft> recipes(Item item) {
+		List<RecipeIndex.Craft> all = RecipeIndex.craftsFor(level, item);
+		return all.size() > MAX_RECIPES ? all.subList(0, MAX_RECIPES) : all;
+	}
+
+	/** Tools to make before gathering it; empty if the hand or something in the bag will do. */
+	private List<Item> gatherTools(Item item) {
+		return gatherTools.computeIfAbsent(item, i -> {
+			long started = System.nanoTime();
+			List<Item> tools = new ArrayList<>();
+			for (Block block : DropAnalysis.candidates(level, breaker, i).keySet()) {
+				if (DropAnalysis.handDrops(level, breaker, block, i)
+						|| DropAnalysis.toolSlotFor(level, breaker, realInventory, block, i) != DropAnalysis.NONE) {
+					tools.clear();
+					break;
+				}
+				for (Item tool : DropAnalysis.toolItemsFor(level, breaker, block, i)) {
+					if (!tools.contains(tool)) {
+						tools.add(tool);
+					}
+				}
+			}
+			tDrops += System.nanoTime() - started;
+			return tools;
+		});
+	}
+
+	private final Map<Item, List<Item>> gatherTools = new HashMap<>();
+
+	/** Per item made, from the current estimates of the ingredients. */
+	private double craftEstimate(RecipeIndex.Craft craft, int depth) {
+		double sum = CRAFT_PER_OP;
+		for (Map.Entry<Ingredient, Integer> e : group(craft.ingredients()).entrySet()) {
+			sum += e.getValue() * cheapestOption(e.getKey(), depth);
+		}
+		return sum / craft.resultCount();
+	}
+
+	/** Per item made (fuel left out: small next to the rest). */
+	private double smeltEstimate(RecipeIndex.Smelt smelt, int depth) {
+		return (cheapestOption(smelt.input(), depth) + SMELT_FIXED + smelt.cookingTime()) / smelt.resultCount();
+	}
+
+	private double cheapestOption(Ingredient ingredient, int depth) {
+		double best = Double.POSITIVE_INFINITY;
+		for (Item option : RecipeIndex.options(ingredient)) {
+			best = Math.min(best, estimate(option, depth + 1));
+		}
+		return best;
+	}
+
+	/**
+	 * Of these alternatives, the ones worth a full search, cheapest-looking first: within
+	 * {@link #SLACK} of the cheapest estimate (all of them, in the given order, if none can be
+	 * estimated).
+	 */
+	private List<Item> promising(List<Item> options, int depth) {
+		Map<Item, Double> est = new HashMap<>();
+		double cheapest = Double.POSITIVE_INFINITY;
+		for (Item option : options) {
+			double e = estimate(option, depth + 1);
+			est.put(option, e);
+			cheapest = Math.min(cheapest, e);
+		}
+		if (Double.isInfinite(cheapest)) {
+			return options;
+		}
+		List<Item> ranked = new ArrayList<>();
+		for (Item option : options) {
+			if (est.get(option) <= SLACK * cheapest) {
+				ranked.add(option);
+			}
+		}
+		ranked.sort(Comparator.comparingDouble(est::get));
+		return ranked;
+	}
 
 	/**
 	 * Mobs the bot could hunt for this item here: they drop it, and are either around already or
@@ -608,32 +830,42 @@ public final class CraftPlanner {
 		if (noGather.contains(item) || !(breaker instanceof Player killer)) {
 			return Map.of();
 		}
-		return huntSources.computeIfAbsent(item, i -> {
-			Map<EntityType<?>, Double> all = MobDrops.sources(level, killer, i);
-			Map<EntityType<?>, Double> usable = new HashMap<>();
-			for (Map.Entry<EntityType<?>, Double> e : all.entrySet()) {
-				if (!MobDrops.spawnBiomes(level, e.getKey()).isEmpty() || nearbyPrey(Map.of(e.getKey(), 1.0))) {
-					usable.put(e.getKey(), e.getValue());
+		Map<EntityType<?>, Double> known = huntSources.get(item);
+		if (known != null) {
+			return known;
+		}
+		long started = System.nanoTime();
+		Map<EntityType<?>, Double> found = findHuntSources(item, killer);
+		huntSources.put(item, found);
+		tHunt += System.nanoTime() - started;
+		return found;
+	}
+
+	private Map<EntityType<?>, Double> findHuntSources(Item item, Player killer) {
+		Map<EntityType<?>, Double> all = MobDrops.sources(level, killer, item);
+		Map<EntityType<?>, Double> usable = new HashMap<>();
+		for (Map.Entry<EntityType<?>, Double> e : all.entrySet()) {
+			if (!MobDrops.spawnBiomes(level, e.getKey()).isEmpty() || nearbyPrey(Map.of(e.getKey(), 1.0))) {
+				usable.put(e.getKey(), e.getValue());
+			}
+		}
+		if (usable.isEmpty() && !all.isEmpty()) {
+			// Phantoms, wither skeletons, guardians...: they need special conditions or structures.
+			net.minecraft.network.chat.MutableComponent who = Component.empty();
+			int n = 0;
+			for (EntityType<?> type : all.keySet()) {
+				if (n++ > 0) {
+					who.append("、");
+				}
+				who.append(type.getDescription());
+				if (n == 3) {
+					break;
 				}
 			}
-			if (usable.isEmpty() && !all.isEmpty()) {
-				// Phantoms, wither skeletons, guardians...: they need special conditions or structures.
-				net.minecraft.network.chat.MutableComponent who = Component.empty();
-				int n = 0;
-				for (EntityType<?> type : all.keySet()) {
-					if (n++ > 0) {
-						who.append("、");
-					}
-					who.append(type.getDescription());
-					if (n == 3) {
-						break;
-					}
-				}
-				huntProblem.put(i, Component.literal("掉").append(name(i)).append("的").append(who)
-						.append("不会在这里的群系里自然刷新（只在特殊条件或特定结构里出现），附近也没有"));
-			}
-			return usable;
-		});
+			huntProblem.put(item, Component.literal("掉").append(name(item)).append("的").append(who)
+					.append("不会在这里的群系里自然刷新（只在特殊条件或特定结构里出现），附近也没有"));
+		}
+		return usable;
 	}
 
 	/** Why an item can't be hunted here, shown only if it's actually considered. */

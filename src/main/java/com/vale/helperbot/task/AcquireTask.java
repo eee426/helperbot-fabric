@@ -26,6 +26,7 @@ public class AcquireTask implements BotTask {
 	private static final int MAX_STEPS = 80;
 	/** The same action failing to change anything this many times in a row means we're stuck. */
 	private static final int MAX_REPEATS = 3;
+	private static final int MAX_PROBLEMS_SHOWN = 4;
 
 	private enum Phase {
 		PLAN, GATHER, HUNT, FILL, CRAFT, SMELT, RETURN
@@ -175,23 +176,30 @@ public class AcquireTask implements BotTask {
 		// is never material for its own plan (it used to dye finished white carpets blue and back).
 		Map<Item, Integer> inventory = CraftPlanner.counts(bot.getInventory());
 		long started = System.nanoTime();
-		CraftPlanner.Plan plan = new CraftPlanner(bot.level(), bot, bot.getInventory(), noGather)
-				.plan(item, wanted - got, inventory);
+		CraftPlanner planner = new CraftPlanner(bot.level(), bot, bot.getInventory(), noGather);
+		CraftPlanner.Plan plan = planner.plan(item, wanted - got, inventory);
 		long ms = (System.nanoTime() - started) / 1_000_000;
 		if (plan.timedOut()) {
-			bot.log("规划超时（" + ms + " 毫秒），用目前找到的最好方案");
-			com.vale.helperbot.HelperBot.LOGGER.warn("HelperBot planning for {} hit the time limit ({} ms)", item, ms);
-		} else if (ms >= 50) {
-			bot.log("规划用了 " + ms + " 毫秒");
+			bot.log("规划超时（" + ms + " 毫秒），用目前找到的最好方案：" + planner.stats());
+			com.vale.helperbot.HelperBot.LOGGER.warn("HelperBot planning for {} hit the time limit ({} ms): {}", item, ms, planner.stats());
+		} else if (ms >= 100) {
+			bot.log("规划用了 " + ms + " 毫秒：" + planner.stats());
 		}
 		if (!plan.possible()) {
 			MutableComponent why = Component.literal("想不出怎么弄到").append(name(item));
 			if (lastFailure != null) {
 				why.append("（" + lastFailure + "）");
 			}
+			// The first few only: the search notes every dead end it looked at (it used to list dozens).
+			int shown = 0;
 			for (Component problem : plan.problems()) {
+				if (shown++ == MAX_PROBLEMS_SHOWN) {
+					why.append("；等 " + plan.problems().size() + " 条（完整的见 /bot log）");
+					break;
+				}
 				why.append("；").append(problem);
 			}
+			bot.log("想不出怎么弄到：" + plan.problems().stream().map(Component::getString).toList());
 			return giveUp(bot, why.getString());
 		}
 		List<CraftPlanner.Action> actions = plan.actions();

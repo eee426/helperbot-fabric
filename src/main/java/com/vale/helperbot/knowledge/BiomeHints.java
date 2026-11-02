@@ -32,12 +32,30 @@ public final class BiomeHints {
 	private BiomeHints() {
 	}
 
+	/**
+	 * Answers per set of blocks: world generation doesn't change while the server runs, and looking
+	 * through every biome's features takes a while (the planner asks about the same items over and
+	 * over: it used to redo it every time, most of a 20-second plan for a diamond pickaxe).
+	 */
+	private static final Map<Set<Block>, Set<Holder<Biome>>> ANSWERS = new java.util.HashMap<>();
+
 	public static void clearCache() {
 		FEATURE_JSON.clear();
+		ANSWERS.clear();
 	}
 
 	/** Biomes of this level that generate any of {@code blocks}; empty if none or unknown. */
 	public static Set<Holder<Biome>> biomesFor(ServerLevel level, Collection<Block> blocks) {
+		Set<Block> key = Set.copyOf(blocks);
+		Set<Holder<Biome>> known = ANSWERS.get(key);
+		if (known == null) {
+			known = Set.copyOf(search(level, key));
+			ANSWERS.put(key, known);
+		}
+		return known;
+	}
+
+	private static Set<Holder<Biome>> search(ServerLevel level, Collection<Block> blocks) {
 		Set<String> ids = new HashSet<>();
 		for (Block block : blocks) {
 			ids.add("\"" + BuiltInRegistries.BLOCK.getKey(block) + "\"");

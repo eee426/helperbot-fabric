@@ -48,6 +48,9 @@ public class HelperBot implements ModInitializer {
 			DropAnalysis.warmUp(server.overworld());
 			BiomeHints.biomesFor(server.overworld(), java.util.List.of()); // reads every world-gen feature once
 			LOGGER.info("HelperBot drop and biome indexes built in {} ms", (System.nanoTime() - start) / 1_000_000);
+			if (System.getenv("HELPERBOT_BENCH") != null) {
+				com.vale.helperbot.knowledge.PlanBench.run(server);
+			}
 			if (Rules.open()) {
 				LOGGER.warn("HelperBot is running with OPEN (beta test) rules: it may break and place any block. "
 						+ "Do not use on a real server before going through docs/LAUNCH_CHECKLIST.md.");
