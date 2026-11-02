@@ -472,7 +472,15 @@ public final class DropAnalysis {
 		if (known != null) {
 			return known;
 		}
-		boolean answer = roll(level, breaker, state, tool, item, Math.max(trials, sureTrials(rate(item, state.getBlock()))));
+		double rate = rate(item, state.getBlock());
+		int n = Math.max(trials, sureTrials(rate));
+		boolean answer = roll(level, breaker, state, tool, item, n);
+		if (!answer && rate < 1 && n < SURE_MAX_TRIALS) {
+			// A chance drop said no: the rate the trials were sized by is itself sampled, and can
+			// come out high (then too few trials). This answer is kept for good, so make sure: a
+			// wrong "no" once made the iron shovel useless for flint until the server restarted.
+			answer = roll(level, breaker, state, tool, item, SURE_MAX_TRIALS);
+		}
 		dropAnswers.put(key, answer);
 		return answer;
 	}

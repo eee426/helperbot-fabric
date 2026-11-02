@@ -134,6 +134,49 @@ public final class Scenarios {
 							+ " 个；近处矿堆剩 " + leftNear + " 个") : null;
 				}),
 
+				new Scenario("V1", "矿洞里 5 格外的钻石：直接挖过去，不先上地面", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(-1, 0, -1, 1, 2, 1, Blocks.AIR);
+					teleport(bot, a, 0, 0, 0);
+					a.set(5, 0, 0, Blocks.DIAMOND_ORE);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					MAX_Y[0] = Integer.MIN_VALUE;
+					return new AcquireTask(me, Items.DIAMOND, 1, Mode.NORMAL);
+				}, c -> {
+					MAX_Y[0] = Math.max(MAX_Y[0], c.bot().getBlockY());
+					if (MAX_Y[0] > 10) {
+						return Scenario.Outcome.fail("往上爬到了 y=" + MAX_Y[0] + "（钻石就在 5 格外）");
+					}
+					return c.bot().getInventory().countItem(Items.DIAMOND) >= 1 ? Scenario.Outcome.pass("直接挖过去拿到了，最高 y=" + MAX_Y[0])
+							: c.ended() ? Scenario.Outcome.fail("任务结束了没拿到") : null;
+				}),
+
+				new Scenario("V2", "矿洞里（y=0）回到 300 格外的你身边：先上地面跑，不一路挖隧道", 6 * MINUTE, (a, bot, me) -> {
+					a.fill(-1, 0, -1, 1, 2, 1, Blocks.AIR);
+					teleport(bot, a, 0, 0, 0);
+					me.teleportTo(a.level, a.origin.getX() + 300.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					MAX_Y[0] = Integer.MIN_VALUE;
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> {
+					MAX_Y[0] = Math.max(MAX_Y[0], c.bot().getBlockY());
+					int used = 999;
+					for (int i = 0; i < c.bot().getInventory().getContainerSize(); i++) {
+						if (c.bot().getInventory().getItem(i).is(Items.IRON_PICKAXE)) {
+							used = c.bot().getInventory().getItem(i).getDamageValue();
+						}
+					}
+					if (c.bot().position().distanceTo(c.arena().at(300, Arena.SURFACE, 0).getBottomCenter()) <= 3) {
+						return MAX_Y[0] >= Arena.SURFACE - 1 && used < 200
+								? Scenario.Outcome.pass("到了，上过地面，镐用了 " + used + " 点耐久")
+								: Scenario.Outcome.fail("到了，但最高只到 y=" + MAX_Y[0] + "，镐用了 " + used + " 点耐久（一路挖过去的）");
+					}
+					return c.ended() ? Scenario.Outcome.fail("任务结束了但没到（最高 y=" + MAX_Y[0] + "，镐用了 " + used + "）") : null;
+				}),
+
 				new Scenario("C33", "白色地毯：做好的不拿去染色", 5 * MINUTE, (a, bot, me) -> {
 					for (int i = 0; i < 4; i++) {
 						a.spawn(EntityType.SHEEP, 6 + i, Arena.SURFACE, 4);
@@ -309,6 +352,9 @@ public final class Scenarios {
 		a.fill(10, 41, -6, 20, 60, 6, Blocks.STONE);
 		a.set(10, 58, 0, Blocks.WATER);
 	}
+
+	/** Highest the bot got during a scene (V1, V2). */
+	private static final int[] MAX_Y = {Integer.MIN_VALUE};
 
 	/** Result of the plan-only scene: [0] failure reason or null, [1] description. */
 	private static final String[] PLAN_RESULT = new String[2];

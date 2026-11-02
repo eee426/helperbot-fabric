@@ -63,7 +63,7 @@ public final class LocalPathfinder {
 	private static final double PLAYER_HEIGHT = 1.8;
 	/** Extra ticks a jump takes over walking. */
 	private static final double ASCEND_EXTRA = 4.0;
-	private static final double BREAK_OVERHEAD = 3.0;
+	static final double BREAK_OVERHEAD = 3.0;
 	/** Feet height above the cell bottom when floating at a water surface. */
 	public static final double SWIM_FLOOR = 0.1;
 	/** Vanilla swimming speed is roughly 0.1-0.15 blocks/tick. */
@@ -188,6 +188,12 @@ public final class LocalPathfinder {
 	 */
 	private final boolean partial;
 	private final double heuristicWeight;
+	/**
+	 * What's left beyond the window. Only for partial searches: there it decides which edge of the
+	 * window to head for (up to the surface to run, or on through the rock). Searches that can see
+	 * the target keep plain running distance, which never overestimates.
+	 */
+	private final TravelEstimate travel;
 
 	private final PriorityQueue<Node> open = new PriorityQueue<>();
 	/**
@@ -242,6 +248,7 @@ public final class LocalPathfinder {
 				? Math.max(Math.abs(target.getX() - start.getX()), Math.abs(target.getZ() - start.getZ())) > limits.radiusXZ()
 				: !inWindow(target);
 		this.heuristicWeight = partial ? PARTIAL_HEURISTIC_WEIGHT : 1.0;
+		this.travel = new TravelEstimate(level, inventory, mode, target, horizontalOnly);
 
 		// Starting with the head in air counts as a full breath: the bot tops up before diving.
 		int startAir = Air.breathable(level, start) ? air.full() : air.now();
@@ -416,10 +423,7 @@ public final class LocalPathfinder {
 	}
 
 	private double heuristic(BlockPos pos) {
-		double dx = pos.getX() - target.getX();
-		double dz = pos.getZ() - target.getZ();
-		double dy = horizontalOnly ? 0 : pos.getY() - target.getY();
-		return Math.sqrt(dx * dx + dy * dy + dz * dz) * walkCost;
+		return partial ? travel.ticks(pos) : travel.straight(pos);
 	}
 
 	private static Result reconstruct(Node node, boolean reachesGoal) {
@@ -833,8 +837,16 @@ public final class LocalPathfinder {
 		}
 		double real = (ticks + BREAK_OVERHEAD + fallers) * penalty;
 		digTicks += real;
-		return real * mode.digCostFactor + Guard.breakRiskCost(level, pos);
+		return real * mode.digCostFactor + wear(pos) + Guard.breakRiskCost(level, pos);
 	}
+
+	/** Tool wear of digging this cell (a preference, not time: see {@link BreakTimes#wearCost}). */
+	private double wear(BlockPos pos) {
+		BlockState state = level.getBlockState(pos);
+		return wearCache.computeIfAbsent(state, s -> BreakTimes.wearCost(inventory, s));
+	}
+
+	private final java.util.Map<BlockState, Double> wearCache = new java.util.HashMap<>();
 
 	private boolean nearLava(BlockPos feet) {
 		long key = feet.asLong();

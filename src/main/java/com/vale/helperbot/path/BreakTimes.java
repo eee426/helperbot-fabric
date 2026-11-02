@@ -39,6 +39,24 @@ public final class BreakTimes {
 		return best;
 	}
 
+	/**
+	 * What a tool is worth, in ticks of work to replace it, spread over its uses: each block it
+	 * mines costs this over its durability. Small on purpose (tools aren't dear in survival, and the
+	 * player gave them): about 2 ticks a block with an iron pickaxe, under half one with diamond.
+	 * Enough that a long tunnel isn't free next to walking, not enough to steer short digs.
+	 */
+	private static final double REPLACE_TICKS = 600;
+
+	/** Wear, in ticks, of mining {@code state} once with the tool that would be used for it. */
+	public static double wearCost(Inventory inventory, BlockState state) {
+		int slot = bestToolSlot(inventory, state);
+		if (slot < 0) {
+			return 0;
+		}
+		ItemStack tool = inventory.getItem(slot);
+		return tool.isDamageableItem() && tool.getMaxDamage() > 0 ? REPLACE_TICKS / tool.getMaxDamage() : 0;
+	}
+
 	private static float score(ItemStack stack, BlockState state) {
 		boolean correct = !state.requiresCorrectToolForDrops() || stack.isCorrectToolForDrops(state);
 		return Math.max(1f, stack.getDestroySpeed(state)) / (correct ? 30f : 100f);

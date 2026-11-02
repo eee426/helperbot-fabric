@@ -9,6 +9,7 @@ import com.vale.helperbot.path.BuildingBlocks;
 import com.vale.helperbot.path.LocalPathfinder;
 import com.vale.helperbot.path.Mode;
 import com.vale.helperbot.path.PathStep;
+import com.vale.helperbot.path.TravelEstimate;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -675,7 +676,7 @@ public final class MovementController {
 			return;
 		}
 		BlockPos here = bot.blockPosition();
-		double distance = Math.sqrt(horizontalOnly ? here.distSqr(target.atY(here.getY())) : here.distSqr(target));
+		double distance = remaining(here);
 		if (distance < bestDistance - 0.5) {
 			bestDistance = distance;
 			ticksWithoutProgress = 0;
@@ -694,6 +695,24 @@ public final class MovementController {
 				fail("用最大搜索范围也没能靠近目标，可能在原地绕圈");
 			}
 		}
+	}
+
+	private TravelEstimate travel;
+	private BlockPos travelTarget;
+	private boolean travelHorizontal;
+
+	/**
+	 * How far it still is, in blocks of running, by the same estimate the planner steers by (see
+	 * {@link TravelEstimate}): climbing out of a mine on a long trip counts as getting closer. By
+	 * straight-line distance it didn't, and a long climb looked like being stuck.
+	 */
+	private double remaining(BlockPos here) {
+		if (travel == null || !target.equals(travelTarget) || horizontalOnly != travelHorizontal) {
+			travel = new TravelEstimate(bot.level(), bot.getInventory(), mode, target, horizontalOnly);
+			travelTarget = target;
+			travelHorizontal = horizontalOnly;
+		}
+		return travel.ticks(here) * mode.speed();
 	}
 
 	/** If the bot hasn't moved at all (and isn't mining), drop to the ground and plan again. */
