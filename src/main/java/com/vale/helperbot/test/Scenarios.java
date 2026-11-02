@@ -38,6 +38,19 @@ public final class Scenarios {
 				}, c -> c.bot().position().distanceTo(c.arena().at(25, Arena.SURFACE, 0).getBottomCenter()) <= 3
 						? Scenario.Outcome.pass("到了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null),
 
+				// The same ravine in the other two modes (S1 is normal): safe must not jump down, it
+				// bridges or goes round; aggressive may do what it likes. Both must get there.
+				ravine("S1s", "安全模式：跨过沟走到你身边", Mode.SAFE),
+				ravine("S1a", "激进模式：跨过沟走到你身边", Mode.AGGRESSIVE),
+
+				new Scenario("C35s", "安全模式：空背包做石镐", 10 * MINUTE, (a, bot, me) -> {
+					a.tree(6, 6, 5);
+					a.tree(-7, 5, 5);
+					a.tree(5, -8, 6);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.STONE_PICKAXE, 1, Mode.SAFE);
+				}, Scenario.has(Items.STONE_PICKAXE, 1)),
+
 				new Scenario("C35", "空背包做石镐（木棍要用木板做）", 10 * MINUTE, (a, bot, me) -> {
 					a.tree(6, 6, 5);
 					a.tree(-7, 5, 5);
@@ -519,6 +532,18 @@ public final class Scenarios {
 	private static void cliffWithWaterfall(Arena a) {
 		a.fill(10, 41, -6, 20, 60, 6, Blocks.STONE);
 		a.set(10, 58, 0, Blocks.WATER);
+	}
+
+	/** S1 (a ravine 4 wide and 20 deep between the bot and you) in a given mode. */
+	private static Scenario ravine(String id, String title, Mode mode) {
+		return new Scenario(id, title, 2 * MINUTE, (a, bot, me) -> {
+			a.fill(10, 20, -6, 13, 40, 6, Blocks.AIR);
+			me.teleportTo(a.level, a.origin.getX() + 25.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+			give(bot, Items.COBBLESTONE, 32);
+			give(bot, Items.BREAD, 16);
+			return new ComeTask(me, mode);
+		}, c -> c.bot().position().distanceTo(c.arena().at(25, Arena.SURFACE, 0).getBottomCenter()) <= 3
+				? Scenario.Outcome.pass("到了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null);
 	}
 
 	private static final net.minecraft.world.entity.Entity[] ZONE_HUSK = new net.minecraft.world.entity.Entity[1];

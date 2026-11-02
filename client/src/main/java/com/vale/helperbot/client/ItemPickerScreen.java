@@ -24,20 +24,33 @@ import java.util.Set;
  * blocks, natural blocks, tools, food...), so other mods' items show up too; a search box looks
  * through all of them. Touching an item only selects it; "下一步" goes on to how many. (Going on
  * at the first touch made a finger jump straight through to "send to the bot?".)
+ *
+ * <p>Scrolling works by finger: drag the list up and down (a touch that moves is a drag, one that
+ * doesn't selects), or the thick bar on the right (drag it, or touch where to go). The mouse wheel
+ * still works too.
  */
 public class ItemPickerScreen extends TouchScreen {
 	private static final int CELL = 24;
+	/** Width of the scroll bar: thick enough for a thumb. */
+	private static final int BAR = 16;
+	/** Movement (screen pixels) under which a touch on the list counts as a tap, not a drag. */
+	private static final double TAP_SLOP = 6;
 
 	private final Screen parent;
 	private final List<CreativeModeTab> tabs = new ArrayList<>();
 	private int tab;
 	private EditBox search;
 	private List<ItemStack> shown = List.of();
-	private int page;
+	/** First row shown. */
+	private int scroll;
 	private ItemStack picked;
-	private Button next, prevPage, nextPage;
-	// Grid area, worked out in init().
-	private int gridX, gridY, cols, rows;
+	private Button next, up, down;
+	// Grid and bar areas, worked out in init().
+	private int gridX, gridY, cols, rows, barX;
+	// A touch in progress: on the list (tap or drag), or on the bar.
+	private boolean onList, onBar, dragging;
+	private double pressX, pressY, moved;
+	private int scrollAtPress;
 
 	public ItemPickerScreen(Screen parent) {
 		super(Component.literal("获取物品"));
@@ -78,13 +91,14 @@ public class ItemPickerScreen extends TouchScreen {
 		// Two rows of buttons at the bottom, the selected item's name just above them.
 		int bottom = height - 6 - 2 * rowH;
 		gridY = y;
-		cols = Math.max(1, w / CELL);
+		cols = Math.max(1, (w - BAR - GAP) / CELL);
 		rows = Math.max(1, (bottom - 14 - gridY) / CELL);
-		gridX = x + (w - cols * CELL) / 2;
-		Button[] pages = row(x, bottom, w, h, new String[]{"上一页", "下一页"},
-				new Runnable[]{() -> turn(-1), () -> turn(1)});
-		prevPage = pages[0];
-		nextPage = pages[1];
+		gridX = x;
+		barX = x + w - BAR;
+		Button[] pages = row(x, bottom, w, h, new String[]{"▲ 往上", "▼ 往下"},
+				new Runnable[]{() -> scrollTo(scroll - rows), () -> scrollTo(scroll + rows)});
+		up = pages[0];
+		down = pages[1];
 		Button[] last = row(x, bottom + rowH, w, h, new String[]{"§a下一步：选数量", "返回"},
 				new Runnable[]{this::goOn, () -> minecraft.setScreen(parent)});
 		next = last[0];
@@ -100,8 +114,8 @@ public class ItemPickerScreen extends TouchScreen {
 		refresh();
 	}
 
-	private void turn(int d) {
-		page = Math.max(0, Math.min(maxPage(), page + d));
+	private void scrollTo(int row) {
+		scroll = Math.max(0, Math.min(maxScroll(), row));
 		updateButtons();
 	}
 
@@ -123,7 +137,7 @@ public class ItemPickerScreen extends TouchScreen {
 	}
 
 	private void refresh() {
-		page = 0;
+		scroll = 0;
 		String q = search == null ? "" : search.getValue().trim().toLowerCase(Locale.ROOT);
 		if (q.isEmpty()) {
 			shown = tabs.isEmpty() ? List.of() : items(tabs.get(tab));
@@ -148,17 +162,43 @@ public class ItemPickerScreen extends TouchScreen {
 	private void updateButtons() {
 		if (next != null) {
 			next.active = picked != null;
-			prevPage.active = page > 0;
-			nextPage.active = page < maxPage();
+			up.active = scroll > 0;
+			down.active = scroll < maxScroll();
 		}
 	}
 
-	private int perPage() {
-		return rows * cols;
+	private int totalRows() {
+		return (shown.size() + cols - 1) / cols;
 	}
 
-	private int maxPage() {
-		return Math.max(0, (shown.size() - 1) / perPage());
+	private int maxScroll() {
+		return Math.max(0, totalRows() - rows);
+	}
+
+	// ---- the scroll bar ---------------------------------------------------------------------
+
+	private int trackHeight() {
+		return rows * CELL;
+	}
+
+	private int thumbHeight() {
+		int total = Math.max(1, totalRows());
+		return Math.max(24, Math.min(trackHeight(), trackHeight() * rows / total));
+	}
+
+	private int thumbY() {
+		int room = trackHeight() - thumbHeight();
+		return gridY + (maxScroll() == 0 ? 0 : room * scroll / maxScroll());
+	}
+
+	/** Scrolls so the thumb is centred on screen height {@code y}. */
+	private void scrollToBar(double y) {
+		int room = trackHeight() - thumbHeight();
+		if (room <= 0) {
+			return;
+		}
+		double f = (y - gridY - thumbHeight() / 2.0) / room;
+		scrollTo((int) Math.round(f * maxScroll()));
 	}
 
 	@Override
@@ -166,9 +206,9 @@ public class ItemPickerScreen extends TouchScreen {
 		super.render(g, mouseX, mouseY, partialTick);
 		int rowH = rowHeight(height / 6, 1);
 		String heading = search.getValue().isBlank() && !tabs.isEmpty() ? tabs.get(tab).getDisplayName().getString() : "搜索结果";
-		g.drawCenteredString(font, heading + "（" + (page + 1) + "/" + (maxPage() + 1) + " 页）", width / 2, 6 + (rowH - GAP) / 2 - 4, 0xFFFFFFFF);
-		for (int i = 0; i < perPage(); i++) {
-			int index = page * perPage() + i;
+		g.drawCenteredString(font, heading + "（" + shown.size() + " 个）", width / 2, 6 + (rowH - GAP) / 2 - 4, 0xFFFFFFFF);
+		for (int i = 0; i < rows * cols; i++) {
+			int index = scroll * cols + i;
 			if (index >= shown.size()) {
 				break;
 			}
@@ -181,9 +221,24 @@ public class ItemPickerScreen extends TouchScreen {
 		if (shown.isEmpty()) {
 			g.drawCenteredString(font, "没有找到", width / 2, gridY + 8, 0xFFAAAAAA);
 		}
+		// The bar: a dark track, a light thumb.
+		g.fill(barX, gridY, barX + BAR, gridY + trackHeight(), 0x60000000);
+		if (maxScroll() > 0) {
+			int ty = thumbY();
+			g.fill(barX + 2, ty, barX + BAR - 2, ty + thumbHeight(), onBar ? 0xFFFFFFFF : 0xFFB0B0B0);
+		}
 		int bottom = height - 6 - 2 * rowH;
-		g.drawCenteredString(font, picked == null ? "点一个物品选中它，再按\"下一步\"" : "已选：" + picked.getHoverName().getString(),
+		g.drawCenteredString(font, picked == null ? "点一个物品选中它，再按\"下一步\"；上下拖动列表或右边的滑条翻看"
+						: "已选：" + picked.getHoverName().getString(),
 				width / 2, bottom - 11, picked == null ? 0xFFAAAAAA : 0xFFFFFF80);
+	}
+
+	private boolean inList(double x, double y) {
+		return x >= gridX && x < gridX + cols * CELL && y >= gridY && y < gridY + rows * CELL;
+	}
+
+	private boolean inBar(double x, double y) {
+		return x >= barX - 4 && x < barX + BAR + 4 && y >= gridY && y < gridY + trackHeight();
 	}
 
 	@Override
@@ -192,21 +247,71 @@ public class ItemPickerScreen extends TouchScreen {
 			return true;
 		}
 		double mx = event.x(), my = event.y();
-		if (mx >= gridX && mx < gridX + cols * CELL && my >= gridY && my < gridY + rows * CELL) {
-			int i = ((int) (my - gridY) / CELL) * cols + (int) (mx - gridX) / CELL;
-			int index = page * perPage() + i;
-			if (index < shown.size()) {
-				picked = shown.get(index).copy(); // select only: going on is the button's job
-				updateButtons();
-			}
+		if (inBar(mx, my)) {
+			onBar = true;
+			scrollToBar(my);
+			return true;
+		}
+		if (inList(mx, my)) {
+			onList = true;
+			dragging = false;
+			moved = 0;
+			pressX = mx;
+			pressY = my;
+			scrollAtPress = scroll;
 			return true;
 		}
 		return super.mouseClicked(event, doubleClick);
 	}
 
 	@Override
+	public boolean mouseDragged(MouseButtonEvent event, double dx, double dy) {
+		if (onBar) {
+			scrollToBar(event.y());
+			return true;
+		}
+		if (onList) {
+			moved += Math.abs(dx) + Math.abs(dy);
+			if (moved > TAP_SLOP) {
+				dragging = true;
+			}
+			if (dragging) {
+				// The list follows the finger: drag up to see further down.
+				scrollTo(scrollAtPress - (int) Math.round((event.y() - pressY) / CELL));
+			}
+			return true;
+		}
+		return super.mouseDragged(event, dx, dy);
+	}
+
+	@Override
+	public boolean mouseReleased(MouseButtonEvent event) {
+		if (onBar) {
+			onBar = false;
+			return true;
+		}
+		if (onList) {
+			onList = false;
+			if (!dragging) {
+				select(pressX, pressY);
+			}
+			return true;
+		}
+		return super.mouseReleased(event);
+	}
+
+	private void select(double mx, double my) {
+		int i = ((int) (my - gridY) / CELL) * cols + (int) (mx - gridX) / CELL;
+		int index = scroll * cols + i;
+		if (index < shown.size()) {
+			picked = shown.get(index).copy(); // select only: going on is the button's job
+			updateButtons();
+		}
+	}
+
+	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
-		turn(scrollY > 0 ? -1 : 1);
+		scrollTo(scroll + (scrollY > 0 ? -1 : 1));
 		return true;
 	}
 }
