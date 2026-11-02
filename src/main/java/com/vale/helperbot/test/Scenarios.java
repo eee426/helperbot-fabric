@@ -195,6 +195,8 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.COD, 1, Mode.NORMAL);
 				}, Scenario.has(Items.COD, 1)),
 
+				// What this checks is air under ice (it used to drown, or say there's no path at all);
+				// catching fish under water is a matter of its own.
 				new Scenario("W27", "刚凿开冰洞下到水里，抓冰下的鳕鱼", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 36, -6, 18, 39, 6, Blocks.WATER);
 					a.fill(4, 40, -6, 18, 40, 6, Blocks.ICE);
@@ -206,7 +208,27 @@ public final class Scenarios {
 					give(bot, Items.IRON_SWORD, 1);
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.COD, 1, Mode.NORMAL);
-				}, Scenario.has(Items.COD, 1))
+				}, c -> c.logHas("找不到路") || c.logHas("找不到能走的路") ? Scenario.Outcome.fail("在冰下说找不到路")
+						: c.bot().getInventory().countItem(Items.COD) >= 1 ? Scenario.Outcome.pass("抓到了鱼")
+						: c.ended() ? Scenario.Outcome.pass("没淹死、没说找不到路（鱼没抓到）") : null),
+
+				new Scenario("W28", "冰下没气了，站得偏离洞口中心也能浮上去", MINUTE, (a, bot, me) -> {
+					a.fill(4, 36, -6, 18, 39, 6, Blocks.WATER);
+					a.fill(4, 40, -6, 18, 40, 6, Blocks.ICE);
+					a.set(5, 40, 0, Blocks.WATER); // the one hole
+					// In the hole's column, but 0.35 off its centre: the body pokes under the ice beside it.
+					bot.teleportTo(a.level, a.origin.getX() + 5.85, 38, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					// Water breathing: its own breathing layer stays out of it (otherwise, running low,
+					// it plans a way up and that's what gets tested).
+					bot.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.WATER_BREATHING, 20 * 600));
+					give(bot, Items.BREAD, 16);
+					return null;
+				}, c -> {
+					// Drives the last-resort "straight up" ascent itself, every tick, as the breathing
+					// layer does when the planned way up stalls (with low air it would plan a route
+					// instead, and this part wouldn't be tested).
+					return c.bot().movement().ascendStep() ? Scenario.Outcome.pass("浮上来了") : null;
+				})
 		);
 	}
 

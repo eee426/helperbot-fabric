@@ -659,7 +659,10 @@ public final class MovementController {
 		}
 		if (++emptyPlans >= MAX_EMPTY_PLANS) {
 			int r = levels[levels.length - 1].radiusXZ();
-			fail("方圆 " + r + " 格内都找不到能走的路（被保护区、岩浆、太高的墙挡住，或者没有方块可以搭路）");
+			// Under water the usual reason is air: nowhere it could go and still get back up in time.
+			fail(headUnderwater() && !ignoreAir
+					? "在水下，一口气能去又能回来换气的地方里找不到路（离换气的出口太远，或者头顶要挖的太慢）"
+					: "方圆 " + r + " 格内都找不到能走的路（被保护区、岩浆、太高的墙挡住，或者没有方块可以搭路）");
 		}
 	}
 
@@ -1642,10 +1645,15 @@ public final class MovementController {
 		return n;
 	}
 
+	/** Off a column's centre by at most this (per axis), the 0.6 wide body fits inside it. */
+	private static final double IN_COLUMN = 0.18;
+
 	/**
-	 * One tick of getting to air: swim straight up; under a ceiling, sidestep towards a nearby
-	 * column that's open upwards; with none, dig through the ceiling. Works while paused. Returns
-	 * true once the head is out of the water (then it just floats at the surface).
+	 * One tick of getting to air: swim straight up; under a ceiling, sidestep towards the nearest
+	 * column that's open upwards (its own one too: off its centre, the body is partly under the
+	 * next column's ceiling, e.g. the ice beside the hole it just made); with none, dig through
+	 * the ceiling. Works while paused. Returns true once the head is out of the water (then it
+	 * just floats at the surface).
 	 */
 	public boolean ascendStep() {
 		ServerLevel level = bot.level();
@@ -1658,7 +1666,7 @@ public final class MovementController {
 		}
 		BlockPos f = feet();
 		BlockPos best = null;
-		for (int r = 1; r <= 4 && best == null; r++) {
+		for (int r = 0; r <= 4 && best == null; r++) {
 			for (int dx = -r; dx <= r; dx++) {
 				for (int dz = -r; dz <= r; dz++) {
 					if (Math.max(Math.abs(dx), Math.abs(dz)) != r) {
@@ -1675,14 +1683,22 @@ public final class MovementController {
 		if (best != null) {
 			double dx = best.getX() + 0.5 - bot.getX(), dz = best.getZ() + 0.5 - bot.getZ();
 			double len = Math.sqrt(dx * dx + dz * dz);
-			double s = LocalPathfinder.SWIM_SPEED;
-			// Can't get over there (something in between): dig up instead of trying forever.
-			if (tryMove(dx / len * s, 0, dz / len * s) || tryMove(dx / len * s, 0, 0) || tryMove(0, 0, dz / len * s)) {
+			if (Math.abs(dx) > IN_COLUMN || Math.abs(dz) > IN_COLUMN) {
+				double s = Math.min(LocalPathfinder.SWIM_SPEED, len);
+				// Can't get over there (something in between): dig up instead of trying forever.
+				if (tryMove(dx / len * s, 0, dz / len * s) || tryMove(dx / len * s, 0, 0) || tryMove(0, 0, dz / len * s)) {
+					return false;
+				}
+			}
+		}
+		// The ceiling over its own column: the first cell above the head that isn't open.
+		for (int k = 1; k <= 3; k++) {
+			BlockPos c = f.above(k);
+			if (!swimmable(level, c)) {
+				mineTarget(c, level.getBlockState(c).getBlock(), AUTO_TOOL, true);
 				return false;
 			}
 		}
-		BlockPos ceiling = BlockPos.containing(bot.getX(), bot.getBoundingBox().maxY + 0.1, bot.getZ());
-		mineTarget(ceiling, level.getBlockState(ceiling).getBlock(), AUTO_TOOL, true);
 		return false;
 	}
 

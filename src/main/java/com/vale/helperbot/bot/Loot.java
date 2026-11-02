@@ -219,12 +219,16 @@ public final class Loot {
 
 	private BlockPos aimedCell;
 
-	/** Nearest drop to go for now. With the head under water only close ones: the rest come up. */
+	/**
+	 * Nearest drop to go for now. With the head under water only close ones: the rest come up.
+	 * The one it's already after stays wanted though: going under and coming up (or the drop
+	 * drifting) mustn't switch it between "go for it" and "nothing to collect" every few ticks.
+	 */
 	private ItemEntity nextDrop() {
 		boolean underwater = bot.movement().headUnderwater();
 		ItemEntity best = null;
 		for (ItemEntity e : tracked()) {
-			if (underwater && bot.distanceTo(e) > UNDERWATER_REACH) {
+			if (underwater && bot.distanceTo(e) > UNDERWATER_REACH && !e.getUUID().equals(aimedAt)) {
 				continue;
 			}
 			if (best == null || bot.distanceToSqr(e) < bot.distanceToSqr(best)) {
@@ -238,7 +242,9 @@ public final class Loot {
 		collecting = false;
 		aimedAt = null;
 		aimedCell = null;
-		aimTicks.clear();
+		// Time spent on each drop is kept (it used to be reset here, so a drop it kept going back
+		// and forth over was never given up on): only forget the ones that are gone.
+		aimTicks.keySet().removeIf(id -> !(bot.level().getEntity(id) instanceof ItemEntity i) || !i.isAlive());
 		bot.log(why);
 		bot.movement().disengage();
 	}

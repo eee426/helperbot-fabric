@@ -2,27 +2,32 @@ package com.vale.helperbot.path;
 
 import com.vale.helperbot.guard.Guard;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 
-import java.util.ArrayDeque;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.Arrays;
+import java.util.PriorityQueue;
 
 /**
- * How long from a spot under water until the head is out: swim a little sideways (to a better
- * column) and then straight up, digging through whatever is overhead at the real under-water
- * mining speed. A block dug under water lets the water in, so the way up stays wet until it
- * reaches air; a column of sand or gravel counts block by block (each falls into the gap).
+ * How long from a spot under water until the head is out: swim sideways (to a column with a
+ * better way up: open water, the hole it came down through) and then straight up, digging through
+ * whatever is overhead at the real under-water mining speed. A block dug under water lets the
+ * water in, so the way up stays wet until it reaches air; a column of sand or gravel counts block
+ * by block (each falls into the gap).
  *
- * <p>One instance memoises per column, so it's cheap to ask about many cells (the planner does).
+ * <p>The sideways part is a shortest-path field per layer, built for a tile of columns at a time
+ * (plus a margin, so ways up just across the tile's edge count too): under ice or a cave ceiling
+ * the nearest opening can be well away, and a player swims back to it rather than digging up.
+ * One instance memoises everything, so it's cheap to ask about many cells (the planner does).
  */
 public final class Escape {
-	/** How far sideways it looks for a better way up. */
-	private static final int SIDE_RADIUS = 3;
+	/** Columns per tile side, and how far past its edges a tile's field looks for ways up. */
+	private static final int TILE = 16, MARGIN = 12;
+	private static final int SIZE = TILE + 2 * MARGIN;
 	/** Give up looking up after this many blocks (deeper than any ocean). */
 	private static final int MAX_UP = 64;
 	private static final double UP_TICKS = 1 / Air.SWIM_UP_SPEED;
@@ -33,6 +38,8 @@ public final class Escape {
 	private final double waterDigFactor;
 	private final Long2DoubleOpenHashMap upMemo = new Long2DoubleOpenHashMap();
 	private final Long2DoubleOpenHashMap memo = new Long2DoubleOpenHashMap();
+	/** Per tile and layer: ticks to air from each cell, swimming sideways first (no standing start). */
+	private final Long2ObjectOpenHashMap<double[]> fields = new Long2ObjectOpenHashMap<>();
 
 	public Escape(Level level, Inventory inventory, double waterDigFactor) {
 		this.level = level;
@@ -49,35 +56,74 @@ public final class Escape {
 		if (!Double.isNaN(cached)) {
 			return cached;
 		}
-		double best = Double.POSITIVE_INFINITY;
-		if (!wet(feet.above())) {
-			best = 0;
-		} else {
-			// Breadth-first through open water at this level, then up from each column reached.
-			Map<BlockPos, Integer> dist = new HashMap<>();
-			ArrayDeque<BlockPos> queue = new ArrayDeque<>();
-			dist.put(feet, 0);
-			queue.add(feet);
-			while (!queue.isEmpty()) {
-				BlockPos c = queue.poll();
-				int d = dist.get(c);
-				best = Math.min(best, d * SIDE_TICKS + up(c, d == 0));
-				if (d * SIDE_TICKS >= best) {
-					continue;
-				}
-				for (Direction dir : Direction.Plane.HORIZONTAL) {
-					BlockPos n = c.relative(dir);
-					if (Math.max(Math.abs(n.getX() - feet.getX()), Math.abs(n.getZ() - feet.getZ())) > SIDE_RADIUS
-							|| dist.containsKey(n) || !open(n) || !open(n.above())) {
-						continue;
-					}
-					dist.put(n, d + 1);
-					queue.add(n);
-				}
+		double best = 0;
+		if (wet(feet.above())) {
+			// Straight up from here (maybe standing on something while digging the first block),
+			// or sideways first: from here, or from a neighbour (here may be too tight to swim in).
+			best = Math.min(up(feet, true), field(feet));
+			for (Direction dir : Direction.Plane.HORIZONTAL) {
+				best = Math.min(best, SIDE_TICKS + field(feet.relative(dir)));
 			}
 		}
 		memo.put(key, best);
 		return best;
+	}
+
+	private double field(BlockPos pos) {
+		int tx = Math.floorDiv(pos.getX(), TILE), tz = Math.floorDiv(pos.getZ(), TILE);
+		long key = BlockPos.asLong(tx, pos.getY(), tz);
+		double[] f = fields.get(key);
+		if (f == null) {
+			f = buildField(tx, pos.getY(), tz);
+			fields.put(key, f);
+		}
+		int x0 = tx * TILE - MARGIN, z0 = tz * TILE - MARGIN;
+		return f[(pos.getX() - x0) * SIZE + (pos.getZ() - z0)];
+	}
+
+	/** Dijkstra over the open water of one layer, seeded with each column's way straight up. */
+	private double[] buildField(int tx, int y, int tz) {
+		int x0 = tx * TILE - MARGIN, z0 = tz * TILE - MARGIN;
+		double[] f = new double[SIZE * SIZE];
+		Arrays.fill(f, Double.POSITIVE_INFINITY);
+		boolean[] swim = new boolean[SIZE * SIZE];
+		PriorityQueue<double[]> queue = new PriorityQueue<>((a, b) -> Double.compare(a[0], b[0]));
+		BlockPos.MutableBlockPos c = new BlockPos.MutableBlockPos();
+		for (int i = 0; i < SIZE; i++) {
+			for (int j = 0; j < SIZE; j++) {
+				c.set(x0 + i, y, z0 + j);
+				if (!open(c) || !open(c.above())) {
+					continue;
+				}
+				int idx = i * SIZE + j;
+				swim[idx] = true;
+				f[idx] = up(c.immutable(), false);
+				if (f[idx] < Double.POSITIVE_INFINITY) {
+					queue.add(new double[]{f[idx], idx});
+				}
+			}
+		}
+		while (!queue.isEmpty()) {
+			double[] e = queue.poll();
+			int idx = (int) e[1];
+			if (e[0] > f[idx]) {
+				continue;
+			}
+			int i = idx / SIZE, j = idx % SIZE;
+			int[][] next = {{i + 1, j}, {i - 1, j}, {i, j + 1}, {i, j - 1}};
+			for (int[] n : next) {
+				if (n[0] < 0 || n[0] >= SIZE || n[1] < 0 || n[1] >= SIZE) {
+					continue;
+				}
+				int nIdx = n[0] * SIZE + n[1];
+				double cost = e[0] + SIDE_TICKS;
+				if (swim[nIdx] && cost < f[nIdx]) {
+					f[nIdx] = cost;
+					queue.add(new double[]{cost, nIdx});
+				}
+			}
+		}
+		return f;
 	}
 
 	/** Straight up from feet in {@code feet}. {@code start}: still where it started (maybe standing on something). */
@@ -87,6 +133,7 @@ public final class Escape {
 		if (!Double.isNaN(cached)) {
 			return cached;
 		}
+		// Only a block right over its head is dug standing: once it swims up, it's floating.
 		boolean grounded = start && LocalPathfinder.isSupport(level, feet.below());
 		double t = 0;
 		BlockPos head = feet.above();
@@ -104,8 +151,8 @@ public final class Escape {
 				}
 				// Under water it mines 5x slower, and 5x again once floating (vanilla).
 				t += dig * waterDigFactor * (grounded ? 1 : 5);
-				grounded = false;
 			}
+			grounded = false;
 			t += UP_TICKS;
 			head = next;
 		}
