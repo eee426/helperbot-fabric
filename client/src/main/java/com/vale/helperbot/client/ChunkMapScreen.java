@@ -2,8 +2,15 @@ package com.vale.helperbot.client;
 
 import com.mojang.blaze3d.platform.NativeImage;
 import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.renderer.block.model.BlockModelPart;
 import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.core.Direction;
 import net.minecraft.resources.Identifier;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -29,8 +36,10 @@ public class ChunkMapScreen extends TouchScreen {
 	private static final int QUERY_RADIUS = 32;
 	/** Movement (screen pixels) under which a touch counts as a tap, not a drag. */
 	private static final double TAP_SLOP = 6;
-	/** Screen pixels per chunk: from a wide view down to 6 pixels a block. */
-	private static final int[] ZOOMS = {8, 16, 32, 48, 64, 96};
+	/** Screen pixels per chunk: from a wide view down to 16 pixels a block. */
+	private static final int[] ZOOMS = {8, 16, 32, 48, 64, 96, 128, 192, 256};
+	/** From this many screen pixels a block, each block is drawn with its own texture. */
+	private static final int TEXTURED_FROM = 8;
 	private static final int UNLOADED = 0xFF2A2A2A;
 	private static final Identifier TEXTURE = Identifier.fromNamespaceAndPath("helperbotclient", "chunk_map");
 	/** Chunks sent per /bot protect chunks command. */
@@ -45,6 +54,21 @@ public class ChunkMapScreen extends TouchScreen {
 	 */
 	private DynamicTexture image;
 	private int imageX, imageZ, imageChunks;
+	/**
+	 * Close up, what each column looks like from above: the top block's own texture (a chest
+	 * reads as a chest, not as "brown" like on the vanilla map). Worked out when first drawn.
+	 */
+	private final it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<Column> columns = new it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap<>();
+	private final RandomSource random = RandomSource.create();
+
+	/**
+	 * One column seen from above. {@code under}: drawn first when the top block doesn't fill its
+	 * cell (a torch, a carpet, a pressure plate on the floor). {@code item}: for blocks drawn by a
+	 * special renderer (chests, signs, beds...), whose model has nothing to show. {@code shade}:
+	 * lighter or darker by the height step, like the vanilla map.
+	 */
+	private record Column(TextureAtlasSprite top, int topTint, TextureAtlasSprite under, int underTint, ItemStack item, int shade) {
+	}
 	private double viewX, viewZ;
 	private int zoom = 2;
 	private int mapX0, mapY0, mapX1, mapY1;
@@ -207,7 +231,10 @@ public class ChunkMapScreen extends TouchScreen {
 		int cx0 = (int) Math.floor(viewX - (midX - mapX0) / size) - 1, cx1 = (int) Math.ceil(viewX + (mapX1 - midX) / size) + 1;
 		int cz0 = (int) Math.floor(viewZ - (midY - mapY0) / size) - 1, cz1 = (int) Math.ceil(viewZ + (mapY1 - midY) / size) + 1;
 		g.fill(mapX0, mapY0, mapX1, mapY1, UNLOADED);
-		if (image != null) {
+		int blockPx = size / 16;
+		if (blockPx >= TEXTURED_FROM) {
+			drawBlocks(g, size, midX, midY);
+		} else if (image != null) {
 			// The whole ground image, scaled; the scissor keeps it inside the map.
 			int ix0 = (int) Math.round(midX + (imageX - viewX) * size), iz0 = (int) Math.round(midY + (imageZ - viewZ) * size);
 			g.blit(TEXTURE, ix0, iz0, ix0 + imageChunks * size, iz0 + imageChunks * size, 0f, 1f, 0f, 1f);
@@ -239,6 +266,117 @@ public class ChunkMapScreen extends TouchScreen {
 		if (!ClientZones.answered()) {
 			g.drawCenteredString(font, "等服务器回复……（服务器要装 Helper Bot 才行）", width / 2, mapY0 + 4, 0xFFFFC060);
 		}
+	}
+
+	/** Close up: every block in view with its own texture, seen from above. */
+	private void drawBlocks(GuiGraphics g, int chunkPx, double midX, double midY) {
+		int px = chunkPx / 16;
+		double bx = viewX * 16, bz = viewZ * 16;
+		int x0 = (int) Math.floor(bx - (midX - mapX0) / px) - 1, x1 = (int) Math.ceil(bx + (mapX1 - midX) / px) + 1;
+		int z0 = (int) Math.floor(bz - (midY - mapY0) / px) - 1, z1 = (int) Math.ceil(bz + (mapY1 - midY) / px) + 1;
+		for (int x = x0; x <= x1; x++) {
+			for (int z = z0; z <= z1; z++) {
+				Column c = column(x, z);
+				if (c == null) {
+					continue;
+				}
+				int sx = (int) Math.round(midX + (x - bx) * px), sy = (int) Math.round(midY + (z - bz) * px);
+				if (c.under() != null) {
+					g.blitSprite(RenderPipelines.GUI_TEXTURED, c.under(), sx, sy, px, px, c.underTint());
+				}
+				if (c.top() != null) {
+					g.blitSprite(RenderPipelines.GUI_TEXTURED, c.top(), sx, sy, px, px, c.topTint());
+				}
+				if (!c.item().isEmpty()) {
+					g.pose().pushMatrix();
+					g.pose().translate(sx, sy);
+					g.pose().scale(px / 16f, px / 16f);
+					g.renderItem(c.item(), 0, 0);
+					g.pose().popMatrix();
+				}
+				if (c.shade() != 0) {
+					g.fill(sx, sy, sx + px, sy + px, c.shade());
+				}
+			}
+		}
+	}
+
+	/** What column (x, z) looks like from above, or null if its chunk isn't loaded. */
+	private Column column(int x, int z) {
+		long key = BlockPos.asLong(x, 0, z);
+		Column cached = columns.get(key);
+		if (cached != null) {
+			return cached;
+		}
+		ClientLevel level = minecraft.level;
+		if (level == null || !level.getChunkSource().hasChunk(x >> 4, z >> 4)) {
+			return null;
+		}
+		int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
+		BlockPos pos = new BlockPos(x, y, z);
+		BlockState state = level.getBlockState(pos);
+		TextureAtlasSprite top = null, under = null;
+		int topTint = -1, underTint = -1;
+		ItemStack item = ItemStack.EMPTY;
+		TintedSprite face = topFace(level, state, pos);
+		if (face == null) {
+			// Drawn by a special renderer (chest, sign, bed...): show it as its item.
+			item = new ItemStack(state.getBlock().asItem());
+		} else {
+			top = face.sprite();
+			topTint = face.tint();
+		}
+		if (face == null || !state.isCollisionShapeFullBlock(level, pos)) {
+			// Doesn't fill its cell (torch, carpet, plate, a chest's corners): the floor shows round it.
+			BlockPos below = pos.below();
+			TintedSprite floor = topFace(level, level.getBlockState(below), below);
+			if (floor != null) {
+				under = floor.sprite();
+				underTint = floor.tint();
+			}
+		}
+		int north = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z - 1) - 1;
+		int shade = y > north ? 0x28FFFFFF : y < north ? 0x40000000 : 0;
+		Column c = new Column(top, topTint, under, underTint, item, shade);
+		columns.put(key, c);
+		return c;
+	}
+
+	private record TintedSprite(TextureAtlasSprite sprite, int tint) {
+	}
+
+	/**
+	 * The texture on top of this block, coloured the way it's drawn in the world (grass and leaves
+	 * by biome). Its upward face; for plants and the like, which have no such face, whatever the
+	 * model has. Null if the model is empty (drawn by a special renderer, or air).
+	 */
+	private TintedSprite topFace(ClientLevel level, BlockState state, BlockPos pos) {
+		if (state.isAir()) {
+			return null;
+		}
+		random.setSeed(state.getSeed(pos));
+		BakedQuad quad = null;
+		for (BlockModelPart part : minecraft.getBlockRenderer().getBlockModel(state).collectParts(random)) {
+			for (Direction d : new Direction[]{Direction.UP, null}) {
+				var quads = part.getQuads(d);
+				if (!quads.isEmpty()) {
+					quad = quads.getFirst();
+					break;
+				}
+			}
+			if (quad != null) {
+				break;
+			}
+		}
+		if (quad == null) {
+			return state.getFluidState().isEmpty() ? null
+					: new TintedSprite(minecraft.getBlockRenderer().getBlockModel(state).particleIcon(), tint(level, state, pos, 0));
+		}
+		return new TintedSprite(quad.sprite(), quad.isTinted() ? tint(level, state, pos, quad.tintIndex()) : -1);
+	}
+
+	private int tint(ClientLevel level, BlockState state, BlockPos pos, int index) {
+		return 0xFF000000 | minecraft.getBlockColors().getColor(state, level, pos, index);
 	}
 
 	private static void border(GuiGraphics g, int x, int y, int size, int t, int colour) {
