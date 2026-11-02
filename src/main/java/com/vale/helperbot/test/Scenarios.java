@@ -186,6 +186,8 @@ public final class Scenarios {
 					ZONE_HUSK[0] = a.spawn(EntityType.HUSK, 30, Arena.SURFACE, 4);
 					ZONE_TARGETED[0] = 0;
 					me.teleportTo(a.level, a.origin.getX() + 70.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					// Outside the protected chunks it fights back as usual (a husk may come with company).
+					give(bot, Items.IRON_SWORD, 1);
 					give(bot, Items.BREAD, 16);
 					return new ComeTask(me, Mode.NORMAL);
 				}, c -> {
@@ -230,6 +232,35 @@ public final class Scenarios {
 					}
 					return c.bot().getInventory().countItem(Items.COBBLESTONE) >= 4 ? Scenario.Outcome.pass("在外面挖的，里面没动")
 							: c.ended() ? Scenario.Outcome.fail("任务结束了没拿到") : null;
+				}),
+
+				new Scenario("Z4", "保护区块里站上压力板、走进绊线：都不触发（区块外的压力板作对照，必须触发）", 30 * 20, (a, bot, me) -> {
+					protect(a, 8, 0);
+					a.set(8, Arena.SURFACE, 0, Blocks.STONE_PRESSURE_PLATE);
+					a.set(8, Arena.SURFACE, 3, Blocks.TRIPWIRE);
+					a.set(40, Arena.SURFACE, 0, Blocks.STONE_PRESSURE_PLATE); // outside: the control
+					teleport(bot, a, 8, Arena.SURFACE, 0);
+					give(bot, Items.BREAD, 16);
+					ZONE_COUNT[0] = 0;
+					return null;
+				}, c -> {
+					Arena a = c.arena();
+					int t = ++ZONE_COUNT[0];
+					boolean plate = a.level.getBlockState(a.at(8, Arena.SURFACE, 0)).getValue(net.minecraft.world.level.block.PressurePlateBlock.POWERED);
+					boolean wire = a.level.getBlockState(a.at(8, Arena.SURFACE, 3)).getValue(net.minecraft.world.level.block.TripWireBlock.POWERED);
+					if (plate || wire) {
+						return Scenario.Outcome.fail("在保护区块里触发了" + (plate ? "压力板" : "绊线"));
+					}
+					if (t == 60) {
+						teleport(c.bot(), a, 8, Arena.SURFACE, 3); // into the tripwire
+					} else if (t == 120) {
+						teleport(c.bot(), a, 40, Arena.SURFACE, 0); // onto the plate outside
+					} else if (t > 140) {
+						boolean control = a.level.getBlockState(a.at(40, Arena.SURFACE, 0)).getValue(net.minecraft.world.level.block.PressurePlateBlock.POWERED);
+						return control ? Scenario.Outcome.pass("区块里压力板、绊线都没触发；区块外的压力板触发了（对照正常）")
+								: Scenario.Outcome.fail("对照失败：区块外的压力板也没触发，这个测试测不出东西");
+					}
+					return null;
 				}),
 
 				new Scenario("C33", "白色地毯：做好的不拿去染色", 5 * MINUTE, (a, bot, me) -> {

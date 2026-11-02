@@ -117,25 +117,61 @@ public class BotPlayer extends ServerPlayer {
 	private boolean ghost;
 
 	/**
-	 * In a protected chunk (a base) the bot is a ghost: vanilla spectator mode, so pressure plates,
-	 * tripwires and sculk sensors don't notice it, mobs don't target it, pistons, water and players
-	 * don't push it, and it picks nothing up. It still walks by its own collision rules (see
-	 * MovementController), so it doesn't go through walls: it only passes through, the way a player
-	 * would, without setting anything off. Only players decide where that is; outside it's back to
-	 * survival.
+	 * In a protected chunk (a base) the bot is a ghost: to the server it counts as a spectator, so
+	 * everything vanilla does for spectators applies (pressure plates, tripwires and sculk sensors
+	 * don't notice it, mobs don't target it, nothing pushes it, it picks nothing up). It stays in
+	 * survival mode though, so players' clients still see and draw it (a real spectator is hidden
+	 * from them), and it still walks by its own collision rules (see MovementController): it
+	 * doesn't go through walls, it only passes through without setting anything off. Only players
+	 * decide where that is.
 	 */
 	private void updateGhost() {
-		boolean inZone = com.vale.helperbot.guard.ProtectionZones.isProtected(level(), blockPosition());
+		boolean inZone = isGhost();
 		if (inZone == ghost) {
 			return;
 		}
-		ghost = inZone;
-		setGameMode(inZone ? net.minecraft.world.level.GameType.SPECTATOR : net.minecraft.world.level.GameType.SURVIVAL);
+		ghost = inZone; // only for the log: isGhost() is what counts
 		log(inZone ? "进入保护区块：灵魂状态（只路过，不碰任何东西，不触发机关，不被怪盯上）" : "离开保护区块，恢复正常");
 	}
 
+	/**
+	 * Any part of it in a protected chunk, worked out whenever asked: vanilla checks what it stands
+	 * on (a pressure plate) before this class gets its turn in the tick, so a flag updated once a
+	 * tick was a tick late, and the first plate past the edge of a protected chunk got pressed.
+	 */
 	public boolean isGhost() {
-		return ghost;
+		var level = level();
+		if (level == null) {
+			return false;
+		}
+		net.minecraft.world.phys.AABB box = getBoundingBox();
+		for (double x : new double[]{box.minX, box.maxX}) {
+			for (double z : new double[]{box.minZ, box.maxZ}) {
+				if (com.vale.helperbot.guard.ProtectionZones.isProtected(level, BlockPos.containing(x, box.minY, z))) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	@Override
+	public boolean isSpectator() {
+		return isGhost() || super.isSpectator();
+	}
+
+	/** Players see it even as a ghost (vanilla doesn't send spectators to non-spectators at all). */
+	@Override
+	public boolean broadcastToPlayer(ServerPlayer viewer) {
+		return isGhost() || super.broadcastToPlayer(viewer);
+	}
+
+	/** A ghost hits nothing (a spectator's "attack" would be looking through the target's eyes). */
+	@Override
+	public void attack(net.minecraft.world.entity.Entity target) {
+		if (!isGhost()) {
+			super.attack(target);
+		}
 	}
 
 	// ---- who's in charge ----------------------------------------------------------------
@@ -379,7 +415,7 @@ public class BotPlayer extends ServerPlayer {
 
 	/** Ranged attackers within range first (they keep shooting), else melee mobs within reach. */
 	private Mob pickThreat() {
-		if (ghost) {
+		if (isGhost()) {
 			return null; // nothing targets a ghost, and it hits nothing (a spectator's attack is "look through")
 		}
 		List<Mob> threats = level().getEntitiesOfClass(Mob.class, getBoundingBox().inflate(RANGED_ENGAGE_RANGE),
