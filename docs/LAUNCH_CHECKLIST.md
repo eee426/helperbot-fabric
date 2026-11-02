@@ -67,6 +67,7 @@
 | 🟢 | 找水扫描 | 附近 48 格扫描一次，在主线程上 | 观察有没有卡顿 | `task/FetchWaterTask.java#nearestWater` |
 | 🟢 | 掉落分析 | 服务器启动时（以及 `/reload` 后）一次性模拟所有方块的战利品表，建成总索引，日志里会打印耗时；之后查询只是查表 | 在云服务器上看一眼启动日志里的耗时 | `knowledge/DropAnalysis.java` |
 | 🟡 | 合成规划 | 每一步之后都会重新规划，单次规划最多探索 4 万个节点、最多 2 秒（只是保险；正常几十毫秒，开服后第一次几百毫秒。超时用目前最好的方案，并写进服务器日志）；用时超过 100 毫秒会把耗时明细记进 `/bot log`。开发时可设环境变量 `HELPERBOT_BENCH` 跑规划基准（`knowledge/PlanBench.java`） | 观察复杂物品（比如染色的东西）规划时有没有卡顿；日志里有没有"planning … hit the time limit" | `knowledge/CraftPlanner.java` |
+| 🟡 | 开发用的测试入口 | 环境变量 `HELPERBOT_BENCH`（规划基准）和 `HELPERBOT_SCENARIOS`（自动测试场景，会造地形、召唤机器人、加速游戏、跑完关服）。没设这两个变量时完全不起作用 | 确认正式服务器上没设这两个变量；或者上线前把 `test` 包移出正式 jar | `knowledge/PlanBench.java`、`test/` |
 | 🟡 | 机器人日志写进服务器日志 | 机器人的每条行动日志都以 INFO 级别写进 latest.log（方便查罕见 bug） | 多个机器人时日志量会很大：改成 DEBUG 级别或加开关 | `bot/BotPlayer.java#log` |
 | 🟡 | 采集远程搜索 | 和取水一样：1 万格内找群系；找不到就在周围最多约 480 格内绕圈探索 | 同"远程搜索"那一条 | `task/GatherTask.java` |
 | 🟡 | 掉落物 | 会捡起**所有**同名物品，不管是谁的（比如玩家扔在地上的） | strict 下只捡自己刚挖出来的掉落物 | `task/GatherTask.java#collect` |

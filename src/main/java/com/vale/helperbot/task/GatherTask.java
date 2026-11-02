@@ -301,6 +301,7 @@ public class GatherTask implements BotTask {
 
 	private Status find(BotPlayer bot) {
 		targets = scan(bot, SCAN_CHUNKS);
+		bot.log("附近扫描到 " + targets.size() + " 处" + itemName().getString() + "（不算已放弃的 " + (rejected.size() + unreachable.size()) + " 处）");
 		if (!targets.isEmpty()) {
 			return nextTarget(bot);
 		}
@@ -349,6 +350,7 @@ public class GatherTask implements BotTask {
 			if (Double.isNaN(cost)) {
 				it.remove();
 				unreachable.add(p);
+				bot.log(p.toShortString() + " 判断为够不着（附近没有能站着伸手够到它的位置，或者一口气不够），跳过");
 				continue;
 			}
 			if (cost < bestCost) {

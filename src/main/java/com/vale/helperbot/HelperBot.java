@@ -51,6 +51,7 @@ public class HelperBot implements ModInitializer {
 			if (System.getenv("HELPERBOT_BENCH") != null) {
 				com.vale.helperbot.knowledge.PlanBench.run(server);
 			}
+			com.vale.helperbot.test.ScenarioRunner.startIfRequested(server);
 			if (Rules.open()) {
 				LOGGER.warn("HelperBot is running with OPEN (beta test) rules: it may break and place any block. "
 						+ "Do not use on a real server before going through docs/LAUNCH_CHECKLIST.md.");

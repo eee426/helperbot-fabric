@@ -91,6 +91,7 @@ public class BotPlayer extends ServerPlayer {
 		if (task != null) {
 			BotTask.Status status = task.tick(this);
 			if (status != BotTask.Status.RUNNING) {
+				lastTaskStatus = status;
 				task.onEnd(this, status);
 				task = null;
 				movement.stop();
@@ -487,6 +488,13 @@ public class BotPlayer extends ServerPlayer {
 		return task;
 	}
 
+	/** How the last task that ended by itself ended (for the test scenarios). */
+	private BotTask.Status lastTaskStatus;
+
+	public BotTask.Status lastTaskStatus() {
+		return lastTaskStatus;
+	}
+
 	public MovementController movement() {
 		return movement;
 	}
@@ -612,7 +620,13 @@ public class BotPlayer extends ServerPlayer {
 		// Also into the server log (latest.log): the in-memory one is gone once the bot dies or is
 		// removed, which is exactly when a rare bug needs looking into.
 		com.vale.helperbot.HelperBot.LOGGER.info("[{}] {}", getGameProfile().name(), event);
+		if (logTap != null) {
+			logTap.accept(event);
+		}
 	}
+
+	/** Test scenarios listen in on the log (see com.vale.helperbot.test). */
+	public static java.util.function.Consumer<String> logTap;
 
 	public java.util.List<String> recentLog(int n) {
 		java.util.List<String> all = new java.util.ArrayList<>(log);
@@ -627,6 +641,9 @@ public class BotPlayer extends ServerPlayer {
 	public void say(ServerPlayer to, Component message) {
 		if (to != null && !to.hasDisconnected()) {
 			to.sendSystemMessage(Component.literal("[" + getGameProfile().name() + "] ").append(message));
+		}
+		if (logTap != null) {
+			logTap.accept("说：" + message.getString());
 		}
 	}
 }
