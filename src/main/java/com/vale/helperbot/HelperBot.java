@@ -58,6 +58,19 @@ public class HelperBot implements ModInitializer {
 			}
 		});
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotManager.remove(server, "服务器关闭，机器人下线。"));
+		// Nobody logs in under the bot's name (any case): in offline mode the name is the account,
+		// so they'd get its saved inventory, and the bot couldn't be summoned while they're on. The
+		// bot itself never goes through login (BotManager places it directly).
+		net.fabricmc.fabric.api.networking.v1.ServerLoginConnectionEvents.QUERY_START.register((handler, server, sender, sync) -> {
+			String name = handler.getUserName();
+			int cut = name.indexOf(" (");
+			if (cut >= 0) {
+				name = name.substring(0, cut);
+			}
+			if (BotManager.BOT_NAME.equalsIgnoreCase(name)) {
+				handler.disconnect(Component.literal("\"" + BotManager.BOT_NAME + "\" 是机器人专用的名字，请换一个名字进服务器。"));
+			}
+		});
 		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(com.vale.helperbot.guard.ZoneDisplay::tick);
 		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(com.vale.helperbot.guard.ZoneReminder::tick);
 
