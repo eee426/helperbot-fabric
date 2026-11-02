@@ -1,7 +1,9 @@
 package com.vale.helperbot.client;
 
-import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import com.mojang.blaze3d.platform.NativeImage;
 import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
+import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.resources.Identifier;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
@@ -27,15 +29,22 @@ public class ChunkMapScreen extends TouchScreen {
 	private static final int QUERY_RADIUS = 32;
 	/** Movement (screen pixels) under which a touch counts as a tap, not a drag. */
 	private static final double TAP_SLOP = 6;
-	private static final int[] ZOOMS = {6, 10, 16, 24, 36};
+	/** Screen pixels per chunk: from a wide view down to 6 pixels a block. */
+	private static final int[] ZOOMS = {8, 16, 32, 48, 64, 96};
 	private static final int UNLOADED = 0xFF2A2A2A;
+	private static final Identifier TEXTURE = Identifier.fromNamespaceAndPath("helperbotclient", "chunk_map");
 	/** Chunks sent per /bot protect chunks command. */
 	private static final int PER_COMMAND = 20;
 
 	private final Screen parent;
 	private final LongLinkedOpenHashSet picked = new LongLinkedOpenHashSet();
-	/** Ground colours per chunk, 4x4 samples, worked out once per opening. */
-	private final Long2ObjectOpenHashMap<int[]> colours = new Long2ObjectOpenHashMap<>();
+	/**
+	 * The ground, one pixel a block, drawn once when the map opens into a texture: chunks
+	 * {@code imageX..imageX+imageChunks-1} (and z likewise). Scaled up on screen, so every block
+	 * shows (it used to be 4x4 samples a chunk, a few blurry dots).
+	 */
+	private DynamicTexture image;
+	private int imageX, imageZ, imageChunks;
 	private double viewX, viewZ;
 	private int zoom = 2;
 	private int mapX0, mapY0, mapX1, mapY1;
@@ -69,8 +78,75 @@ public class ChunkMapScreen extends TouchScreen {
 		Button[] last = row(x, mapY1 + 4 + rowH, w, h, new String[]{"应用", "清除选择", "返回"},
 				new Runnable[]{this::applyPicked, picked::clear, () -> minecraft.setScreen(parent)});
 		apply = last[0];
-		colours.clear();
+		if (image == null) {
+			drawGround();
+		}
 		query(true);
+	}
+
+	/**
+	 * The loaded ground around the player into {@link #image}: each block's map colour (what the
+	 * vanilla map would show), lighter or darker by the height step to the block north of it, deeper
+	 * water darker, like the vanilla map. Unloaded chunks dark grey.
+	 */
+	private void drawGround() {
+		ClientLevel level = minecraft.level;
+		if (level == null || minecraft.player == null) {
+			return;
+		}
+		int radius = Math.max(4, Math.min(16, minecraft.options.getEffectiveRenderDistance()));
+		ChunkPos centre = minecraft.player.chunkPosition();
+		imageChunks = radius * 2 + 1;
+		imageX = centre.x - radius;
+		imageZ = centre.z - radius;
+		int size = imageChunks * 16;
+		NativeImage pixels = new NativeImage(size, size, false);
+		BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+		for (int cx = 0; cx < imageChunks; cx++) {
+			for (int cz = 0; cz < imageChunks; cz++) {
+				boolean loaded = level.getChunkSource().hasChunk(imageX + cx, imageZ + cz);
+				for (int bx = 0; bx < 16; bx++) {
+					for (int bz = 0; bz < 16; bz++) {
+						int px = cx * 16 + bx, pz = cz * 16 + bz;
+						pixels.setPixel(px, pz, loaded ? groundColour(level, pos, (imageX + cx) * 16 + bx, (imageZ + cz) * 16 + bz) : UNLOADED);
+					}
+				}
+			}
+		}
+		image = new DynamicTexture(() -> "helperbot chunk map", pixels);
+		minecraft.getTextureManager().register(TEXTURE, image);
+	}
+
+	private static int groundColour(ClientLevel level, BlockPos.MutableBlockPos pos, int x, int z) {
+		int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
+		pos.set(x, y, z);
+		BlockState state = level.getBlockState(pos);
+		MapColor colour = state.getMapColor(level, pos);
+		if (colour == MapColor.NONE) {
+			return UNLOADED;
+		}
+		MapColor.Brightness shade;
+		if (colour == MapColor.WATER) {
+			// Deeper water darker.
+			int depth = 0;
+			while (depth < 10 && level.getFluidState(pos.set(x, y - depth - 1, z)).isSource()) {
+				depth++;
+			}
+			shade = depth < 3 ? MapColor.Brightness.HIGH : depth < 6 ? MapColor.Brightness.NORMAL : MapColor.Brightness.LOW;
+		} else {
+			int north = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z - 1) - 1;
+			shade = y > north ? MapColor.Brightness.HIGH : y < north ? MapColor.Brightness.LOW : MapColor.Brightness.NORMAL;
+		}
+		return colour.calculateARGBColor(shade);
+	}
+
+	@Override
+	public void removed() {
+		if (image != null) {
+			minecraft.getTextureManager().release(TEXTURE);
+			image = null;
+		}
+		super.removed();
 	}
 
 	private void recentre() {
@@ -130,28 +206,27 @@ public class ChunkMapScreen extends TouchScreen {
 		double midX = (mapX0 + mapX1) / 2.0, midY = (mapY0 + mapY1) / 2.0;
 		int cx0 = (int) Math.floor(viewX - (midX - mapX0) / size) - 1, cx1 = (int) Math.ceil(viewX + (mapX1 - midX) / size) + 1;
 		int cz0 = (int) Math.floor(viewZ - (midY - mapY0) / size) - 1, cz1 = (int) Math.ceil(viewZ + (mapY1 - midY) / size) + 1;
-		int sub = size >= 24 ? 4 : size >= 10 ? 2 : 1;
+		g.fill(mapX0, mapY0, mapX1, mapY1, UNLOADED);
+		if (image != null) {
+			// The whole ground image, scaled; the scissor keeps it inside the map.
+			int ix0 = (int) Math.round(midX + (imageX - viewX) * size), iz0 = (int) Math.round(midY + (imageZ - viewZ) * size);
+			g.blit(TEXTURE, ix0, iz0, ix0 + imageChunks * size, iz0 + imageChunks * size, 0f, 1f, 0f, 1f);
+		}
 		for (int cx = cx0; cx <= cx1; cx++) {
 			for (int cz = cz0; cz <= cz1; cz++) {
 				int sx = (int) Math.round(midX + (cx - viewX) * size), sy = (int) Math.round(midY + (cz - viewZ) * size);
-				int[] col = colours(cx, cz);
-				int step = size / sub;
-				for (int i = 0; i < sub; i++) {
-					for (int j = 0; j < sub; j++) {
-						int c = col[(i * 4 / sub) * 4 + (j * 4 / sub)];
-						g.fill(sx + i * step, sy + j * step, sx + (i + 1) * step, sy + (j + 1) * step, c);
-					}
-				}
-				long key = ChunkPos.asLong(cx, cz);
+				// Light tints and a border, so what's in the chunk still shows through.
 				if (ClientZones.idOf(cx, cz) != 0) {
-					g.fill(sx, sy, sx + size, sy + size, 0x6000FF40);
+					g.fill(sx, sy, sx + size, sy + size, 0x3000FF40);
+					border(g, sx, sy, size, 1, 0xFF20E040);
 				}
-				if (picked.contains(key)) {
-					g.fill(sx, sy, sx + size, sy + size, 0x90FFE020);
+				if (picked.contains(ChunkPos.asLong(cx, cz))) {
+					g.fill(sx, sy, sx + size, sy + size, 0x40FFE020);
+					border(g, sx, sy, size, 2, 0xFFFFE020);
 				}
 				// Chunk grid.
-				g.fill(sx, sy, sx + size, sy + 1, 0x30000000);
-				g.fill(sx, sy, sx + 1, sy + size, 0x30000000);
+				g.fill(sx, sy, sx + size, sy + 1, 0x50000000);
+				g.fill(sx, sy, sx + 1, sy + size, 0x50000000);
 			}
 		}
 		if (minecraft.player != null) {
@@ -166,34 +241,11 @@ public class ChunkMapScreen extends TouchScreen {
 		}
 	}
 
-	/** 4x4 ground colours of a chunk, from what the game has loaded (dark grey if not loaded). */
-	private int[] colours(int cx, int cz) {
-		long key = ChunkPos.asLong(cx, cz);
-		int[] cached = colours.get(key);
-		if (cached != null) {
-			return cached;
-		}
-		int[] out = new int[16];
-		ClientLevel level = minecraft.level;
-		boolean loaded = level != null && level.getChunkSource().hasChunk(cx, cz);
-		for (int i = 0; i < 4; i++) {
-			for (int j = 0; j < 4; j++) {
-				if (!loaded) {
-					out[i * 4 + j] = UNLOADED;
-					continue;
-				}
-				int x = cx * 16 + i * 4 + 2, z = cz * 16 + j * 4 + 2;
-				int y = level.getHeight(Heightmap.Types.WORLD_SURFACE, x, z) - 1;
-				BlockPos pos = new BlockPos(x, y, z);
-				BlockState state = level.getBlockState(pos);
-				MapColor map = state.getMapColor(level, pos);
-				out[i * 4 + j] = map == MapColor.NONE ? UNLOADED : 0xFF000000 | map.col;
-			}
-		}
-		if (loaded) {
-			colours.put(key, out); // unloaded ones are looked at again (they may load meanwhile)
-		}
-		return out;
+	private static void border(GuiGraphics g, int x, int y, int size, int t, int colour) {
+		g.fill(x, y, x + size, y + t, colour);
+		g.fill(x, y + size - t, x + size, y + size, colour);
+		g.fill(x, y, x + t, y + size, colour);
+		g.fill(x + size - t, y, x + size, y + size, colour);
 	}
 
 	private boolean inMap(double x, double y) {
