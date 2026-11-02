@@ -143,8 +143,12 @@ public class FetchWaterTask implements BotTask {
 
 	private void startTravel(BotPlayer bot) {
 		BlockPos t = biomeTarget;
-		// The biome's surface height is unknown, so only horizontal distance counts.
-		bot.movement().goTo(p -> horizontalDistSq(p, t) <= 16 * 16, t.atY(bot.getBlockY()), mode, true);
+		// Rivers and oceans are at the surface: head for its height there (worked out from world
+		// generation if the chunk isn't loaded), and be up under the sky on arrival, not under it.
+		ServerLevel level = bot.level();
+		var surface = com.vale.helperbot.knowledge.Habitat.Layer.SURFACE;
+		bot.movement().goTo(com.vale.helperbot.knowledge.Habitat.arrived(level, t, 16, surface),
+				com.vale.helperbot.knowledge.Habitat.target(level, t, surface, bot.blockPosition()), mode, false);
 		travelTicks = 0;
 		phase = Phase.TRAVEL;
 	}

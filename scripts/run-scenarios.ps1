@@ -2,7 +2,7 @@
 #   scripts\run-scenarios.ps1            all scenes
 #   scripts\run-scenarios.ps1 W2,H1      only scenes whose id starts with W2 or H1
 # The report is written to run\scenario-report.md. Scenes: src\main\java\com\vale\helperbot\test\Scenarios.java
-param([string]$Only = "all")
+param([string[]]$Only = @("all"))
 
 $root = Split-Path -Parent $PSScriptRoot
 $run = Join-Path $root "run"
@@ -28,7 +28,7 @@ if (Test-Path $world) { Remove-Item -Recurse -Force $world }
 $report = Join-Path $run "scenario-report.md"
 if (Test-Path $report) { Remove-Item -Force $report }
 
-$env:HELPERBOT_SCENARIOS = $Only
+$env:HELPERBOT_SCENARIOS = $Only -join ","
 & (Join-Path $root "gradlew.bat") -p $root runServer --console=plain 2>&1 |
 	Select-String -Pattern "SCENARIO|Exception|ERROR" | ForEach-Object { $_.Line }
 Remove-Item Env:\HELPERBOT_SCENARIOS

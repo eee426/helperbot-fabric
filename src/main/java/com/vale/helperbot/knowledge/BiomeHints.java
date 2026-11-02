@@ -15,6 +15,7 @@ import net.minecraft.world.level.levelgen.placement.PlacedFeature;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -42,6 +43,7 @@ public final class BiomeHints {
 	public static void clearCache() {
 		FEATURE_JSON.clear();
 		ANSWERS.clear();
+		LAYERS.clear();
 	}
 
 	/** Biomes of this level that generate any of {@code blocks}; empty if none or unknown. */
@@ -53,6 +55,55 @@ public final class BiomeHints {
 			ANSWERS.put(key, known);
 		}
 		return known;
+	}
+
+	private static final Map<Set<Block>, Habitat.Layer> LAYERS = new java.util.HashMap<>();
+
+	/**
+	 * Which layer the world features that place any of {@code blocks} decorate: trees, flowers and
+	 * the like are surface steps, ores and cave growth underground ones (from the generation step
+	 * each feature belongs to). ANY if both, or if no feature places them.
+	 */
+	public static Habitat.Layer layerFor(ServerLevel level, Collection<Block> blocks) {
+		Set<Block> key = Set.copyOf(blocks);
+		Habitat.Layer known = LAYERS.get(key);
+		if (known != null) {
+			return known;
+		}
+		Set<String> ids = new HashSet<>();
+		for (Block block : blocks) {
+			ids.add("\"" + BuiltInRegistries.BLOCK.getKey(block) + "\"");
+		}
+		RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, level.registryAccess());
+		boolean surface = false, underground = false;
+		var steps = net.minecraft.world.level.levelgen.GenerationStep.Decoration.values();
+		for (Holder<Biome> biome : level.getChunkSource().getGenerator().getBiomeSource().possibleBiomes()) {
+			List<HolderSet<PlacedFeature>> features = biome.value().getGenerationSettings().features();
+			for (int i = 0; i < features.size() && i < steps.length; i++) {
+				for (Holder<PlacedFeature> placed : features.get(i)) {
+					if (placed.value().getFeatures().anyMatch(f -> mentions(f, ids, ops))) {
+						switch (steps[i]) {
+							case UNDERGROUND_ORES, UNDERGROUND_DECORATION, UNDERGROUND_STRUCTURES, FLUID_SPRINGS -> underground = true;
+							default -> surface = true;
+						}
+					}
+				}
+			}
+		}
+		Habitat.Layer layer = surface == underground ? Habitat.Layer.ANY : surface ? Habitat.Layer.SURFACE : Habitat.Layer.UNDERGROUND;
+		LAYERS.put(key, layer);
+		return layer;
+	}
+
+	private static boolean mentions(ConfiguredFeature<?, ?> feature, Set<String> ids, RegistryOps<JsonElement> ops) {
+		String json = FEATURE_JSON.computeIfAbsent(feature, f -> ConfiguredFeature.DIRECT_CODEC
+				.encodeStart(ops, f).result().map(JsonElement::toString).orElse(""));
+		for (String id : ids) {
+			if (json.contains(id)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static Set<Holder<Biome>> search(ServerLevel level, Collection<Block> blocks) {

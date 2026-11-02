@@ -5,6 +5,7 @@ import com.vale.helperbot.bot.BotPlayer;
 import com.vale.helperbot.bot.MovementController;
 import com.vale.helperbot.guard.ProtectionZones;
 import com.vale.helperbot.knowledge.CraftPlanner;
+import com.vale.helperbot.knowledge.Habitat;
 import com.vale.helperbot.knowledge.MobDrops;
 import com.vale.helperbot.path.Mode;
 import net.minecraft.core.BlockPos;
@@ -228,7 +229,7 @@ final class HuntTask {
 				Holder<Biome> biome = gridBiome.get(waypointKey);
 				bot.log("去 " + t.getX() + ", " + t.getZ() + " 找（" + biomeName(biome) + "，预计每个区块 "
 						+ String.format("%.2f", dropsPerChunk(biome)) + " 个）");
-				bot.movement().goTo(p -> horizontalDistSq(p, t) <= 16 * 16, t, mode, true);
+				headFor(bot, t);
 				setPhase(Phase.EXPLORE);
 				return BotTask.Status.RUNNING;
 			}
@@ -264,7 +265,10 @@ final class HuntTask {
 		if (best.isEmpty()) {
 			return BotTask.Status.RUNNING; // next tick: explore around here
 		}
-		if (best.contains(level.getBiome(bot.blockPosition()))) {
+		// The biome where the prey lives: for animals the one up on the surface, not the cave's.
+		BlockPos here = bot.blockPosition();
+		BlockPos where = layer(level) == Habitat.Layer.SURFACE ? Habitat.target(level, here, Habitat.Layer.SURFACE, here) : here;
+		if (best.contains(level.getBiome(where))) {
 			bot.log("这里就是" + names().getString() + "多的群系，就在附近找");
 			return BotTask.Status.RUNNING;
 		}
@@ -296,7 +300,7 @@ final class HuntTask {
 				+ biomeName(found.getSecond()) + " 找（那里最多）。"));
 		waypoint = t;
 		waypointKey = BEST_BIOME;
-		bot.movement().goTo(p -> horizontalDistSq(p, t) <= 16 * 16, t.atY(bot.getBlockY()), mode, true);
+		headFor(bot, t);
 		setPhase(Phase.EXPLORE);
 		return BotTask.Status.RUNNING;
 	}
@@ -417,10 +421,28 @@ final class HuntTask {
 	}
 
 
+	/** Where the prey lives: animals on the surface; monsters anywhere dark (see {@link Habitat}). */
+	private Habitat.Layer layer(ServerLevel level) {
+		if (layer == null) {
+			layer = Habitat.ofAll(sources.keySet());
+		}
+		return layer;
+	}
+
+	private Habitat.Layer layer;
+
+	/** Off towards that x/z, at the height the prey lives at (see {@link Habitat}). */
+	private void headFor(BotPlayer bot, BlockPos xz) {
+		ServerLevel level = bot.level();
+		Habitat.Layer l = layer(level);
+		bot.movement().goTo(Habitat.arrived(level, xz, 16, l), Habitat.target(level, xz, l, bot.blockPosition()), mode,
+				!Habitat.heightKnown(l));
+	}
+
 	/** Places near where it is now count as seen (it would have spotted the prey there). */
 	private void markSeen(BotPlayer bot) {
-		if (origin == null) {
-			return;
+		if (origin == null || (layer(bot.level()) == Habitat.Layer.SURFACE && !Habitat.onSurface(bot.level(), bot.blockPosition()))) {
+			return; // passing underneath, through the rock, it hasn't seen what's up there
 		}
 		BlockPos here = bot.blockPosition();
 		int r = SEEN_RADIUS / GRID + 1;
@@ -456,6 +478,18 @@ final class HuntTask {
 
 	private BotTask.Status waitForSpawns(BotPlayer bot) {
 		ServerLevel level = bot.level();
+		if (layer(level) == Habitat.Layer.SURFACE && !Habitat.onSurface(level, bot.blockPosition())) {
+			// Animals only appear on the surface (grass, daylight): waiting in a cave is pointless.
+			MovementController.Status status = bot.movement().status();
+			if (status != MovementController.Status.MOVING) {
+				if (status == MovementController.Status.FAILED && phaseTicks > 1) {
+					return fail(bot, "上不到地面（" + bot.movement().failReason() + "），在地下等不到" + names().getString());
+				}
+				bot.log("先上到地面再等（" + names().getString() + "只在地面上刷）");
+				headFor(bot, bot.blockPosition());
+			}
+			return BotTask.Status.RUNNING;
+		}
 		// Monsters only spawn in the dark: under the open sky that means at night.
 		boolean monsters = anyMonsters(level) && !anyAnimals(level);
 		boolean canSpawn = !monsters || !level.canSeeSky(bot.blockPosition().above()) || level.isDarkOutside();

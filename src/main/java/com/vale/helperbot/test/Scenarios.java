@@ -102,11 +102,16 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.DIAMOND, 1, Mode.NORMAL);
 				}, Scenario.has(Items.DIAMOND, 1)),
 
-				new Scenario("H1", "在矿洞里要生羊肉（羊在地面上）", 6 * MINUTE, (a, bot, me) -> {
-					a.fill(-2, 0, -2, 2, 2, 2, Blocks.AIR); // a cave room 41 blocks down
-					teleport(bot, a, 0, 0, 0);
-					for (int i = 0; i < 4; i++) {
-						a.spawn(EntityType.SHEEP, 90 + i, Arena.SURFACE, 3);
+				new Scenario("H1", "在深矿洞里（y=-40）要生羊肉（羊在地面上）", 6 * MINUTE, (a, bot, me) -> {
+					// A cave room 81 blocks down: deeper than it can see mobs (64), like a real deep cave.
+					a.fill(-2, -40, -2, 2, -38, 2, Blocks.AIR);
+					teleport(bot, a, 0, -40, 0);
+					// A few groups 90 blocks out in every direction: out of sight from the cave (and
+					// from right above it), so it has to go up and look around on the surface.
+					for (int[] d : new int[][]{{90, 0}, {-90, 0}, {0, 90}, {0, -90}}) {
+						for (int i = 0; i < 3; i++) {
+							a.spawn(EntityType.SHEEP, d[0] + i, Arena.SURFACE, d[1] + i);
+						}
 					}
 					give(bot, Items.IRON_SWORD, 1);
 					give(bot, Items.IRON_PICKAXE, 1);
@@ -125,6 +130,26 @@ public final class Scenarios {
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.OAK_LOG, 3, Mode.NORMAL);
 				}, Scenario.has(Items.OAK_LOG, 3))
+				,
+
+				new Scenario("H3", "从矿洞（y=0）走到地面上你身边", 4 * MINUTE, (a, bot, me) -> {
+					a.fill(-2, 0, -2, 2, 2, 2, Blocks.AIR);
+					teleport(bot, a, 0, 0, 0);
+					me.teleportTo(a.level, a.origin.getX() + 20.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.bot().position().distanceTo(c.arena().at(20, Arena.SURFACE, 0).getBottomCenter()) <= 3
+						? Scenario.Outcome.pass("到了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null),
+
+				new Scenario("H4", "在地面上要铁（铁矿在地下 25 格）", 6 * MINUTE, (a, bot, me) -> {
+					a.fill(6, 14, 6, 7, 15, 7, Blocks.IRON_ORE);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.RAW_IRON, 3, Mode.NORMAL);
+				}, Scenario.has(Items.RAW_IRON, 3))
 		);
 	}
 

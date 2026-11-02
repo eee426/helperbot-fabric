@@ -112,6 +112,7 @@ public class GatherTask implements BotTask {
 		double waterFactor = Air.waterDigFactor(bot);
 		int full = Air.fullBudget(bot);
 		double bestNeed = Double.NaN;
+		boolean anyStand = false;
 		int r = (int) Math.ceil(reach);
 		search:
 		for (int dy = -r - 1; dy <= r; dy++) {
@@ -122,6 +123,7 @@ public class GatherTask implements BotTask {
 							|| Double.isNaN(LocalPathfinder.floorHeight(level, q))) {
 						continue;
 					}
+					anyStand = true;
 					if (Air.breathable(level, q)) {
 						bestNeed = 0;
 						break search;
@@ -141,12 +143,57 @@ public class GatherTask implements BotTask {
 				}
 			}
 		}
+		if (!anyStand && !nearWater(level, p)) {
+			// Buried (ore in solid rock, stone under the dirt): nowhere to stand next to it yet, but
+			// digging a way there makes one, like a player would. Costed by what's in the way. (It used
+			// to count as unreachable, so with no stone in the open it never got any cobblestone.)
+			// Under water this isn't done: a dug tunnel floods, and air is a separate question.
+			bestNeed = tunnelCost(bot, p);
+		}
 		if (Double.isNaN(bestNeed)) {
 			return Double.NaN;
 		}
 		// Per item it gives, not per block: a dead bush (about a stick each) before leaves (1 in 50).
 		double perBlock = Math.max(0.01, Math.min(1.0, DropAnalysis.rate(item, state.getBlock())));
 		return (Math.sqrt(p.distSqr(bot.blockPosition())) * 5 + bestNeed) / perBlock;
+	}
+
+	/** Most cells looked at along a tunnel (beyond that it's too far to dig anyway). */
+	private static final int MAX_TUNNEL = 96;
+
+	/**
+	 * Rough ticks to dig straight from the bot to {@code p}: every solid block on the line, at the
+	 * speed of the best tool in the bag. NaN if something on the way can't be mined (bedrock).
+	 */
+	private static double tunnelCost(BotPlayer bot, BlockPos p) {
+		ServerLevel level = bot.level();
+		Vec3 from = bot.getEyePosition();
+		Vec3 to = Vec3.atCenterOf(p);
+		double length = from.distanceTo(to);
+		Set<BlockPos> seen = new HashSet<>();
+		double ticks = 0;
+		for (double d = 0; d < length && seen.size() < MAX_TUNNEL; d += 0.5) {
+			BlockPos c = BlockPos.containing(from.add(to.subtract(from).scale(d / length)));
+			if (c.equals(p) || !seen.add(c) || LocalPathfinder.isPassable(level, c)) {
+				continue;
+			}
+			BlockState s = level.getBlockState(c);
+			int t = BreakTimes.estimateTicks(bot.getInventory(), level, c, s);
+			if (t == Integer.MAX_VALUE || !Guard.canBreak(level, c, s)) {
+				return Double.NaN;
+			}
+			ticks += t;
+		}
+		return ticks;
+	}
+
+	private static boolean nearWater(ServerLevel level, BlockPos p) {
+		for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
+			if (LocalPathfinder.isWater(level, p.relative(d))) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/** Blocks that drop the item with a tool we have, and the inventory slot (or HAND) to use. */
@@ -429,7 +476,12 @@ public class GatherTask implements BotTask {
 
 	private void startTravel(BotPlayer bot, BlockPos to) {
 		travelTarget = to;
-		bot.movement().goTo(p -> horizontalDistSq(p, to) <= 16 * 16, to.atY(bot.getBlockY()), mode, true);
+		// At the height its sources are at: on the surface for trees and flowers (see Habitat).
+		ServerLevel level = bot.level();
+		com.vale.helperbot.knowledge.Habitat.Layer layer = BiomeHints.layerFor(level, toolFor.keySet());
+		bot.movement().goTo(com.vale.helperbot.knowledge.Habitat.arrived(level, to, 16, layer),
+				com.vale.helperbot.knowledge.Habitat.target(level, to, layer, bot.blockPosition()), mode,
+				!com.vale.helperbot.knowledge.Habitat.heightKnown(layer));
 		travelTicks = 0;
 		phase = Phase.TRAVEL;
 	}
@@ -517,7 +569,7 @@ public class GatherTask implements BotTask {
 			return Status.RUNNING;
 		}
 		if (!bot.movement().isBreaking(aim)) {
-			Status air = airCheck(bot, aim, tool);
+			Status air = airCheck(bot, aim, aimBlock, tool);
 			if (air != null) {
 				return air;
 			}
@@ -577,7 +629,7 @@ public class GatherTask implements BotTask {
 	 * player: not enough left, go up for air first; not even on a full breath from here, skip it.
 	 * Null: go ahead and mine.
 	 */
-	private Status airCheck(BotPlayer bot, BlockPos aim, int tool) {
+	private Status airCheck(BotPlayer bot, BlockPos aim, Block expected, int tool) {
 		if (!bot.movement().headUnderwater()) {
 			return null;
 		}
@@ -587,6 +639,11 @@ public class GatherTask implements BotTask {
 		}
 		ServerLevel level = bot.level();
 		BlockState state = level.getBlockState(aim);
+		if (!state.is(expected)) {
+			// Already gone (mined, fell): the mining step notices. It used to cost the water that took
+			// its place (hardness 100: "3750 seconds") and skip a perfectly good target.
+			return null;
+		}
 		int dig = tool == MovementController.AUTO_TOOL
 				? BreakTimes.estimateTicks(bot.getInventory(), level, aim, state)
 				: BreakTimes.estimateTicksWith(tool >= 0 ? bot.getInventory().getItem(tool) : ItemStack.EMPTY, level, aim, state);
