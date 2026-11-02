@@ -9,6 +9,8 @@ import com.vale.helperbot.bot.BotManager;
 import com.vale.helperbot.bot.BotPlayer;
 import com.vale.helperbot.guard.ProtectionZones;
 import com.vale.helperbot.guard.Rules;
+import com.vale.helperbot.guard.ZoneDisplay;
+import net.minecraft.world.level.ChunkPos;
 import com.vale.helperbot.knowledge.Obtainability;
 import com.vale.helperbot.path.Mode;
 import com.vale.helperbot.task.BotTask;
@@ -91,23 +93,13 @@ public final class BotCommands {
 							return 1;
 						})))
 				.then(Commands.literal("protect")
-						.then(Commands.literal("list").executes(BotCommands::listZones))
-						.then(Commands.literal("remove")
-								.requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
-								.then(Commands.argument("name", StringArgumentType.word()).executes(ctx -> {
-									String name = StringArgumentType.getString(ctx, "name");
-									boolean ok = ProtectionZones.remove(name);
-									ctx.getSource().sendSuccess(() -> Component.literal(ok ? "已删除保护区 " + name : "没有叫 " + name + " 的保护区"), false);
-									return ok ? 1 : 0;
-								})))
-						.then(Commands.literal("add")
-								.then(Commands.argument("name", StringArgumentType.word())
-										.then(Commands.literal("here")
-												.then(Commands.argument("radius", IntegerArgumentType.integer(1, 512))
-														.executes(BotCommands::addZoneHere)))
-										.then(Commands.argument("from", BlockPosArgument.blockPos())
-												.then(Commands.argument("to", BlockPosArgument.blockPos())
-														.executes(BotCommands::addZoneBox)))))));
+						.executes(BotCommands::toggleChunk)
+						.then(Commands.literal("list").executes(BotCommands::listChunks))
+						.then(Commands.literal("show").executes(ctx -> {
+							ZoneDisplay.show(ctx.getSource().getPlayerOrException());
+							ctx.getSource().sendSuccess(() -> Component.literal("附近保护区块的边界用绿色粒子标出来了（15 秒）。"), false);
+							return 1;
+						}))));
 	}
 
 	private static java.util.concurrent.CompletableFuture<com.mojang.brigadier.suggestion.Suggestions> suggestModes(
@@ -206,37 +198,42 @@ public final class BotCommands {
 		return 1;
 	}
 
-	private static int addZoneHere(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+	/** Protects the chunk the player stands in, or unprotects it if it already was. */
+	private static int toggleChunk(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
 		ServerPlayer player = ctx.getSource().getPlayerOrException();
-		int r = IntegerArgumentType.getInteger(ctx, "radius");
-		BlockPos c = player.blockPosition();
-		return addZone(ctx, c.offset(-r, -r, -r), c.offset(r, r, r));
-	}
-
-	private static int addZoneBox(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
-		return addZone(ctx, BlockPosArgument.getBlockPos(ctx, "from"), BlockPosArgument.getBlockPos(ctx, "to"));
-	}
-
-	private static int addZone(CommandContext<CommandSourceStack> ctx, BlockPos a, BlockPos b) {
-		String name = StringArgumentType.getString(ctx, "name");
-		if (!ProtectionZones.add(name, ctx.getSource().getLevel(), a, b)) {
-			ctx.getSource().sendFailure(Component.literal("已经有叫 " + name + " 的保护区了。"));
-			return 0;
+		ChunkPos chunk = player.chunkPosition();
+		boolean now = ProtectionZones.toggle(player.level(), chunk);
+		String where = "区块 " + chunk.x + ", " + chunk.z + "（x " + chunk.getMinBlockX() + "~" + chunk.getMaxBlockX()
+				+ "，z " + chunk.getMinBlockZ() + "~" + chunk.getMaxBlockZ() + "）";
+		Component text = Component.literal(now
+						? "已保护" + where + "：机器人可以路过，但不碰里面任何东西，路过时也不会触发机关、不会被怪盯上。"
+						: "已取消保护" + where + "。")
+				.append(button(" [撤销]", "/bot protect"))
+				.append(button(" [显示边界]", "/bot protect show"));
+		ctx.getSource().sendSuccess(() -> text, true);
+		if (now) {
+			ZoneDisplay.show(player);
 		}
-		ctx.getSource().sendSuccess(() -> Component.literal("已添加保护区 " + name + "：" + a.toShortString() + " ~ " + b.toShortString()), true);
 		return 1;
 	}
 
-	private static int listZones(CommandContext<CommandSourceStack> ctx) {
-		var zones = ProtectionZones.all();
-		if (zones.isEmpty()) {
-			ctx.getSource().sendSuccess(() -> Component.literal("还没有保护区。"), false);
+	private static Component button(String label, String command) {
+		return Component.literal(label).withStyle(s -> s.withColor(net.minecraft.ChatFormatting.AQUA)
+				.withClickEvent(new net.minecraft.network.chat.ClickEvent.RunCommand(command)));
+	}
+
+	private static int listChunks(CommandContext<CommandSourceStack> ctx) {
+		var chunks = ProtectionZones.all(ctx.getSource().getLevel());
+		if (chunks.isEmpty()) {
+			ctx.getSource().sendSuccess(() -> Component.literal("这个维度还没有保护区块。站在要保护的区块里输入 /bot protect。"), false);
 			return 0;
 		}
-		for (ProtectionZones.Zone z : zones) {
-			ctx.getSource().sendSuccess(() -> Component.literal(z.name() + "  " + z.dimension() + "  "
-					+ z.minX() + "," + z.minY() + "," + z.minZ() + " ~ " + z.maxX() + "," + z.maxY() + "," + z.maxZ()), false);
+		StringBuilder sb = new StringBuilder("保护区块（" + chunks.size() + " 个）：");
+		for (ChunkPos c : chunks) {
+			sb.append(" [").append(c.x).append(", ").append(c.z).append("]");
 		}
-		return zones.size();
+		String text = sb.toString();
+		ctx.getSource().sendSuccess(() -> Component.literal(text).append(button(" [显示边界]", "/bot protect show")), false);
+		return chunks.size();
 	}
 }

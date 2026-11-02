@@ -58,6 +58,7 @@ public class HelperBot implements ModInitializer {
 			}
 		});
 		ServerLifecycleEvents.SERVER_STOPPING.register(server -> BotManager.remove(server, "服务器关闭，机器人下线。"));
+		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(com.vale.helperbot.guard.ZoneDisplay::tick);
 
 		// Right-click the bot to edit its inventory.
 		UseEntityCallback.EVENT.register((player, level, hand, entity, hitResult) -> {

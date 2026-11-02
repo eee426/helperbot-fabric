@@ -65,6 +65,7 @@ public class BotPlayer extends ServerPlayer {
 		if (!isAlive()) {
 			return;
 		}
+		updateGhost();
 		loot.observe();
 		// Survival first: air, then fighting back. The task waits meanwhile.
 		if (breathe()) {
@@ -109,6 +110,32 @@ public class BotPlayer extends ServerPlayer {
 	public void awardKillScore(net.minecraft.world.entity.Entity killed, DamageSource source) {
 		super.awardKillScore(killed, source);
 		loot.onKill(killed);
+	}
+
+	// ---- ghost in protected chunks ------------------------------------------------------
+
+	private boolean ghost;
+
+	/**
+	 * In a protected chunk (a base) the bot is a ghost: vanilla spectator mode, so pressure plates,
+	 * tripwires and sculk sensors don't notice it, mobs don't target it, pistons, water and players
+	 * don't push it, and it picks nothing up. It still walks by its own collision rules (see
+	 * MovementController), so it doesn't go through walls: it only passes through, the way a player
+	 * would, without setting anything off. Only players decide where that is; outside it's back to
+	 * survival.
+	 */
+	private void updateGhost() {
+		boolean inZone = com.vale.helperbot.guard.ProtectionZones.isProtected(level(), blockPosition());
+		if (inZone == ghost) {
+			return;
+		}
+		ghost = inZone;
+		setGameMode(inZone ? net.minecraft.world.level.GameType.SPECTATOR : net.minecraft.world.level.GameType.SURVIVAL);
+		log(inZone ? "进入保护区块：灵魂状态（只路过，不碰任何东西，不触发机关，不被怪盯上）" : "离开保护区块，恢复正常");
+	}
+
+	public boolean isGhost() {
+		return ghost;
 	}
 
 	// ---- who's in charge ----------------------------------------------------------------
@@ -352,6 +379,9 @@ public class BotPlayer extends ServerPlayer {
 
 	/** Ranged attackers within range first (they keep shooting), else melee mobs within reach. */
 	private Mob pickThreat() {
+		if (ghost) {
+			return null; // nothing targets a ghost, and it hits nothing (a spectator's attack is "look through")
+		}
 		List<Mob> threats = level().getEntitiesOfClass(Mob.class, getBoundingBox().inflate(RANGED_ENGAGE_RANGE),
 				m -> m.isAlive() && (m.getTarget() == this
 						|| (m == getLastHurtByMob() && tickCount - getLastHurtByMobTimestamp() < RECENT_HIT_TICKS))

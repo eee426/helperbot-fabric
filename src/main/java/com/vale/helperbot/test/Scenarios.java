@@ -177,6 +177,61 @@ public final class Scenarios {
 					return c.ended() ? Scenario.Outcome.fail("任务结束了但没到（最高 y=" + MAX_Y[0] + "，镐用了 " + used + "）") : null;
 				}),
 
+				new Scenario("Z1", "穿过保护区块（里面有尸壳）到你身边：灵魂状态，不被盯上", 3 * MINUTE, (a, bot, me) -> {
+					for (int x = 16; x <= 48; x += 16) {
+						for (int z = -16; z <= 16; z += 16) {
+							protect(a, x, z);
+						}
+					}
+					ZONE_HUSK[0] = a.spawn(EntityType.HUSK, 30, Arena.SURFACE, 4);
+					ZONE_TARGETED[0] = 0;
+					me.teleportTo(a.level, a.origin.getX() + 70.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> {
+					boolean inZone = com.vale.helperbot.guard.ProtectionZones.isProtected(c.arena().level, c.bot().blockPosition());
+					if (inZone && ZONE_HUSK[0] instanceof net.minecraft.world.entity.Mob m && m.isAlive() && m.getTarget() == c.bot()) {
+						ZONE_TARGETED[0]++;
+					}
+					if (ZONE_TARGETED[0] > 20) {
+						return Scenario.Outcome.fail("在保护区块里还被尸壳盯着");
+					}
+					if (c.bot().position().distanceTo(c.arena().at(70, Arena.SURFACE, 0).getBottomCenter()) <= 3) {
+						return c.logHas("进入保护区块") && c.logHas("离开保护区块") ? Scenario.Outcome.pass("穿过去了，进出都切换了灵魂状态")
+								: Scenario.Outcome.fail("到了，但日志里没看到进出灵魂状态");
+					}
+					return c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null;
+				}),
+
+				new Scenario("Z2", "要原木：近处的树在保护区块里，不能砍；去砍远处的", 4 * MINUTE, (a, bot, me) -> {
+					protect(a, 8, 0);
+					a.tree(8, 0, 5); // the near tree, protected
+					a.tree(40, 8, 5);
+					ZONE_COUNT[0] = countLogs(a, 8, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.OAK_LOG, 3, Mode.NORMAL);
+				}, c -> {
+					if (countLogs(c.arena(), 8, 0) != ZONE_COUNT[0]) {
+						return Scenario.Outcome.fail("砍了保护区块里的树");
+					}
+					return c.bot().getInventory().countItem(Items.OAK_LOG) >= 3 ? Scenario.Outcome.pass("砍的是外面的树")
+							: c.ended() ? Scenario.Outcome.fail("任务结束了没拿到") : null;
+				}),
+
+				new Scenario("Z3", "站在保护区块里要圆石：走出去挖，里面一块不动", 4 * MINUTE, (a, bot, me) -> {
+					protect(a, 0, 0);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					ZONE_COUNT[0] = countSolid(a, 0, 0);
+					return new AcquireTask(me, Items.COBBLESTONE, 4, Mode.NORMAL);
+				}, c -> {
+					if (countSolid(c.arena(), 0, 0) != ZONE_COUNT[0]) {
+						return Scenario.Outcome.fail("动了保护区块里的方块");
+					}
+					return c.bot().getInventory().countItem(Items.COBBLESTONE) >= 4 ? Scenario.Outcome.pass("在外面挖的，里面没动")
+							: c.ended() ? Scenario.Outcome.fail("任务结束了没拿到") : null;
+				}),
+
 				new Scenario("C33", "白色地毯：做好的不拿去染色", 5 * MINUTE, (a, bot, me) -> {
 					for (int i = 0; i < 4; i++) {
 						a.spawn(EntityType.SHEEP, 6 + i, Arena.SURFACE, 4);
@@ -320,7 +375,9 @@ public final class Scenarios {
 					give(bot, Items.IRON_SWORD, 1);
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.COD, 1, Mode.NORMAL);
-				}, c -> c.logHas("找不到路") || c.logHas("找不到能走的路") ? Scenario.Outcome.fail("在冰下说找不到路")
+					// The move giving up for lack of a path, not one search coming up empty (that's routine
+					// when short of air: it goes up for a breath next).
+				}, c -> c.logHas("找不到能走的路") || c.logHas("换气的地方里找不到路") ? Scenario.Outcome.fail("在冰下说找不到路（移动放弃了）")
 						: c.bot().getInventory().countItem(Items.COD) >= 1 ? Scenario.Outcome.pass("抓到了鱼")
 						: c.ended() ? Scenario.Outcome.pass("没淹死、没说找不到路（鱼没抓到）") : null),
 
@@ -351,6 +408,39 @@ public final class Scenarios {
 	private static void cliffWithWaterfall(Arena a) {
 		a.fill(10, 41, -6, 20, 60, 6, Blocks.STONE);
 		a.set(10, 58, 0, Blocks.WATER);
+	}
+
+	private static final net.minecraft.world.entity.Entity[] ZONE_HUSK = new net.minecraft.world.entity.Entity[1];
+	private static final int[] ZONE_TARGETED = {0};
+	private static final int[] ZONE_COUNT = {0};
+
+	/** Protects the chunk holding arena cell (x, z), if it isn't already. */
+	private static void protect(Arena a, int x, int z) {
+		net.minecraft.world.level.ChunkPos chunk = new net.minecraft.world.level.ChunkPos(a.at(x, 0, z));
+		if (!com.vale.helperbot.guard.ProtectionZones.isProtected(a.level, chunk)) {
+			com.vale.helperbot.guard.ProtectionZones.toggle(a.level, chunk);
+		}
+	}
+
+	/** Oak logs in the chunk holding arena cell (x, z), surface and up. */
+	private static int countLogs(Arena a, int x, int z) {
+		return count(a, x, z, Arena.SURFACE, Arena.SURFACE + 12, s -> s.is(Blocks.OAK_LOG));
+	}
+
+	/** Non-air blocks in the chunk holding arena cell (x, z), from a few blocks down to a few up. */
+	private static int countSolid(Arena a, int x, int z) {
+		return count(a, x, z, Arena.SURFACE - 8, Arena.SURFACE + 3, s -> !s.isAir());
+	}
+
+	private static int count(Arena a, int x, int z, int y0, int y1, java.util.function.Predicate<net.minecraft.world.level.block.state.BlockState> what) {
+		net.minecraft.world.level.ChunkPos chunk = new net.minecraft.world.level.ChunkPos(a.at(x, 0, z));
+		int n = 0;
+		for (BlockPos p : BlockPos.betweenClosed(chunk.getMinBlockX(), y0, chunk.getMinBlockZ(), chunk.getMaxBlockX(), y1, chunk.getMaxBlockZ())) {
+			if (what.test(a.level.getBlockState(p))) {
+				n++;
+			}
+		}
+		return n;
 	}
 
 	/** Highest the bot got during a scene (V1, V2). */

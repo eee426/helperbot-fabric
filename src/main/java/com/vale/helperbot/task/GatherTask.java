@@ -5,6 +5,7 @@ import com.vale.helperbot.HelperBot;
 import com.vale.helperbot.bot.BotPlayer;
 import com.vale.helperbot.bot.MovementController;
 import com.vale.helperbot.guard.Guard;
+import com.vale.helperbot.guard.ProtectionZones;
 import com.vale.helperbot.knowledge.BiomeHints;
 import com.vale.helperbot.knowledge.BlockScanner;
 import net.minecraft.core.component.DataComponents;
@@ -120,7 +121,7 @@ public class GatherTask implements BotTask {
 				for (int dz = -r; dz <= r; dz++) {
 					BlockPos q = p.offset(dx, dy, dz);
 					if (q.equals(p) || new Vec3(q.getX() + 0.5, q.getY() + bot.getEyeHeight(), q.getZ() + 0.5).distanceTo(center) > reach
-							|| Double.isNaN(LocalPathfinder.floorHeight(level, q))) {
+							|| Double.isNaN(LocalPathfinder.floorHeight(level, q)) || ProtectionZones.isProtected(level, q)) {
 						continue;
 					}
 					anyStand = true;
@@ -441,7 +442,9 @@ public class GatherTask implements BotTask {
 	private void goNear(BotPlayer bot, BlockPos block) {
 		double reach = bot.blockInteractionRange() - REACH_MARGIN;
 		Vec3 center = Vec3.atCenterOf(block);
-		bot.movement().goTo(p -> !p.equals(block)
+		// Not from inside a protected chunk: it can't do anything there (see ProtectionZones).
+		ServerLevel level = bot.level();
+		bot.movement().goTo(p -> !p.equals(block) && !ProtectionZones.isProtected(level, p)
 				&& new Vec3(p.getX() + 0.5, p.getY() + bot.getEyeHeight(), p.getZ() + 0.5).distanceTo(center) <= reach,
 				block, mode);
 	}

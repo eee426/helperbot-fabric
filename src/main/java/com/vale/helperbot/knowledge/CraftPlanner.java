@@ -623,7 +623,9 @@ public final class CraftPlanner {
 			sourceBlocks.put(i, blocks);
 			gatherRate.put(i, Math.min(1.0, DropAnalysis.bestRate(i, blocks)));
 			List<BlockPos> found = BlockScanner.find(level, breaker.blockPosition(), NEARBY_CHUNKS,
-					state -> blocks.contains(state.getBlock()) && DropAnalysis.dropsFrom(i, state), p -> true, MAX_SITES);
+					state -> blocks.contains(state.getBlock()) && DropAnalysis.dropsFrom(i, state),
+					// The same test the gathering step uses: protected chunks and (strict) rules count.
+					p -> com.vale.helperbot.guard.Guard.canHarvest(level, p, level.getBlockState(p)), MAX_SITES);
 			long took = System.nanoTime() - started;
 			tScan += took;
 			scanTimes.put(i, took);

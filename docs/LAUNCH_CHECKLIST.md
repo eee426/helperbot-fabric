@@ -14,7 +14,8 @@
 | 🔴 | 默认规则 | `OPEN`：什么都能挖、能搭 | 默认改为 `STRICT`，或者改成读配置文件 | `guard/Rules.java` |
 | 🔴 | `/bot rules` 指令 | **任何玩家**都能切换成 open | 要求 OP 权限，或者正式版里直接删掉 open | `command/BotCommands.java` |
 | 🔴 | 规则不持久化 | 重启后恢复默认 | 存进配置文件，避免"以为是 strict，其实是 open" | `guard/Rules.java` |
-| 🔴 | `/bot protect add` | 任何玩家都能加保护区 | 至少记录是谁加的；考虑只允许 OP 添加 | `command/BotCommands.java` |
+| 🔴 | `/bot protect`（保护/取消保护当前区块） | 任何玩家都能保护或**取消保护**任何区块（包括别人的基地） | 记录是谁保护的；取消保护只允许本人或 OP；多人服考虑每人只能管自己保护的区块 | `command/BotCommands.java#toggleChunk` |
+| 🟡 | 保护区块里的灵魂状态 | 机器人在保护区块里会切成原版旁观者模式：别人看不见它、右键不了它（打不开它的背包），不会受伤、不会饿、不会掉气 | 确认玩家能接受"在基地里看不见机器人"；要不要在它进出时提示一句 | `bot/BotPlayer.java#updateGhost` |
 | 🟡 | `/bot spawn / remove / get / come / cancel` | 任何玩家都能用，而且只有一个全局机器人，谁都能指挥、谁都能取消别人的任务 | 改成每人一个机器人，或者记录主人、只听主人的 | `bot/BotManager.java` |
 | 🟡 | 右键编辑背包 | 任何玩家都能打开机器人背包拿东西 | 只允许主人（和 OP）打开 | `HelperBot.java` |
 

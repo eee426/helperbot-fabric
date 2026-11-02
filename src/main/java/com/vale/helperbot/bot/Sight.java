@@ -33,6 +33,8 @@ public final class Sight {
 		double eyeHeight = bot.getEyeHeight();
 		// A little inside the real reach, so a slightly moving target is still in range on arrival.
 		double reach = bot.entityInteractionRange() - 0.3;
-		return p -> canHitFrom(level, new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5), target, reach, bot);
+		// Not from inside a protected chunk: it's a ghost there and can't hit anything.
+		return p -> !com.vale.helperbot.guard.ProtectionZones.isProtected(level, p)
+				&& canHitFrom(level, new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5), target, reach, bot);
 	}
 }

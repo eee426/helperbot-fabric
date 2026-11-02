@@ -1,6 +1,7 @@
 package com.vale.helperbot.path;
 
 import com.vale.helperbot.guard.Guard;
+import com.vale.helperbot.guard.ProtectionZones;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -455,11 +456,13 @@ public final class LocalPathfinder {
 			}
 		}
 		double pen = digPenalty(p);
+		// In a protected chunk it's a ghost: it can pass through, but not dig or build from there.
+		boolean canAct = !ProtectionZones.isProtected(level, p);
 		if (isWater(level, p)) {
-			swimInto(p, out, pen);
+			swimInto(p, out, pen, canAct);
 		}
 		// Digging and building assume we stand on a full block (or hold still in water).
-		if (Math.abs(cur - p.getY()) < 1e-3) {
+		if (canAct && Math.abs(cur - p.getY()) < 1e-3) {
 			for (Direction d : Direction.Plane.HORIZONTAL) {
 				digInto(p, d, out, pen);
 				if (canBuild) {
@@ -487,10 +490,10 @@ public final class LocalPathfinder {
 	 * From water, swim to any neighbouring water cell: level, diving down, or rising (3D). Also
 	 * dig straight up through a ceiling (sand that fell in, the sea floor from below).
 	 */
-	private void swimInto(BlockPos p, List<Candidate> out, double pen) {
+	private void swimInto(BlockPos p, List<Candidate> out, double pen, boolean canDig) {
 		BlockPos up = p.above();
 		BlockPos overHead = up.above();
-		if (inWindow(overHead) && swimmable(up) && !swimmable(overHead)) {
+		if (canDig && inWindow(overHead) && swimmable(up) && !swimmable(overHead)) {
 			List<BlockPos> breaks = new ArrayList<>(1);
 			digTicks = 0;
 			double dig = clearCost(overHead, breaks, pen);

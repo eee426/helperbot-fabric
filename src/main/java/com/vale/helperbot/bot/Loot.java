@@ -163,7 +163,9 @@ public final class Loot {
 		for (ItemEntity item : bot.level().getEntitiesOfClass(ItemEntity.class, all,
 				// Only what the task needs: spare building blocks are picked up in passing, never
 				// fetched (it used to turn back, or dig out its own pillar, for one dropped block).
-				i -> i.isAlive() && !abandoned.contains(i.getUUID()) && bot.taskWants(i.getItem()))) {
+				i -> i.isAlive() && !abandoned.contains(i.getUUID()) && bot.taskWants(i.getItem())
+						// Whatever lies in a protected chunk is left alone (it may be someone's).
+						&& !com.vale.helperbot.guard.ProtectionZones.isProtected(bot.level(), i.blockPosition()))) {
 			for (Event e : events) {
 				if (item.getAge() <= bot.tickCount - e.tick + 2 && e.area().contains(item.position())) {
 					out.add(item);
@@ -277,7 +279,8 @@ public final class Loot {
 		double half = bot.getBbWidth() / 2, height = bot.getBbHeight();
 		return p -> {
 			double floor = LocalPathfinder.floorHeight(level, p);
-			if (Double.isNaN(floor)) {
+			// A ghost in a protected chunk doesn't pick anything up.
+			if (Double.isNaN(floor) || com.vale.helperbot.guard.ProtectionZones.isProtected(level, p)) {
 				return false;
 			}
 			double cx = p.getX() + 0.5, cz = p.getZ() + 0.5;

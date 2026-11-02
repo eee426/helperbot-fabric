@@ -4,8 +4,11 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import com.vale.helperbot.HelperBot;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -14,39 +17,46 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-/** Box-shaped zones where the bot may walk through but never break, place or interact. */
+/**
+ * Protected chunks (bases, farms, machines): whole chunks, bedrock to sky, marked by a player
+ * standing in them. The bot may pass through but never breaks, places, picks up, fights or uses
+ * anything there, and while inside it's a ghost (see BotPlayer#updateGhost): nothing there
+ * notices it. Chunks rather than boxes: nobody wants to count blocks, and a whole chunk leaves
+ * some room around what's being protected.
+ */
 public final class ProtectionZones {
-	public record Zone(String name, String dimension, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
-		public boolean contains(String dim, BlockPos pos) {
-			return dimension.equals(dim)
-					&& pos.getX() >= minX && pos.getX() <= maxX
-					&& pos.getY() >= minY && pos.getY() <= maxY
-					&& pos.getZ() >= minZ && pos.getZ() <= maxZ;
-		}
-	}
-
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-	private static final List<Zone> zones = new ArrayList<>();
+	/** Per dimension id: chunk positions (ChunkPos#toLong). */
+	private static final Map<String, LongSet> chunks = new HashMap<>();
 	private static Path file;
 
 	private ProtectionZones() {
 	}
 
 	public static void load(MinecraftServer server) {
-		zones.clear();
-		file = server.getWorldPath(LevelResource.ROOT).resolve("helperbot").resolve("zones.json");
+		chunks.clear();
+		file = server.getWorldPath(LevelResource.ROOT).resolve("helperbot").resolve("protected_chunks.json");
 		if (!Files.exists(file)) {
 			return;
 		}
 		try {
-			List<Zone> loaded = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), new TypeToken<List<Zone>>() {}.getType());
+			Map<String, List<int[]>> loaded = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8),
+					new TypeToken<Map<String, List<int[]>>>() {}.getType());
 			if (loaded != null) {
-				zones.addAll(loaded);
+				loaded.forEach((dim, list) -> {
+					LongSet set = new LongOpenHashSet();
+					for (int[] c : list) {
+						set.add(ChunkPos.asLong(c[0], c[1]));
+					}
+					chunks.put(dim, set);
+				});
 			}
 		} catch (IOException | RuntimeException e) {
-			HelperBot.LOGGER.error("Failed to read protection zones from {}", file, e);
+			HelperBot.LOGGER.error("Failed to read protected chunks from {}", file, e);
 		}
 	}
 
@@ -54,52 +64,56 @@ public final class ProtectionZones {
 		if (file == null) {
 			return;
 		}
+		Map<String, List<int[]>> out = new HashMap<>();
+		chunks.forEach((dim, set) -> {
+			List<int[]> list = new ArrayList<>();
+			for (long c : set) {
+				list.add(new int[]{ChunkPos.getX(c), ChunkPos.getZ(c)});
+			}
+			out.put(dim, list);
+		});
 		try {
 			Files.createDirectories(file.getParent());
-			Files.writeString(file, GSON.toJson(zones), StandardCharsets.UTF_8);
+			Files.writeString(file, GSON.toJson(out), StandardCharsets.UTF_8);
 		} catch (IOException e) {
-			HelperBot.LOGGER.error("Failed to save protection zones to {}", file, e);
+			HelperBot.LOGGER.error("Failed to save protected chunks to {}", file, e);
 		}
 	}
 
-	public static boolean add(String name, Level level, BlockPos a, BlockPos b) {
-		if (find(name) != null) {
-			return false;
+	/** Protects the chunk if it wasn't, unprotects it if it was. Returns whether it's protected now. */
+	public static boolean toggle(Level level, ChunkPos chunk) {
+		LongSet set = chunks.computeIfAbsent(dimensionId(level), d -> new LongOpenHashSet());
+		boolean now = !set.remove(chunk.toLong());
+		if (now) {
+			set.add(chunk.toLong());
 		}
-		zones.add(new Zone(name, dimensionId(level),
-				Math.min(a.getX(), b.getX()), Math.min(a.getY(), b.getY()), Math.min(a.getZ(), b.getZ()),
-				Math.max(a.getX(), b.getX()), Math.max(a.getY(), b.getY()), Math.max(a.getZ(), b.getZ())));
 		save();
-		return true;
+		return now;
 	}
 
-	public static boolean remove(String name) {
-		boolean removed = zones.removeIf(z -> z.name().equals(name));
-		if (removed) {
-			save();
+	/** Protected chunks in this level's dimension. */
+	public static List<ChunkPos> all(Level level) {
+		List<ChunkPos> out = new ArrayList<>();
+		LongSet set = chunks.get(dimensionId(level));
+		if (set != null) {
+			for (long c : set) {
+				out.add(new ChunkPos(c));
+			}
 		}
-		return removed;
-	}
-
-	public static Zone find(String name) {
-		return zones.stream().filter(z -> z.name().equals(name)).findFirst().orElse(null);
-	}
-
-	public static List<Zone> all() {
-		return List.copyOf(zones);
+		return out;
 	}
 
 	public static boolean isProtected(Level level, BlockPos pos) {
-		if (zones.isEmpty()) {
+		if (chunks.isEmpty()) {
 			return false;
 		}
-		String dim = dimensionId(level);
-		for (Zone zone : zones) {
-			if (zone.contains(dim, pos)) {
-				return true;
-			}
-		}
-		return false;
+		LongSet set = chunks.get(dimensionId(level));
+		return set != null && set.contains(ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4));
+	}
+
+	public static boolean isProtected(Level level, ChunkPos chunk) {
+		LongSet set = chunks.get(dimensionId(level));
+		return set != null && set.contains(chunk.toLong());
 	}
 
 	private static String dimensionId(Level level) {

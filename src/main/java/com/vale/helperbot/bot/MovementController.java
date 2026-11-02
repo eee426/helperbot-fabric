@@ -1126,6 +1126,9 @@ public final class MovementController {
 
 	private MineResult mine(BlockPos pos, BlockState state, int tool, Predicate<ItemStack> handOk) {
 		ServerLevel level = bot.level();
+		if (bot.isGhost()) {
+			return MineResult.FAILED; // in a protected chunk it touches nothing (plans shouldn't ask)
+		}
 		if (!pos.equals(breakingPos)) {
 			abortBreaking();
 			if (++breakAttempts > 3) {
@@ -1245,6 +1248,9 @@ public final class MovementController {
 	 */
 	public boolean placeItem(BlockPos pos, int slot) {
 		ServerLevel level = bot.level();
+		if (bot.isGhost()) {
+			return false;
+		}
 		Direction[] order = {Direction.DOWN, Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP};
 		for (Direction dir : order) {
 			BlockPos against = pos.relative(dir);
