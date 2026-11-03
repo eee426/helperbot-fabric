@@ -306,7 +306,7 @@ public class BotPlayer extends ServerPlayer {
 			}
 			double escape = movement.escapeTicks();
 			boolean asked = movement.takeAirRequest();
-			boolean low = budget <= Air.reserve(escape);
+			boolean low = !Air.enough(budget, escape, 0); // the planner's rule, without its slack
 			boolean sealNow = movement.canSeal() && (movement.headingDown() || low || asked)
 					&& getAirSupply() < getMaxAirSupply();
 			if (!sealNow && !low && !asked) {

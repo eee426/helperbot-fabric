@@ -25,8 +25,37 @@ public final class Air {
 	public static final float KEEP_HEALTH = 12;
 	private static final int TICKS_PER_HIT = 20;
 	private static final float DAMAGE_PER_HIT = 2;
-	/** Swimming straight up, blocks/tick. */
+	/**
+	 * Swimming speeds, blocks/tick: what the bot really moves at (the movement controller) and what
+	 * planning and the way-up estimate charge, from this one place. Up or down is slower than
+	 * across; the planner once charged vertical swimming at the across speed, so a dive took half
+	 * as long again as planned, and the bot turned back for air half way along a planned route.
+	 */
+	public static final double SWIM_SPEED = 0.12;
+	/** Up or down: swimming straight up for air, and the vertical part of any swim. */
 	public static final double SWIM_UP_SPEED = 0.08;
+	/**
+	 * Breath kept on top of {@link #reserve} when planning: room for moving a little slower than
+	 * planned, so the bot doesn't reach the breathing layer's limit on a route it was given.
+	 */
+	public static final int PLAN_SLACK = 20;
+
+	/**
+	 * Time to keep for collecting what the work drops, on the same dive: it lands within a block or
+	 * two (in the hole just dug, say). Without it the bot mined the block, found too little air to
+	 * swim the one block down to the drop, went up for air and came back for it.
+	 */
+	public static final int PICKUP_TICKS = 40;
+
+	/** Air a piece of work costs where mining goes {@code penalty} times slower: the work, and picking up its drops. */
+	public static double workUnderWater(double dryTicks, double penalty) {
+		return dryTicks * penalty + PICKUP_TICKS;
+	}
+
+	/** Ticks to swim (dx, dy, dz) blocks: at the swimming speed, but no faster up or down than {@link #SWIM_UP_SPEED}. */
+	public static double swimTicks(double dx, double dy, double dz) {
+		return Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz) / SWIM_SPEED, Math.abs(dy) / SWIM_UP_SPEED);
+	}
 
 	/**
 	 * What the planner needs to know about the bot's breath.
@@ -35,15 +64,28 @@ public final class Air {
 	 * @param full           budget with a full breath (what it has after surfacing)
 	 * @param waterDigFactor how much slower mining is with the head under water (5 without aqua affinity)
 	 * @param limited        false: ignore air (e.g. while heading for air: any way up will do)
+	 * @param workTicks      what it will do once there (mining a block, say), in ticks on dry land:
+	 *                       the goal must leave air for that too, at the speed it works there
 	 */
-	public record Profile(int now, int full, double waterDigFactor, boolean limited) {
+	public record Profile(int now, int full, double waterDigFactor, boolean limited, double workTicks) {
 	}
 
 	private Air() {
 	}
 
-	public static Profile profile(LivingEntity e, boolean limited) {
-		return new Profile(budget(e), fullBudget(e), waterDigFactor(e), limited);
+	public static Profile profile(LivingEntity e, boolean limited, double workTicks) {
+		return new Profile(budget(e), fullBudget(e), waterDigFactor(e), limited, workTicks);
+	}
+
+	/**
+	 * The one rule, used by the planner, the breathing layer and the tasks alike: with {@code budget}
+	 * ticks of breath, may it spend {@code spend} more where getting back to air takes
+	 * {@code escape}? Each used to work it out its own way, and where they disagreed the bot
+	 * dithered: planned a dive, then turned back half way; got to a block, then found too little
+	 * air to mine it.
+	 */
+	public static boolean enough(double budget, double escape, double spend) {
+		return budget - spend > reserve(escape);
 	}
 
 	/** Ticks it can stay under water from now: air left, plus health it may spend. */

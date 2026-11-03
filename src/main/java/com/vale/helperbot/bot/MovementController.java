@@ -49,7 +49,7 @@ public final class MovementController {
 	static final double DRAG = 0.98;
 	static final double JUMP_VELOCITY = 0.42;
 	private static final double SWIM_UP_SPEED = 0.06;
-	private static final double SWIM_VERTICAL_SPEED = 0.08;
+	private static final double SWIM_VERTICAL_SPEED = Air.SWIM_UP_SPEED;
 	/** How fast it sinks when idle under water. */
 	private static final double SINK_SPEED = 0.02;
 	/** Place the pillar block only once the feet are this far above the cell (see {@link #pillar}). */
@@ -151,6 +151,32 @@ public final class MovementController {
 		this.emptyPlans = 0;
 		this.recoveries = 0;
 		this.frozenTicks = 0;
+		this.goalWork = 0;
+	}
+
+	/**
+	 * What it will do on arrival, in ticks on dry land (mining the block it goes to, say): under
+	 * water the plan then leaves air for that too (see Air.Profile#workTicks). Set right after
+	 * {@link #goTo}; a fight or a pickup on the way doesn't count it.
+	 */
+	public void workAtGoal(double dryTicks) {
+		this.goalWork = dryTicks;
+	}
+
+	private double goalWork;
+
+	/**
+	 * Can the work it came for be done from here on the breath it has (see {@link #workAtGoal})?
+	 * The plan's own goal test (LocalPathfinder#airForWork), on arrival: a route down to a
+	 * standing spot passes cells already within reach on the way, and stopping at the first, afloat,
+	 * mining went 25 times slower than planned and the air ran out.
+	 */
+	private boolean workFitsHere() {
+		if (goalWork <= 0 || engaged || ignoreAir || !headUnderwater()) {
+			return true;
+		}
+		BlockPos f = feet();
+		return Air.enough(Air.budget(bot), escapeTicks(), Air.workUnderWater(goalWork, Air.digPenalty(bot.level(), f, Air.waterDigFactor(bot))));
 	}
 
 	/** Changes the destination; the current step finishes, then a new plan is made. */
@@ -475,7 +501,7 @@ public final class MovementController {
 		}
 		boolean atStepBoundary = !stepStarted && breakIndex == 0 && breakingPos == null;
 		if (atStepBoundary) {
-			if (goal.test(bot.level(), feet())) {
+			if (goal.test(bot.level(), feet()) && workFitsHere()) {
 				status = Status.ARRIVED;
 				path = null;
 				return;
@@ -648,7 +674,7 @@ public final class MovementController {
 	private static final int WATER_REPLAN_TICKS = 20;
 
 	private Air.Profile airProfile() {
-		return Air.profile(bot, !ignoreAir);
+		return Air.profile(bot, !ignoreAir, engaged ? 0 : goalWork);
 	}
 
 	public boolean headUnderwater() {

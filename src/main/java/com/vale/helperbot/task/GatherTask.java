@@ -130,11 +130,13 @@ public class GatherTask implements BotTask {
 						break search;
 					}
 					double up = escape.ticks(q);
-					double mining = dig * Air.digPenalty(level, q, waterFactor);
-					// Down there, mine, back up, on one breath; with the planner's safety margin on top.
-					// (The way down used to be left out: deep blocks passed, and every dive ran out of
-					// air halfway through the block, went up, came back and started over.)
-					if (2 * up + mining + Air.reserve(up) + 20 > full) {
+					double mining = Air.workUnderWater(dig, Air.digPenalty(level, q, waterFactor));
+					// Down there (about as long as the way up) and mine, on one breath, keeping what the
+					// way back up needs: the planner's rule and margin (see Air#enough). The way down used
+					// to be left out (every dive ran out halfway through the block), then the way up was
+					// counted twice (once more than the reserve already has it): blocks well within one
+					// breath were skipped as out of reach.
+					if (!Air.enough(full - up, up, mining + Air.PLAN_SLACK)) {
 						continue;
 					}
 					double need = 2 * up + mining;
@@ -448,6 +450,19 @@ public class GatherTask implements BotTask {
 		bot.movement().goTo((w, p) -> !p.equals(block) && !ProtectionZones.isProtected(w, p)
 				&& new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5).distanceTo(center) <= reach,
 				block, mode);
+		// Under water the plan must leave air to mine it too, not just to get there and back.
+		BlockState state = level.getBlockState(block);
+		int dry = dryTicks(bot, block, state, toolFor.getOrDefault(state.getBlock(), MovementController.HAND));
+		if (dry != Integer.MAX_VALUE) {
+			bot.movement().workAtGoal(dry);
+		}
+	}
+
+	/** Ticks to mine it on dry land with this tool (a slot, the hand, or the best there is), or MAX_VALUE if it can't be. */
+	private static int dryTicks(BotPlayer bot, BlockPos pos, BlockState state, int tool) {
+		return tool == MovementController.AUTO_TOOL
+				? BreakTimes.estimateTicks(bot.getInventory(), bot.level(), pos, state)
+				: BreakTimes.estimateTicksWith(tool >= 0 ? bot.getInventory().getItem(tool) : ItemStack.EMPTY, bot.level(), pos, state);
 	}
 
 	private Status startLocate(BotPlayer bot) {
@@ -675,19 +690,19 @@ public class GatherTask implements BotTask {
 			// its place (hardness 100: "3750 seconds") and skip a perfectly good target.
 			return null;
 		}
-		int dig = tool == MovementController.AUTO_TOOL
-				? BreakTimes.estimateTicks(bot.getInventory(), level, aim, state)
-				: BreakTimes.estimateTicksWith(tool >= 0 ? bot.getInventory().getItem(tool) : ItemStack.EMPTY, level, aim, state);
+		int dig = dryTicks(bot, aim, state, tool);
 		if (dig == Integer.MAX_VALUE) {
 			return null; // can't be mined at all: the mining step says so
 		}
-		// At the speed it will really go: under water, and 5x slower again when not standing.
-		double mining = dig * Air.waterDigFactor(bot) * (bot.onGround() ? 1 : 5);
+		// At the speed it will really go: under water, and 5x slower again when not standing (the
+		// same reckoning the plan made, see Air#digPenalty).
+		double mining = Air.workUnderWater(dig, Air.digPenalty(level, bot.blockPosition(), Air.waterDigFactor(bot)));
 		double escape = bot.movement().escapeTicks();
-		if (budget - mining > Air.reserve(escape)) {
+		if (Air.enough(budget, escape, mining)) {
 			return null;
 		}
-		if (Air.fullBudget(bot) - escape - mining <= Air.reserve(escape)) {
+		// Even with a full breath: back down here (about as long as the way up), then the mining.
+		if (!Air.enough(Air.fullBudget(bot) - escape, escape, mining)) {
 			bot.log(aim.toShortString() + " 在水下要挖 " + (int) mining / 20 + " 秒，一口气挖不完再游上去，跳过");
 			reject(current);
 			return nextTarget(bot);

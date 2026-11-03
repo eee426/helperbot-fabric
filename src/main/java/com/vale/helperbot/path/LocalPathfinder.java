@@ -68,7 +68,7 @@ public final class LocalPathfinder implements Planner {
 	/** Feet height above the cell bottom when floating at a water surface. */
 	public static final double SWIM_FLOOR = 0.1;
 	/** Vanilla swimming speed is roughly 0.1-0.15 blocks/tick. */
-	public static final double SWIM_SPEED = 0.12;
+	public static final double SWIM_SPEED = Air.SWIM_SPEED;
 	/** Deepest {@link #surfaceDistance} looks. (Diving itself is limited by air, see {@link Air}.) */
 	public static final int MAX_DIVE_DEPTH = 10;
 	/** Air is tracked in steps of this many ticks: two routes to a cell differing by less are the same. */
@@ -260,7 +260,7 @@ public final class LocalPathfinder implements Planner {
 				return false;
 			}
 			Node node = open.poll();
-			if (goal.test(level, node.pos)) {
+			if (goal.test(level, node.pos) && airForWork(node)) {
 				result = reconstruct(node, true);
 				progress = (heuristic(origin) - heuristic(node.pos)) / walkCost;
 				return true;
@@ -418,10 +418,24 @@ public final class LocalPathfinder implements Planner {
 		}
 		// Charged with the real time the step takes, not its cost (which includes preferences).
 		int left = from.air - (int) Math.ceil(c.ticks());
-		if (left < Air.reserve(escape.ticks(to)) + 20) {
+		if (!Air.enough(left, escape.ticks(to), Air.PLAN_SLACK)) {
 			return -1;
 		}
 		return left;
+	}
+
+	/**
+	 * At the goal it has work to do (see {@link Air.Profile#workTicks}): arriving there must leave
+	 * air for that as well, at the speed it works there (under water, floating or standing), or it
+	 * gets there, finds it can't finish, goes up for air and comes back to the same spot. A goal
+	 * that leaves too little isn't one: the search goes on (by way of a breath, say).
+	 */
+	private boolean airForWork(Node node) {
+		if (!air.limited() || air.workTicks() <= 0 || Air.breathable(level, node.pos)) {
+			return true;
+		}
+		double work = Air.workUnderWater(air.workTicks(), digPenalty(node.pos));
+		return Air.enough(node.air, escape.ticks(node.pos), work + Air.PLAN_SLACK);
 	}
 
 	private int bucket(int airLeft) {

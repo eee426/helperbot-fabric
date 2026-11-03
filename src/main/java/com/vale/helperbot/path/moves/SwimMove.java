@@ -53,7 +53,7 @@ final class SwimMove implements Move {
 						continue;
 					}
 					boolean submerged = pf.water(c.above());
-					double ticks = Math.sqrt(dx * dx + dy * dy + dz * dz) / LocalPathfinder.SWIM_SPEED;
+					double ticks = Air.swimTicks(dx, dy, dz);
 					out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, c, List.of()), f,
 							ticks * (submerged ? LocalPathfinder.DIVE_COST_FACTOR : 1), ticks));
 				}

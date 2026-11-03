@@ -629,6 +629,17 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.PEONY, 2, Mode.NORMAL);
 				}, Scenario.has(Items.PEONY, 2, c -> !c.logHas("重新选工具"), "说手里的东西挖不出（拿上半截当没有掉落）")),
 
+				new Scenario("W30", "6 格深的池底挖一块沙子（空手）：一口气下去站着挖完、捡起来，不来回换气", 3 * MINUTE, (a, bot, me) -> {
+					// Floating where it's nearest, mining by hand takes 25x as long: too long for one
+					// breath. Standing on the bottom it's 5x, and there's air for that and the pickup.
+					a.fill(6, 35, -2, 10, 40, 2, Blocks.WATER);
+					a.set(8, 34, 0, Blocks.SAND);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.SAND, 1, Mode.NORMAL);
+				}, Scenario.has(Items.SAND, 1, c -> c.logCount("该换气了") == 0 && !c.logHas("剩下的气不够"),
+						"去换了气（说明规划没把挖的时间算进去，或者游的时间算少了）")),
+
 				new Scenario("F1", "装一桶水：地面上，9 格外有个小水池（血不多）", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(10, 39, 4, 12, 40, 6, Blocks.WATER); // a pond 3x3, 2 deep, in the grass
 					teleport(bot, a, 1, 41, 0);
