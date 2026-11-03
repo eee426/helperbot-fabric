@@ -2,8 +2,6 @@ package com.vale.helperbot.path;
 
 import com.vale.helperbot.guard.Guard;
 import com.vale.helperbot.guard.ProtectionZones;
-import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
-import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.core.BlockPos;
@@ -180,10 +178,8 @@ public final class LocalPathfinder {
 	private final double walkCost;
 	private final boolean canBuild;
 	/** 0 = unknown, 1 = passable, 2 = blocked. */
-	private final Long2IntOpenHashMap passableCache = new Long2IntOpenHashMap();
-	private final Long2IntOpenHashMap breakCache = new Long2IntOpenHashMap();
-	private final Long2IntOpenHashMap lavaCache = new Long2IntOpenHashMap();
-	private final Long2DoubleOpenHashMap floorCache = new Long2DoubleOpenHashMap();
+	/** What this search has worked out about each cell, and its best nodes there (see {@link Cells}). */
+	private final Cells cells = new Cells();
 
 	/**
 	 * The target is outside the window, so this search can only return a partial path. Exploring
@@ -201,11 +197,6 @@ public final class LocalPathfinder {
 	private final TravelEstimate travel;
 
 	private final NodeHeap open = new NodeHeap();
-	/**
-	 * Best node per cell and air bucket. A route to a cell is only worth exploring if no other
-	 * route got there at least as cheaply with at least as much air left.
-	 */
-	private final Long2ObjectOpenHashMap<Node[]> best = new Long2ObjectOpenHashMap<>();
 	private final Air.Profile air;
 	private final Escape escape;
 	private final int buckets;
@@ -247,8 +238,6 @@ public final class LocalPathfinder {
 		this.goal = goal;
 		this.walkCost = 1.0 / mode.speed();
 		this.canBuild = com.vale.helperbot.guard.Rules.open() && BuildingBlocks.count(inventory) > 0;
-		breakCache.defaultReturnValue(Integer.MIN_VALUE);
-		floorCache.defaultReturnValue(Double.NEGATIVE_INFINITY);
 		this.partial = horizontalOnly
 				? Math.max(Math.abs(target.getX() - start.getX()), Math.abs(target.getZ() - start.getZ())) > limits.radiusXZ()
 				: !inWindow(target);
@@ -259,7 +248,7 @@ public final class LocalPathfinder {
 		int startAir = Air.breathable(level, start) ? air.full() : air.now();
 		startNode = new Node(start, startFloor, 0, heuristic(start) * heuristicWeight, null, null, startAir);
 		open.add(startNode);
-		cell(start.asLong())[bucket(startAir)] = startNode;
+		cell(start)[bucket(startAir)] = startNode;
 		closest = startNode;
 		closestH = heuristic(start);
 		java.util.Arrays.fill(bestPartialValue, closestH);
@@ -311,7 +300,7 @@ public final class LocalPathfinder {
 				double g = node.g + c.cost * (favored.test(key) ? FAVOR_PREVIOUS : 1)
 						* (isWater(level, c.step.to()) ? WATER_COST_FACTOR : 1);
 				int b = bucket(airLeft);
-				Node[] nodes = cell(key);
+				Node[] nodes = cell(c.step.to());
 				if (!dominated(nodes, b, g)) {
 					double toGoal = heuristic(c.step.to()) * heuristicWeight;
 					Node next = nodes[b];
@@ -411,14 +400,72 @@ public final class LocalPathfinder {
 		return false;
 	}
 
-	/** The best node so far for each air bucket of this cell. */
-	private Node[] cell(long key) {
-		Node[] nodes = best.get(key);
+	/**
+	 * The best node so far for each air bucket of this cell. A route to a cell is only worth
+	 * exploring if no other route got there at least as cheaply with at least as much air left.
+	 */
+	private Node[] cell(BlockPos pos) {
+		Cells.Section s = cells.at(pos);
+		int i = Cells.index(pos);
+		if (s.nodes == null) {
+			s.nodes = new Node[Cells.SIZE][];
+		}
+		Node[] nodes = s.nodes[i];
 		if (nodes == null) {
 			nodes = new Node[buckets];
-			best.put(key, nodes);
+			s.nodes[i] = nodes;
 		}
 		return nodes;
+	}
+
+	/**
+	 * Per-cell memory of one search, kept in blocks of 16x8x16 cells, one array per thing known:
+	 * neighbouring cells sit next to each other, and a lookup is an array index once the block is
+	 * found (usually the same block as last time). It replaced a hash map per thing, keyed by cell.
+	 * Arrays are made when first written; zero means "not worked out yet" in each.
+	 */
+	private static final class Cells {
+		static final int SIZE = 16 * 8 * 16;
+
+		static final class Section {
+			/** 0 = unknown, 1 = passable, 2 = blocked. */
+			byte[] passable;
+			/** 0 = unknown, 1 = lava near, 2 = none. */
+			byte[] lava;
+			/** Ticks to break + 1; 0 = unknown, {@link #BREAK_NO} = may not be broken. */
+			int[] breakTicks;
+			/** Floor height, stored as a bit pattern + 1 so that zero stays "unknown". */
+			long[] floor;
+			Node[][] nodes;
+		}
+
+		/** Stored for "may not be broken": distinct from any real tick count. */
+		static final int BREAK_NO = Integer.MIN_VALUE;
+
+		private final Long2ObjectOpenHashMap<Section> sections = new Long2ObjectOpenHashMap<>();
+		private long lastKey = Long.MIN_VALUE;
+		private Section last;
+
+		Section at(BlockPos pos) {
+			long key = ((long) (pos.getX() >> 4) & 0x3FFFFF) << 42
+					| ((long) (pos.getZ() >> 4) & 0x3FFFFF) << 20
+					| (long) (pos.getY() >> 3) & 0xFFFFF;
+			if (key == lastKey) {
+				return last;
+			}
+			Section s = sections.get(key);
+			if (s == null) {
+				s = new Section();
+				sections.put(key, s);
+			}
+			lastKey = key;
+			last = s;
+			return s;
+		}
+
+		static int index(BlockPos pos) {
+			return (pos.getX() & 15) | (pos.getZ() & 15) << 4 | (pos.getY() & 7) << 8;
+		}
 	}
 
 	/**
@@ -878,24 +925,33 @@ public final class LocalPathfinder {
 	}
 
 	private double floor(BlockPos c) {
-		long key = c.asLong();
-		double cached = floorCache.get(key);
-		if (cached == Double.NEGATIVE_INFINITY) {
-			cached = floorHeight(level, c);
-			if (!Double.isNaN(cached) && (nearLava(c) || avoid.test(key) || avoid.test(c.above().asLong()))) {
-				cached = Double.NaN;
-			}
-			floorCache.put(key, cached);
+		Cells.Section s = cells.at(c);
+		int i = Cells.index(c);
+		if (s.floor == null) {
+			s.floor = new long[Cells.SIZE];
 		}
-		return cached;
+		long stored = s.floor[i];
+		if (stored != 0) {
+			return Double.longBitsToDouble(stored - 1);
+		}
+		double floor = floorHeight(level, c);
+		if (!Double.isNaN(floor) && (nearLava(c) || avoid.test(c.asLong()) || avoid.test(c.above().asLong()))) {
+			floor = Double.NaN;
+		}
+		s.floor[i] = Double.doubleToLongBits(floor) + 1;
+		return floor;
 	}
 
 	private boolean passable(BlockPos pos) {
-		long key = pos.asLong();
-		int cached = passableCache.get(key);
+		Cells.Section s = cells.at(pos);
+		int i = Cells.index(pos);
+		if (s.passable == null) {
+			s.passable = new byte[Cells.SIZE];
+		}
+		byte cached = s.passable[i];
 		if (cached == 0) {
-			cached = isPassable(level, pos) && !avoid.test(key) ? 1 : 2;
-			passableCache.put(key, cached);
+			cached = isPassable(level, pos) && !avoid.test(pos.asLong()) ? (byte) 1 : (byte) 2;
+			s.passable[i] = cached;
 		}
 		return cached == 1;
 	}
@@ -908,9 +964,14 @@ public final class LocalPathfinder {
 		if (passable(pos)) {
 			return 0;
 		}
-		long key = pos.asLong();
-		int ticks = breakCache.get(key);
-		if (ticks == Integer.MIN_VALUE) {
+		Cells.Section s = cells.at(pos);
+		int cellIndex = Cells.index(pos);
+		if (s.breakTicks == null) {
+			s.breakTicks = new int[Cells.SIZE];
+		}
+		int stored = s.breakTicks[cellIndex];
+		int ticks = stored == Cells.BREAK_NO ? -1 : stored - 1;
+		if (stored == 0) {
 			BlockState state = level.getBlockState(pos);
 			// Liquids and other non-solid cells can't be mined out of the way.
 			boolean allowed = level.hasChunkAt(pos)
@@ -921,7 +982,7 @@ public final class LocalPathfinder {
 			if (ticks == Integer.MAX_VALUE) {
 				ticks = -1;
 			}
-			breakCache.put(key, ticks);
+			s.breakTicks[cellIndex] = ticks < 0 ? Cells.BREAK_NO : ticks + 1;
 		}
 		if (ticks < 0) {
 			return -1e9;
@@ -949,8 +1010,12 @@ public final class LocalPathfinder {
 	private final java.util.Map<BlockState, Double> wearCache = new java.util.HashMap<>();
 
 	private boolean nearLava(BlockPos feet) {
-		long key = feet.asLong();
-		int cached = lavaCache.get(key);
+		Cells.Section s = cells.at(feet);
+		int i = Cells.index(feet);
+		if (s.lava == null) {
+			s.lava = new byte[Cells.SIZE];
+		}
+		int cached = s.lava[i];
 		if (cached == 0) {
 			cached = 2;
 			int m = mode.lavaMargin;
@@ -965,7 +1030,7 @@ public final class LocalPathfinder {
 					}
 				}
 			}
-			lavaCache.put(key, cached);
+			s.lava[i] = (byte) cached;
 		}
 		return cached == 1;
 	}
