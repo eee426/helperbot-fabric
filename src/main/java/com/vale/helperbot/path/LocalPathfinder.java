@@ -12,7 +12,6 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -703,10 +702,10 @@ public final class LocalPathfinder {
 			return Double.NaN;
 		}
 		BlockState state = level.getBlockState(c);
-		VoxelShape shape = state.getCollisionShape(level, c);
+		boolean empty = BlockTable.empty(state, level, c);
 		double base;
-		if (shape.isEmpty() && isWater(level, c)) {
-			if (Guard.isDangerous(state)) {
+		if (empty && isWater(level, c)) {
+			if (BlockTable.dangerous(state)) {
 				return Double.NaN;
 			}
 			if (isWater(level, c.above())) {
@@ -715,16 +714,15 @@ public final class LocalPathfinder {
 			}
 			// Swimming at the surface, head out of the water.
 			base = c.getY() + SWIM_FLOOR;
-		} else if (shape.isEmpty()) {
+		} else if (empty) {
 			if (!isPassable(level, c) || !isSupport(level, c.below())) {
 				return Double.NaN;
 			}
 			base = c.getY();
 		} else {
 			// A low block in the feet cell (slab, path, snow layer, carpet) is the ground itself.
-			double top = shape.max(Direction.Axis.Y);
-			if (top > 0.9375 + 1e-4 || !state.getFluidState().isEmpty()
-					|| Guard.isDangerous(state) || Guard.isNoStep(state)) {
+			double top = BlockTable.top(state, level, c);
+			if (top > 0.9375 + 1e-4 || !BlockTable.clean(state)) {
 				return Double.NaN;
 			}
 			base = c.getY() + top;
@@ -749,7 +747,7 @@ public final class LocalPathfinder {
 			return false;
 		}
 		BlockState state = level.getBlockState(pos);
-		return state.getCollisionShape(level, pos).isEmpty() && !Guard.isDangerous(state);
+		return BlockTable.empty(state, level, pos) && !BlockTable.dangerous(state);
 	}
 
 	/**
@@ -774,16 +772,12 @@ public final class LocalPathfinder {
 			return false;
 		}
 		BlockState state = level.getBlockState(pos);
-		if (!state.getCollisionShape(level, pos).isEmpty()
-				|| !state.getFluidState().isEmpty()
-				|| Guard.isDangerous(state)
-				|| Guard.isNoStep(state)) {
+		if (!BlockTable.empty(state, level, pos) || !BlockTable.clean(state)) {
 			return false;
 		}
 		// Fences and walls are 1.5 blocks tall: the one below sticks half a block up into this cell.
 		BlockPos below = pos.below();
-		VoxelShape belowShape = level.getBlockState(below).getCollisionShape(level, below);
-		return belowShape.isEmpty() || belowShape.max(Direction.Axis.Y) <= 1.0 + 1e-6;
+		return BlockTable.top(level.getBlockState(below), level, below) <= 1.0 + 1e-6;
 	}
 
 	/** A full-height block that can be stood on. */
@@ -792,12 +786,9 @@ public final class LocalPathfinder {
 			return false;
 		}
 		BlockState state = level.getBlockState(pos);
-		VoxelShape shape = state.getCollisionShape(level, pos);
-		return !shape.isEmpty()
-				&& shape.max(Direction.Axis.Y) >= 0.999
-				&& state.getFluidState().isEmpty()
-				&& !Guard.isDangerous(state)
-				&& !Guard.isNoStep(state);
+		return !BlockTable.empty(state, level, pos)
+				&& BlockTable.top(state, level, pos) >= 0.999
+				&& BlockTable.clean(state);
 	}
 
 	private double floor(BlockPos c) {
@@ -837,9 +828,9 @@ public final class LocalPathfinder {
 			BlockState state = level.getBlockState(pos);
 			// Liquids and other non-solid cells can't be mined out of the way.
 			boolean allowed = level.hasChunkAt(pos)
-					&& !state.getCollisionShape(level, pos).isEmpty()
+					&& !BlockTable.empty(state, level, pos)
 					&& Guard.canBreak(level, pos, state)
-					&& !Guard.isDangerous(state);
+					&& !BlockTable.dangerous(state);
 			ticks = allowed ? BreakTimes.estimateTicks(inventory, level, pos, state) : -1;
 			if (ticks == Integer.MAX_VALUE) {
 				ticks = -1;

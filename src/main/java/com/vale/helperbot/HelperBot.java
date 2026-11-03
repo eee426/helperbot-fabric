@@ -113,9 +113,11 @@ public class HelperBot implements ModInitializer {
 	 * (about a third of a second here, some 20 seconds on a phone): every block's drops, every
 	 * recipe, every mob's drops (each killed 60 times on paper) and where mobs spawn. The mobs'
 	 * "killer" is a stand-in player, since none is around yet; drops come out the same.
+	 * Also what the pathfinder asks of each block state (tags may have changed on reload).
 	 */
 	private static void warmUp(net.minecraft.server.MinecraftServer server) {
 		var level = server.overworld();
+		com.vale.helperbot.path.BlockTable.build();
 		DropAnalysis.warmUp(level);
 		RecipeIndex.craftsFor(level, net.minecraft.world.item.Items.STICK);
 		com.vale.helperbot.knowledge.MobDrops.sources(level, net.fabricmc.fabric.api.entity.FakePlayer.get(level),
