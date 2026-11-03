@@ -37,17 +37,16 @@ public class HelperBot implements ModInitializer {
 			BiomeHints.clearCache();
 			RecipeIndex.clearCache();
 			com.vale.helperbot.knowledge.MobDrops.clearCache();
-			DropAnalysis.warmUp(server.overworld());
+			warmUp(server);
 		});
 
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			ProtectionZones.load(server);
 			com.vale.helperbot.guard.Restrictions.load(server);
-			// One pass over every block's loot table, so the first /bot get doesn't stall the game.
 			long start = System.nanoTime();
-			DropAnalysis.warmUp(server.overworld());
+			warmUp(server);
 			BiomeHints.biomesFor(server.overworld(), java.util.List.of()); // reads every world-gen feature once
-			LOGGER.info("HelperBot drop and biome indexes built in {} ms", (System.nanoTime() - start) / 1_000_000);
+			LOGGER.info("HelperBot drop, recipe, mob and biome indexes built in {} ms", (System.nanoTime() - start) / 1_000_000);
 			if (System.getenv("HELPERBOT_BENCH") != null) {
 				com.vale.helperbot.knowledge.PlanBench.run(server);
 			}
@@ -108,4 +107,19 @@ public class HelperBot implements ModInitializer {
 	}
 
 	private static final Map<UUID, Long> lastBotInteraction = new HashMap<>();
+
+	/**
+	 * Builds what the first plan would otherwise build on the spot, freezing the game meanwhile
+	 * (about a third of a second here, some 20 seconds on a phone): every block's drops, every
+	 * recipe, every mob's drops (each killed 60 times on paper) and where mobs spawn. The mobs'
+	 * "killer" is a stand-in player, since none is around yet; drops come out the same.
+	 */
+	private static void warmUp(net.minecraft.server.MinecraftServer server) {
+		var level = server.overworld();
+		DropAnalysis.warmUp(level);
+		RecipeIndex.craftsFor(level, net.minecraft.world.item.Items.STICK);
+		com.vale.helperbot.knowledge.MobDrops.sources(level, net.fabricmc.fabric.api.entity.FakePlayer.get(level),
+				net.minecraft.world.item.Items.BONE);
+		com.vale.helperbot.knowledge.MobDrops.spawnBiomes(level, net.minecraft.world.entity.EntityType.PIG);
+	}
 }

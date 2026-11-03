@@ -567,11 +567,29 @@ public final class MovementController {
 	 * Runs the current search for this tick's budget. If it finds nothing useful (no path, or a
 	 * partial path that barely gets closer), the next bigger window is tried.
 	 */
-	/** Runs a search for this tick's budget, timing it (see Perf). True once it has finished. */
+	/** Search time already spent this tick, and which tick that was. */
+	private long searchedThisTick;
+	private int searchTick = -1;
+
+	/**
+	 * Runs a search for what's left of this tick's budget, timing it (see Perf). True once it has
+	 * finished. The budget is for all searching in a tick together: planning the path and planning
+	 * ahead while walking used to get one each, twice the budget in some ticks.
+	 */
 	private boolean timedStep(LocalPathfinder s) {
+		if (searchTick != bot.tickCount) {
+			searchTick = bot.tickCount;
+			searchedThisTick = 0;
+		}
+		long left = PLAN_BUDGET_NANOS - searchedThisTick;
+		if (left <= 0) {
+			return false; // carries on next tick
+		}
 		long started = System.nanoTime();
-		boolean done = s.step(PLAN_BUDGET_NANOS);
-		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
+		boolean done = s.step(left);
+		long took = System.nanoTime() - started;
+		searchedThisTick += took;
+		bot.perf().add(Perf.Part.PATHFIND, took);
 		return done;
 	}
 

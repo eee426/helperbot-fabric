@@ -269,7 +269,9 @@ public final class LocalPathfinder {
 		}
 		long deadline = System.nanoTime() + budgetNanos;
 		while (!open.isEmpty() && expanded < limits.maxNodes()) {
-			if ((expanded & 127) == 0 && System.nanoTime() > deadline) {
+			// Often enough that a slow stretch (under water, lots to dig) can't run far past the
+			// budget: every 128 nodes it overshot to some 35 ms in a tick.
+			if ((expanded & 15) == 0 && System.nanoTime() > deadline) {
 				return false;
 			}
 			Node node = open.poll();
