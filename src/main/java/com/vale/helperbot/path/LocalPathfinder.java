@@ -237,8 +237,8 @@ public final class LocalPathfinder implements Planner {
 		this.heuristicWeight = partial ? PARTIAL_HEURISTIC_WEIGHT : 1.0;
 		this.travel = new TravelEstimate(level, inventory, mode, target, horizontalOnly);
 
-		// Starting with the head in air counts as a full breath: the bot tops up before diving.
-		int startAir = Air.breathable(level, start) ? air.full() : air.now();
+		// The breath it really has: where it needs more before going under, the plan says so (see breathe).
+		int startAir = air.now();
 		startNode = new Node(start, startFloor, 0, heuristic(start) * heuristicWeight, null, null, startAir);
 		open.add(startNode);
 		cell(start)[bucket(startAir)] = startNode;
@@ -284,7 +284,12 @@ public final class LocalPathfinder implements Planner {
 			if (partial && expanded >= EARLY_STOP_MIN_NODES && atWindowEdge(closest.pos)) {
 				break;
 			}
-			for (Candidate c : neighbours(node.pos, node.floor)) {
+			List<Candidate> steps = neighbours(node.pos, node.floor);
+			Candidate breath = breathe(node);
+			if (breath != null) {
+				steps.add(breath);
+			}
+			for (Candidate c : steps) {
 				int airLeft = airAfter(node, c);
 				if (airLeft < 0) {
 					continue; // couldn't get back up from there in time
@@ -418,19 +423,38 @@ public final class LocalPathfinder implements Planner {
 				break;
 			}
 		}
-		if (!floods && Air.breathable(level, to)) {
-			return air.full();
-		}
 		if (!air.limited()) {
 			return 0;
 		}
+		if (!floods && Air.breathable(level, to)) {
+			// Head out of the water: the breath comes back as it goes, at vanilla's pace, not all at once.
+			return (int) Math.min(air.full(), Math.max(0, from.air) + air.refill() * c.ticks());
+		}
 		// Charged with the real time the step takes, not its cost (which includes preferences).
 		int left = from.air - (int) Math.ceil(c.ticks());
-		if (!Air.enough(left, escape.ticks(to), Air.PLAN_SLACK)) {
+		// Kept all through the step, not just at its end: mining first, it stays where it set off
+		// meanwhile, maybe further from air than where it ends up (a long dig down there ran out of
+		// breath half way through, by the start's reckoning, on a step that ended fine).
+		double way = c.step().toBreak().isEmpty() ? escape.ticks(to) : Math.max(escape.ticks(to), escape.ticks(from.pos));
+		if (!Air.enough(left, way, Air.PLAN_SLACK)) {
 			airRejected++;
 			return -1;
 		}
 		return left;
+	}
+
+	/**
+	 * Stay here, head out of the water, until the breath is back: the plan's own way of taking a
+	 * breath, at the time it takes (vanilla gives 4 air a tick), wherever on the route it's best. It
+	 * used to be the breathing layer's alone, deciding as it went, and where its sums and the plan's
+	 * differed the bot turned back half way along a planned route.
+	 */
+	private Candidate breathe(Node node) {
+		if (!air.limited() || node.air >= air.full() || !Air.breathable(level, node.pos)) {
+			return null;
+		}
+		double ticks = Math.ceil((air.full() - node.air) / air.refill());
+		return new Candidate(new PathStep(PathStep.Type.WAIT, node.pos, node.pos, List.of()), node.floor, ticks);
 	}
 
 	/**

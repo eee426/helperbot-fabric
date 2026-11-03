@@ -18,7 +18,9 @@ public record PathStep(Type type, BlockPos from, BlockPos to, List<BlockPos> toB
 		WALK(false, false),
 		ASCEND(false, true),
 		DESCEND(false, false),
-		PILLAR(true, true);
+		PILLAR(true, true),
+		/** Stay where it is, head out of the water, until it has its breath back (planned: see LocalPathfinder#breathe). */
+		WAIT(false, false);
 
 		/** Places its block during the move (pillar: mid-jump) rather than before setting off (bridge). */
 		public final boolean placesWhileMoving;

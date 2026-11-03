@@ -523,20 +523,7 @@ public final class MovementController {
 				path = null;
 				cancelLookahead();
 			}
-			// About to go under from where it can breathe: top up first, like a player taking a
-			// breath before diving. The plan counted on a full breath.
-			if (path != null && index < path.size() && !ignoreAir && !headUnderwater()
-					&& diveStep(path.get(index)) && bot.getAirSupply() < bot.getMaxAirSupply()) {
-				if (!toppingUp) {
-					toppingUp = true;
-					bot.log("下水前先换满气");
-				}
-				bot.setSprinting(false);
-				fall();
-				lastPosition = bot.position();
-				return;
-			}
-			toppingUp = false;
+			// (Taking a breath before going under is a step of the plan now: see PathStep.Type.WAIT.)
 			if (path == null || index >= path.size() || replanRequested) {
 				if (!switchToLookahead()) {
 					replanRequested = false;
@@ -657,21 +644,6 @@ public final class MovementController {
 		}
 	}
 
-	private boolean toppingUp;
-
-	/** Does this step end with the head under water (or dig into water)? */
-	private boolean diveStep(PathStep step) {
-		ServerLevel level = bot.level();
-		if (!Air.breathable(level, step.to())) {
-			return true;
-		}
-		for (BlockPos b : step.toBreak()) {
-			if (Escape.floodsWhenDug(level, b)) {
-				return true;
-			}
-		}
-		return false;
-	}
 
 	/** Search windows in use: a small cube first under water (see LocalPathfinder#WATER_LEVELS). */
 	private LocalPathfinder.Limits[] levels = LocalPathfinder.LEVELS;
@@ -1497,7 +1469,7 @@ public final class MovementController {
 		double tz = to.getZ() + 0.5;
 		double ty = stepFloor;
 
-		if (isInWater() && LocalPathfinder.isWater(bot.level(), to)) {
+		if (step.type() != PathStep.Type.WAIT && isInWater() && LocalPathfinder.isWater(bot.level(), to)) {
 			swimTowards(tx, ty, tz);
 			return;
 		}
@@ -1509,7 +1481,8 @@ public final class MovementController {
 			PathStep.Type.WALK, WalkStep.INSTANCE,
 			PathStep.Type.ASCEND, WalkStep.INSTANCE,
 			PathStep.Type.DESCEND, WalkStep.INSTANCE,
-			PathStep.Type.PILLAR, PillarStep.INSTANCE));
+			PathStep.Type.PILLAR, PillarStep.INSTANCE,
+			PathStep.Type.WAIT, BreatheStep.INSTANCE));
 
 	private static StepExecutor executor(PathStep step) {
 		return EXECUTORS.get(step.type());

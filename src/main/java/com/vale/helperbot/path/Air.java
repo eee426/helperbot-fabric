@@ -66,15 +66,19 @@ public final class Air {
 	 * @param limited        false: ignore air (e.g. while heading for air: any way up will do)
 	 * @param workTicks      what it will do once there (mining a block, say), in ticks on dry land:
 	 *                       the goal must leave air for that too, at the speed it works there
+	 * @param refill         budget won back per tick with the head out of the water (see {@link #REFILL})
 	 */
-	public record Profile(int now, int full, double waterDigFactor, boolean limited, double workTicks) {
+	public record Profile(int now, int full, double waterDigFactor, boolean limited, double workTicks, double refill) {
 	}
+
+	/** Vanilla: air comes back 4 points a tick with the head out of the water. */
+	public static final int REFILL = 4;
 
 	private Air() {
 	}
 
 	public static Profile profile(LivingEntity e, boolean limited, double workTicks) {
-		return new Profile(budget(e), fullBudget(e), waterDigFactor(e), limited, workTicks);
+		return new Profile(budget(e), fullBudget(e), waterDigFactor(e), limited, workTicks, REFILL * airStretch(e));
 	}
 
 	/**
