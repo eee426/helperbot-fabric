@@ -44,12 +44,14 @@ public final class LocalPathfinder implements Planner {
 			new Limits(64, 24, 32, 200_000),
 	};
 	/**
-	 * Under water the first try is a small cube: routes there are short anyway (air), the world
-	 * changes fast (sand falls, water floods in, kelp breaks off), and the bot re-plans often.
-	 * Each node also carries the air left, which multiplies the nodes; a small window keeps it cheap.
+	 * Under water the first try is a cube of 16 each way: about as far as one breath goes (sprint-
+	 * swimming), and tall enough to take in the surface from most depths, so the plan can route up for
+	 * a breath itself (see breathe). It was 8: from 10 down the surface was outside, and only the
+	 * breathing layer could take it up. Each node also carries the air left, which multiplies the
+	 * nodes; searches run in the background, so the main thread pays only for copying the blocks.
 	 */
 	public static final Limits[] WATER_LEVELS = {
-			new Limits(8, 8, 8, 30_000),
+			new Limits(16, 16, 16, 40_000),
 			LEVELS[1],
 			LEVELS[2],
 	};
