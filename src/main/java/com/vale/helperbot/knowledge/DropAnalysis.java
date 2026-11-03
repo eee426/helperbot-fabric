@@ -23,6 +23,8 @@ import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.block.state.properties.Property;
 
 import java.util.ArrayList;
@@ -174,7 +176,21 @@ public final class DropAnalysis {
 	public static boolean dropsFrom(Item item, BlockState state) {
 		Map<Block, Set<BlockState>> byBlock = dropStates == null ? null : dropStates.get(item);
 		Set<BlockState> ok = byBlock == null ? null : byBlock.get(state.getBlock());
-		return ok == null || ok.contains(project(state));
+		return ok == null || ok.contains(project(dropping(state)));
+	}
+
+	/**
+	 * The state whose drops breaking this one gives. The top half of a two-block plant or door drops
+	 * nothing itself (its loot table is for the bottom half), but breaking it takes the bottom half
+	 * with it, which then drops as usual (vanilla). Asked about the top half as it is, the check
+	 * before mining said "this hand gets nothing from it" and skipped every tall flower's top.
+	 */
+	public static BlockState dropping(BlockState state) {
+		if (state.hasProperty(BlockStateProperties.DOUBLE_BLOCK_HALF)
+				&& state.getValue(BlockStateProperties.DOUBLE_BLOCK_HALF) == DoubleBlockHalf.UPPER) {
+			return state.setValue(BlockStateProperties.DOUBLE_BLOCK_HALF, DoubleBlockHalf.LOWER);
+		}
+		return state;
 	}
 
 	/** A state of {@code block} that drops {@code item}, to test tools against. */
@@ -429,7 +445,7 @@ public final class DropAnalysis {
 		int trials = (int) Math.max(TRIALS, Math.min(RARE_TRIALS, Math.ceil(3 / rate)));
 		// Plain items (blocks, food...) break like a bare hand, and are what the hand often holds.
 		ItemStack tool = !held.isDamageableItem() && !held.isEnchanted() ? ItemStack.EMPTY : held;
-		return drops(level, breaker, state, tool, item, trials);
+		return drops(level, breaker, dropping(state), tool, item, trials);
 	}
 
 	/** Expected number per break of this block (best tool), 1.0 if unknown. */

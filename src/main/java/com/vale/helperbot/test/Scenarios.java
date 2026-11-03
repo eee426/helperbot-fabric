@@ -611,7 +611,23 @@ public final class Scenarios {
 					// layer does when the planned way up stalls (with low air it would plan a route
 					// instead, and this part wouldn't be tested).
 					return c.bot().movement().ascendStep() ? Scenario.Outcome.pass("浮上来了") : null;
-				})
+				}),
+
+				new Scenario("D1", "采牡丹（两格高的花：先够到的是上半截）", 2 * MINUTE, (a, bot, me) -> {
+					// A step one block up, so the flowers' top halves are level with its feet: the
+					// nearest part of each is the top. The top's own loot is empty; breaking it takes
+					// the bottom with it, which drops the flower.
+					a.fill(2, 41, -1, 4, 41, 1, Blocks.STONE);
+					for (int i = 0; i < 2; i++) {
+						net.minecraft.world.level.block.state.BlockState lower = Blocks.PEONY.defaultBlockState();
+						a.set(6, 41, i * 2 - 1, lower);
+						a.set(6, 42, i * 2 - 1, lower.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.DOUBLE_BLOCK_HALF,
+								net.minecraft.world.level.block.state.properties.DoubleBlockHalf.UPPER));
+					}
+					teleport(bot, a, 4, 42, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.PEONY, 2, Mode.NORMAL);
+				}, Scenario.has(Items.PEONY, 2, c -> !c.logHas("重新选工具"), "说手里的东西挖不出（拿上半截当没有掉落）"))
 		);
 	}
 
