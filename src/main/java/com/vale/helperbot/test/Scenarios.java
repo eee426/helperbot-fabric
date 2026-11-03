@@ -640,6 +640,22 @@ public final class Scenarios {
 				}, Scenario.has(Items.SAND, 1, c -> c.logCount("该换气了") == 0 && !c.logHas("剩下的气不够"),
 						"去换了气（说明规划没把挖的时间算进去，或者游的时间算少了）")),
 
+				new Scenario("W31", "6 格深的池底挖沙砾拿燧石（时运 III 铲子，必掉燧石）：挖完把燧石捡起来", 4 * MINUTE, (a, bot, me) -> {
+					// Fortune III makes gravel always drop flint: every break leaves a flint to collect
+					// under water (a player saw it swim almost up to one, turn back, and never go for it again).
+					a.fill(6, 35, -3, 12, 40, 3, Blocks.WATER);
+					a.set(7, 34, -2, Blocks.GRAVEL);
+					a.set(9, 34, 1, Blocks.GRAVEL);
+					a.set(11, 34, -1, Blocks.GRAVEL);
+					teleport(bot, a, 3, 41, 0);
+					ItemStack shovel = new ItemStack(Items.IRON_SHOVEL);
+					shovel.enchant(a.level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT)
+							.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.FORTUNE), 3);
+					bot.getInventory().add(shovel);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.FLINT, 3, Mode.NORMAL);
+				}, Scenario.has(Items.FLINT, 3, c -> !c.logHas("不要了"), "放弃了一个燧石（没捡到）")),
+
 				new Scenario("F1", "装一桶水：地面上，9 格外有个小水池（血不多）", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(10, 39, 4, 12, 40, 6, Blocks.WATER); // a pond 3x3, 2 deep, in the grass
 					teleport(bot, a, 1, 41, 0);

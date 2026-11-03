@@ -115,6 +115,11 @@ public final class PathJob {
 		return failed ? "后台搜索出错：" + error : search.diagnose();
 	}
 
+	/** See LocalPathfinder#airRejected. */
+	public int airRejected() {
+		return failed ? 0 : search.airRejected();
+	}
+
 	public double progressBlocks() {
 		return failed ? 0 : search.progressBlocks();
 	}

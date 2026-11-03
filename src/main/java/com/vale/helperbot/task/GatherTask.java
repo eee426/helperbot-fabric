@@ -63,7 +63,7 @@ public class GatherTask implements BotTask {
 	private static final double REACH_MARGIN = 0.3;
 
 	private enum Phase {
-		PREPARE, FIND, LOCATE, TRAVEL, APPROACH, MINE, COLLECT, RETURN
+		PREPARE, FIND, LOCATE, TRAVEL, APPROACH, MINE, FETCH, RETURN
 	}
 
 	private final ServerPlayer requester;
@@ -72,6 +72,10 @@ public class GatherTask implements BotTask {
 	private final int wanted;
 	private final ComeTask returnLeg;
 	private Phase phase = Phase.PREPARE;
+	/** Items on the ground are sources too (see DropFetch): the one it's fetching, in FETCH. */
+	private final DropFetch drops = new DropFetch();
+	/** Items lying within this are sources: the same range it looks for blocks in. */
+	private static final double DROP_RANGE = SCAN_CHUNKS * 16;
 	private int startCount;
 	/** Hand checks failed in a row for the current target (see {@link #mine}). */
 	private int handFixes;
@@ -269,12 +273,12 @@ public class GatherTask implements BotTask {
 			}
 		}
 		if (phase != Phase.PREPARE && phase != Phase.RETURN) {
-			if (collected(bot) < wanted && phase != Phase.COLLECT
-					&& collected(bot) + bot.loot().pending(item) >= wanted) {
-				// Enough has come out: stop mining and let the drops be collected.
-				bot.log("挖够了，等掉落物捡完（还差 " + (wanted - collected(bot)) + " 个）");
+			if (collected(bot) < wanted && (phase == Phase.APPROACH || phase == Phase.MINE) && bot.tickCount % 10 == 0
+					&& collected(bot) + drops.lying(bot, item, DROP_RANGE) >= wanted && !bot.movement().isMining()) {
+				// Enough lies around: no more mining, just picking up.
+				bot.log("地上的已经够了，去捡（还差 " + (wanted - collected(bot)) + " 个）");
 				bot.movement().stop();
-				phase = Phase.COLLECT;
+				return nextTarget(bot);
 			}
 			if (collected(bot) >= wanted) {
 				if (asStep) {
@@ -294,7 +298,7 @@ public class GatherTask implements BotTask {
 			case TRAVEL -> travel(bot);
 			case APPROACH -> approach(bot);
 			case MINE -> mine(bot);
-			case COLLECT -> collect(bot);
+			case FETCH -> fetch(bot);
 			case RETURN -> requester.hasDisconnected() ? Status.FAILED : ComeTask.followTick(bot, requester, mode, returnLeg);
 		};
 	}
@@ -385,10 +389,31 @@ public class GatherTask implements BotTask {
 		}
 		ServerLevel level = bot.level();
 		BlockPos here = bot.blockPosition();
+		drops.stop();
+		// Items on the ground: sources like the blocks, on the same scale (see DropFetch). If they
+		// make up what's still missing, no more mining.
+		int needed = wanted - collected(bot);
+		net.minecraft.world.entity.item.ItemEntity bestItem = null;
+		double bestItemCost = Double.MAX_VALUE;
+		int lying = 0;
+		for (net.minecraft.world.entity.item.ItemEntity e : drops.nearby(bot, item, DROP_RANGE)) {
+			lying += e.getItem().getCount();
+			double c = DropFetch.cost(bot, e, needed);
+			if (c < bestItemCost) {
+				bestItemCost = c;
+				bestItem = e;
+			}
+		}
+		if (bestItem != null && lying >= needed) {
+			return fetch(bot, bestItem);
+		}
 		// Also drops ones that changed since the scan (berries picked, crop trampled).
 		targets.removeIf(p -> rejected.contains(p) || !toolFor.containsKey(level.getBlockState(p).getBlock())
 				|| !DropAnalysis.dropsFrom(item, level.getBlockState(p)));
 		if (targets.isEmpty()) {
+			if (bestItem != null) {
+				return fetch(bot, bestItem);
+			}
 			phase = Phase.FIND;
 			return Status.RUNNING;
 		}
@@ -432,6 +457,9 @@ public class GatherTask implements BotTask {
 		if (best == null) {
 			return nextTarget(bot); // all of those were out of reach: look at the next few
 		}
+		if (bestItem != null && bestItemCost <= bestCost) {
+			return fetch(bot, bestItem);
+		}
 		targets.remove(best);
 		current = best;
 		currentBlock = level.getBlockState(current).getBlock();
@@ -447,15 +475,47 @@ public class GatherTask implements BotTask {
 		// Not from inside a protected chunk: it can't do anything there (see ProtectionZones).
 		ServerLevel level = bot.level();
 		double eyeHeight = bot.getEyeHeight();
-		bot.movement().goTo((w, p) -> !p.equals(block) && !ProtectionZones.isProtected(w, p)
-				&& new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5).distanceTo(center) <= reach,
-				block, mode);
+		// With a face open to air or water it must also be in sight, like a player has to see what
+		// they mine: within reach isn't enough from the bottom of a hole, with the floor in between
+		// (it stopped there, set about mining the floor as "in the way", and gave the block up).
+		// Buried ones (ore in rock) have no such spot: getting close and digging through is the way.
+		boolean exposed = false;
+		for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
+			BlockPos n = block.relative(d);
+			exposed |= LocalPathfinder.isPassable(level, n) || LocalPathfinder.isWater(level, n);
+		}
+		boolean mustSee = exposed;
+		bot.movement().goTo((w, p) -> {
+			if (p.equals(block) || ProtectionZones.isProtected(w, p)) {
+				return false;
+			}
+			Vec3 eye = new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5);
+			if (eye.distanceTo(center) > reach) {
+				return false;
+			}
+			if (!mustSee) {
+				return true;
+			}
+			return blockerOf(w, eye, block) == null;
+		}, block, mode);
 		// Under water the plan must leave air to mine it too, not just to get there and back.
 		BlockState state = level.getBlockState(block);
 		int dry = dryTicks(bot, block, state, toolFor.getOrDefault(state.getBlock(), MovementController.HAND));
 		if (dry != Integer.MAX_VALUE) {
 			bot.movement().workAtGoal(dry);
 		}
+	}
+
+	/**
+	 * What's in the line of sight from {@code eye} to the block, or null if nothing: the one check
+	 * for both where to stand (goNear) and what to mine first (mine). They used to look differently
+	 * (one at the blocks' collision boxes from the middle of the cell, the other at their outlines from
+	 * the real eye), and it chose a spot to stand that the mining then found blocked.
+	 */
+	private static BlockPos blockerOf(net.minecraft.world.level.BlockGetter world, Vec3 eye, BlockPos block) {
+		BlockHitResult hit = world.clip(new ClipContext(eye, Vec3.atCenterOf(block), ClipContext.Block.OUTLINE,
+				ClipContext.Fluid.NONE, net.minecraft.world.phys.shapes.CollisionContext.empty()));
+		return hit.getType() == HitResult.Type.BLOCK && !hit.getBlockPos().equals(block) ? hit.getBlockPos() : null;
 	}
 
 	/** Ticks to mine it on dry land with this tool (a slot, the hand, or the best there is), or MAX_VALUE if it can't be. */
@@ -577,12 +637,11 @@ public class GatherTask implements BotTask {
 			return Status.RUNNING;
 		}
 		// Like a player, the bot has to see the block: if something is in the way, deal with that first.
-		BlockHitResult hit = level.clip(new ClipContext(eye, center, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, bot));
+		BlockPos blocker = blockerOf(level, eye, current);
 		BlockPos aim = current;
 		Block aimBlock = currentBlock;
 		boolean obstacle = false;
-		if (hit.getType() == HitResult.Type.BLOCK && !hit.getBlockPos().equals(current)) {
-			BlockPos blocker = hit.getBlockPos();
+		if (blocker != null) {
 			BlockState blockerState = level.getBlockState(blocker);
 			if (toolFor.containsKey(blockerState.getBlock()) && DropAnalysis.dropsFrom(item, blockerState)
 					&& Guard.canHarvest(level, blocker, blockerState)) {
@@ -658,7 +717,8 @@ public class GatherTask implements BotTask {
 		if (result == MovementController.MineResult.DONE && !obstacle) {
 			blocksMined++;
 			unreachableInRow = 0;
-			// The drop tracker follows what came out (and the bot's loot layer collects it).
+			// Noted to check it dropped what it should (see checkDrop); what came out is a source
+			// like any other now, and the nearest, so usually picked up next.
 			int brokeAt = bot.movement().lastBreakTick();
 			bot.loot().onBreak(current, brokeAt);
 			lastBreak = current;
@@ -703,7 +763,9 @@ public class GatherTask implements BotTask {
 		}
 		// Even with a full breath: back down here (about as long as the way up), then the mining.
 		if (!Air.enough(Air.fullBudget(bot) - escape, escape, mining)) {
-			bot.log(aim.toShortString() + " 在水下要挖 " + (int) mining / 20 + " 秒，一口气挖不完再游上去，跳过");
+			bot.log(aim.toShortString() + " 的" + state.getBlock().getName().getString() + " 在水下要挖 " + (int) mining / 20
+					+ " 秒（" + toolName(bot, tool) + "，岸上 " + dig + " 刻，站在 " + bot.blockPosition().toShortString()
+					+ (LocalPathfinder.isSupport(level, bot.blockPosition().below()) ? "，站着" : "，浮着") + "），一口气挖不完再游上去，跳过");
 			reject(current);
 			return nextTarget(bot);
 		}
@@ -780,24 +842,18 @@ public class GatherTask implements BotTask {
 		return null;
 	}
 
-	/**
-	 * Enough has been mined; the bot's loot layer is collecting the drops (it runs before the task
-	 * each tick). Under water it leaves drops floating up to the surface, so go up there. If some
-	 * drops are lost (despawned, unreachable), back to mining.
-	 */
-	private Status collect(BotPlayer bot) {
-		if (bot.loot().pending(item) == 0) {
-			if (collected(bot) < wanted) {
-				bot.log("有些掉落物没捡到，接着挖");
-				return nextTarget(bot);
-			}
-			return Status.RUNNING; // tick() wraps up next time round
-		}
-		ServerLevel level = bot.level();
-		if (bot.movement().headUnderwater() && bot.movement().status() != MovementController.Status.MOVING) {
-			bot.movement().goTo((w, p) -> Air.breathable(w, p), bot.blockPosition().above(bot.movement().waterAbove() + 1), mode);
-		}
+	private Status fetch(BotPlayer bot, net.minecraft.world.entity.item.ItemEntity e) {
+		drops.start(bot, e, mode);
+		phase = Phase.FETCH;
 		return Status.RUNNING;
+	}
+
+	/** Fetching an item from the ground; once it's picked up (or out of reach), the next source. */
+	private Status fetch(BotPlayer bot) {
+		if (drops.tick(bot, mode) == DropFetch.Result.RUNNING) {
+			return Status.RUNNING;
+		}
+		return nextTarget(bot);
 	}
 
 	private void reject(BlockPos pos) {
@@ -898,7 +954,7 @@ public class GatherTask implements BotTask {
 			case TRAVEL -> "采集 " + what + "：前往 " + travelTarget.getX() + ", " + travelTarget.getZ();
 			case APPROACH -> "采集 " + what + "：走向 " + current.toShortString();
 			case MINE -> "采集 " + what + "：正在挖 " + current.toShortString();
-			case COLLECT -> "采集 " + what + "：捡掉落物";
+			case FETCH -> "采集 " + what + "：捡地上的";
 			case RETURN -> "采集 " + what + "：返回";
 		};
 	}

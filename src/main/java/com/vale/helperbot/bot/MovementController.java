@@ -502,6 +502,12 @@ public final class MovementController {
 		boolean atStepBoundary = !stepStarted && breakIndex == 0 && breakingPos == null;
 		if (atStepBoundary) {
 			if (goal.test(bot.level(), feet()) && workFitsHere()) {
+				// Arrived means at the middle of the cell, which is where plans and goals take it to
+				// stand (what it sees and reaches from there). Pushed or shuffled off it (after picking
+				// something up, say), it saw a block from the middle that was hidden from where it was.
+				if (offCentre(feet()) && recentre(feet())) {
+					return;
+				}
 				status = Status.ARRIVED;
 				path = null;
 				return;
@@ -703,6 +709,7 @@ public final class MovementController {
 		resetStep();
 		if (result.steps().isEmpty()) {
 			bot.log("在 ±" + radius + " 格内找不到路：" + finished.diagnose());
+			noPathForAir = finished.airRejected() > 0;
 			if (emptyPlans + 1 >= MAX_EMPTY_PLANS) {
 				crossCheck(); // about to give up (see onNoPath)
 			}
@@ -776,9 +783,14 @@ public final class MovementController {
 		return true;
 	}
 
+	/** The last search that found nothing turned steps down for want of air (see onNoPath). */
+	private boolean noPathForAir;
+
 	private void onNoPath() {
 		path = null;
-		if (!ignoreAir && headUnderwater() && Air.budget(bot) < Air.fullBudget(bot)) {
+		// Only when air was the reason: it used to be assumed whenever it was under water with less
+		// than a full breath, and a drop it couldn't reach for another reason sent it up for air.
+		if (!ignoreAir && headUnderwater() && noPathForAir && Air.budget(bot) < Air.fullBudget(bot)) {
 			// Nowhere to go on the air left: get a full breath and try again (a player diving to
 			// dig deeper does the same: down, dig, up, down again).
 			bot.log("这口气不够走下去，先去换气");

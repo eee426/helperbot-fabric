@@ -85,7 +85,7 @@ final class HuntTask {
 	private static final int HEAL_MAX_TICKS = 600;
 
 	private enum Phase {
-		FIND, LOCATE, EXPLORE, WAIT, CHASE, HEAL
+		FIND, LOCATE, EXPLORE, WAIT, CHASE, FETCH, HEAL
 	}
 
 	private final ServerPlayer requester;
@@ -95,6 +95,13 @@ final class HuntTask {
 	private final Map<EntityType<?>, Double> sources;
 	private final Set<UUID> rejected = new HashSet<>();
 	private Phase phase = Phase.FIND;
+	/** Items on the ground are sources too (a kill's drops, say): the one it's fetching, in FETCH (see DropFetch). */
+	private final DropFetch drops = new DropFetch();
+	/**
+	 * Ticks a kill takes besides getting there (a few hits, the mob running), for weighing a mob
+	 * against an item on the ground on one scale (see DropFetch#cost).
+	 */
+	private static final double KILL_TICKS = 100;
 	private int startCount = -1;
 	private Mob target;
 	private BlockPos aimedAt;
@@ -160,6 +167,12 @@ final class HuntTask {
 			case EXPLORE -> explore(bot);
 			case WAIT -> waitForSpawns(bot);
 			case CHASE -> chase(bot);
+			case FETCH -> {
+				if (drops.tick(bot, mode) != DropFetch.Result.RUNNING) {
+					setPhase(Phase.FIND);
+				}
+				yield BotTask.Status.RUNNING;
+			}
 			case HEAL -> {
 				if (bot.getHealth() >= RESUME_HEALTH || phaseTicks > HEAL_MAX_TICKS || !bot.canRegenerate()) {
 					setPhase(Phase.FIND);
@@ -201,6 +214,29 @@ final class HuntTask {
 
 	private BotTask.Status find(BotPlayer bot) {
 		target = nearestPrey(bot, SCAN_RADIUS);
+		// What lies on the ground (its kills' drops, or anyone's) against the nearest mob, on one scale.
+		int needed = wanted - (count(bot.getInventory()) - startCount);
+		net.minecraft.world.entity.item.ItemEntity bestItem = null;
+		double bestItemCost = Double.MAX_VALUE;
+		int lying = 0;
+		for (net.minecraft.world.entity.item.ItemEntity e : drops.nearby(bot, item, SCAN_RADIUS)) {
+			lying += e.getItem().getCount();
+			double c = DropFetch.cost(bot, e, needed);
+			if (c < bestItemCost) {
+				bestItemCost = c;
+				bestItem = e;
+			}
+		}
+		if (bestItem != null) {
+			double preyCost = target == null ? Double.MAX_VALUE
+					: (bot.distanceTo(target) * 5 + KILL_TICKS) / Math.max(0.01, sources.getOrDefault(target.getType(), 1.0));
+			if (lying >= needed || bestItemCost <= preyCost) {
+				target = null;
+				drops.start(bot, bestItem, mode);
+				setPhase(Phase.FETCH);
+				return BotTask.Status.RUNNING;
+			}
+		}
 		if (target != null) {
 			bot.log("盯上了 " + target.getType().getDescription().getString() + " @" + target.blockPosition().toShortString());
 			bot.holdWeapon();
@@ -514,8 +550,7 @@ final class HuntTask {
 
 	private BotTask.Status chase(BotPlayer bot) {
 		if (target == null || target.isRemoved() || !target.isAlive()) {
-			// Its drops are collected by the bot's loot layer (BotPlayer), before this task's
-			// next tick; then on to the next one.
+			// What it dropped lies around now: a source like the next mob (see find).
 			bot.movement().stop();
 			setPhase(Phase.FIND);
 			return BotTask.Status.RUNNING;
@@ -605,6 +640,7 @@ final class HuntTask {
 					+ " 找（已探索 " + exploreTicks / 20 + " 秒）";
 			case WAIT -> "打猎（" + what + "）：等刷新（已等 " + waited / 20 + " 秒）";
 			case CHASE -> "打猎（" + what + "）：追击 " + (target == null ? "?" : target.getType().getDescription().getString());
+			case FETCH -> "打猎（" + what + "）：捡地上的";
 			case HEAL -> "打猎（" + what + "）：血量低，回血中";
 		};
 	}

@@ -347,6 +347,13 @@ public final class LocalPathfinder implements Planner {
 		return limits;
 	}
 
+	/** Steps it turned down for want of air (see {@link #airAfter}): 0 means air wasn't why it found nothing. */
+	public int airRejected() {
+		return airRejected;
+	}
+
+	private int airRejected;
+
 	/**
 	 * For the log when a search found nothing: how far it got, and what's around the start (each
 	 * neighbouring cell, how many first steps there were and how many the air ruled out). Called
@@ -419,6 +426,7 @@ public final class LocalPathfinder implements Planner {
 		// Charged with the real time the step takes, not its cost (which includes preferences).
 		int left = from.air - (int) Math.ceil(c.ticks());
 		if (!Air.enough(left, escape.ticks(to), Air.PLAN_SLACK)) {
+			airRejected++;
 			return -1;
 		}
 		return left;
@@ -763,9 +771,13 @@ public final class LocalPathfinder implements Planner {
 			}
 			base = c.getY() + top;
 		}
+		// Headroom: air, or water it can be in (feet in an air pocket under water, say: a block just
+		// dug out before the water flows in, where its drop lies). Breath is the air rules' business
+		// (see Air), not whether it fits.
 		int headTop = (int) Math.floor(base + PLAYER_HEIGHT - 1e-4);
 		for (int y = c.getY() + 1; y <= headTop; y++) {
-			if (!isPassable(level, new BlockPos(c.getX(), y, c.getZ()))) {
+			BlockPos h = new BlockPos(c.getX(), y, c.getZ());
+			if (!isPassable(level, h) && !isOpenWater(level, h)) {
 				return Double.NaN;
 			}
 		}

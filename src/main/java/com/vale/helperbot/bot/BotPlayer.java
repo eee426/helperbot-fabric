@@ -104,13 +104,6 @@ public class BotPlayer extends ServerPlayer {
 			perf.add(Perf.Part.SURVIVAL, System.nanoTime() - started);
 			return;
 		}
-		// Collect what its kills and its mining dropped before going back to the task.
-		if (loot.tick()) {
-			hand(Layer.LOOT);
-			movement.tick();
-			perf.add(Perf.Part.SURVIVAL, System.nanoTime() - started);
-			return;
-		}
 		hand(Layer.TASK);
 		perf.add(Perf.Part.SURVIVAL, System.nanoTime() - started);
 		started = System.nanoTime();
@@ -135,7 +128,6 @@ public class BotPlayer extends ServerPlayer {
 	@Override
 	public void awardKillScore(net.minecraft.world.entity.Entity killed, DamageSource source) {
 		super.awardKillScore(killed, source);
-		loot.onKill(killed);
 	}
 
 	// ---- ghost in protected chunks ------------------------------------------------------
@@ -238,7 +230,7 @@ public class BotPlayer extends ServerPlayer {
 	 * (see {@link Loot}).
 	 */
 	public enum Layer {
-		BREATH("换气"), COMBAT("打架"), EAT("吃东西"), LOOT("捡掉落物"), TASK("任务");
+		BREATH("换气"), COMBAT("打架"), EAT("吃东西"), TASK("任务");
 
 		final String label;
 
@@ -708,7 +700,7 @@ public class BotPlayer extends ServerPlayer {
 		return restocking && freeSlots() > LOW_FREE_SLOTS + 1;
 	}
 
-	/** Things the current task needs: only these are worth going out of the way for (see Loot). */
+	/** Things the current task needs: only these are worth going out of the way for (see task/DropFetch). */
 	public boolean taskWants(ItemStack stack) {
 		return task != null && task.wantsPickup(stack);
 	}
