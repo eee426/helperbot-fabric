@@ -44,6 +44,7 @@ public final class BotCommands {
 					return 1;
 				}))
 				.then(Commands.literal("status").executes(BotCommands::status))
+				.then(Commands.literal("perf").executes(BotCommands::perf))
 				.then(Commands.literal("log").executes(ctx -> {
 					BotPlayer bot = requireBot(ctx);
 					if (bot == null) {
@@ -203,6 +204,27 @@ public final class BotCommands {
 				+ "，移动：" + bot.movement().describe()
 				+ "，着地：" + (bot.onGround() ? "是" : "否（挖掘会慢 5 倍）");
 		ctx.getSource().sendSuccess(() -> Component.literal(text), false);
+		return 1;
+	}
+
+	/**
+	 * Where the time goes: the bot's own parts (see Perf), and the whole server's average tick,
+	 * with how much of the world is loaded. Run it with the bot out, then after /bot remove: the
+	 * difference in the server's tick is what having the bot around costs in all, its own work
+	 * plus the world it keeps loaded and running like any player.
+	 */
+	private static int perf(CommandContext<CommandSourceStack> ctx) {
+		var server = ctx.getSource().getServer();
+		var level = ctx.getSource().getLevel();
+		BotPlayer bot = BotManager.get();
+		String own = bot == null ? "机器人不在场。" : bot.perf().summary();
+		String world = String.format(Locale.ROOT, "服务器每刻平均 %.2f 毫秒（满负荷是 50）；视距 %d、模拟距离 %d；本维度已加载区块 %d 个，在线玩家 %d 个（含机器人）",
+				server.getAverageTickTimeNanos() / 1e6, server.getPlayerList().getViewDistance(),
+				server.getPlayerList().getSimulationDistance(), level.getChunkSource().getLoadedChunksCount(),
+				server.getPlayerList().getPlayerCount());
+		for (String line : (own + "\n" + world + "\n想知道机器人在场总共多花多少：在场时看一次这里的\"服务器每刻平均\"，/bot remove 后过半分钟再看一次，两次相减。").split("\n")) {
+			ctx.getSource().sendSuccess(() -> Component.literal(line), false);
+		}
 		return 1;
 	}
 

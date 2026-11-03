@@ -567,8 +567,16 @@ public final class MovementController {
 	 * Runs the current search for this tick's budget. If it finds nothing useful (no path, or a
 	 * partial path that barely gets closer), the next bigger window is tried.
 	 */
+	/** Runs a search for this tick's budget, timing it (see Perf). True once it has finished. */
+	private boolean timedStep(LocalPathfinder s) {
+		long started = System.nanoTime();
+		boolean done = s.step(PLAN_BUDGET_NANOS);
+		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
+		return done;
+	}
+
 	private void continuePlanning() {
-		if (!search.step(PLAN_BUDGET_NANOS)) {
+		if (!timedStep(search)) {
 			return;
 		}
 		LocalPathfinder.Result result = search.result();
@@ -600,7 +608,7 @@ public final class MovementController {
 	 */
 	private void advanceLookahead() {
 		if (lookahead != null) {
-			lookahead.step(PLAN_BUDGET_NANOS);
+			timedStep(lookahead);
 			return;
 		}
 		if (path == null || pathReachesGoal || replanRequested || path.size() - index > LOOKAHEAD_STEPS) {
@@ -631,7 +639,7 @@ public final class MovementController {
 		if (next == null || replanRequested || path == null || !feet().equals(path.get(path.size() - 1).to())) {
 			return false;
 		}
-		if (!next.step(PLAN_BUDGET_NANOS)) {
+		if (!timedStep(next)) {
 			lookahead = next; // almost always done by now; if not, finish it next tick
 			return true;
 		}

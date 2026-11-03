@@ -49,8 +49,16 @@ public class BotPlayer extends ServerPlayer {
 		connection.handleAcceptPlayerLoad(new ServerboundPlayerLoadedPacket());
 	}
 
+	private final Perf perf = new Perf();
+
+	/** Where its time goes (see /bot perf). */
+	public Perf perf() {
+		return perf;
+	}
+
 	@Override
 	public void tick() {
+		long started = System.nanoTime();
 		if (tickCount % 10 == 0) {
 			connection.resetPosition();
 			level().getChunkSource().move(this);
@@ -61,20 +69,31 @@ public class BotPlayer extends ServerPlayer {
 		yo = getY();
 		zo = getZ();
 		doTick();
-
-		if (!isAlive()) {
-			return;
+		perf.add(Perf.Part.VANILLA, System.nanoTime() - started);
+		try {
+			if (isAlive()) {
+				behave();
+			}
+		} finally {
+			perf.endTick();
 		}
+	}
+
+	/** Its own part of the tick: survival reflexes first, else the task, then moving. */
+	private void behave() {
+		long started = System.nanoTime();
 		updateGhost();
 		loot.observe();
 		// Survival first: air, then fighting back. The task waits meanwhile.
 		if (breathe()) {
 			hand(Layer.BREATH);
+			perf.add(Perf.Part.SURVIVAL, System.nanoTime() - started);
 			return; // it moved itself this tick
 		}
 		if (combat()) {
 			hand(Layer.COMBAT);
 			movement.tick();
+			perf.add(Perf.Part.SURVIVAL, System.nanoTime() - started);
 			return;
 		}
 		// Eating takes its 1.6 s like for anyone. It keeps walking meanwhile, slowed down the
@@ -82,15 +101,19 @@ public class BotPlayer extends ServerPlayer {
 		if (isUsingItem() || tryEat()) {
 			hand(Layer.EAT);
 			movement.tick();
+			perf.add(Perf.Part.SURVIVAL, System.nanoTime() - started);
 			return;
 		}
 		// Collect what its kills and its mining dropped before going back to the task.
 		if (loot.tick()) {
 			hand(Layer.LOOT);
 			movement.tick();
+			perf.add(Perf.Part.SURVIVAL, System.nanoTime() - started);
 			return;
 		}
 		hand(Layer.TASK);
+		perf.add(Perf.Part.SURVIVAL, System.nanoTime() - started);
+		started = System.nanoTime();
 		if (tickCount % 40 == 0 && freeSlots() <= LOW_FREE_SLOTS) {
 			tidyInventory();
 		}
@@ -103,7 +126,10 @@ public class BotPlayer extends ServerPlayer {
 				movement.stop();
 			}
 		}
+		perf.add(Perf.Part.TASK, System.nanoTime() - started);
+		started = System.nanoTime();
 		movement.tick();
+		perf.add(Perf.Part.MOVE, System.nanoTime() - started);
 	}
 
 	@Override

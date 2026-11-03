@@ -39,6 +39,7 @@ public final class ScenarioRunner {
 	private final List<Scenario> scenarios;
 	private final List<String> rows = new ArrayList<>();
 	private final List<String> details = new ArrayList<>();
+	private final List<String> perfRows = new ArrayList<>();
 	private int index = -1;
 	private Step step = Step.WAIT;
 	private int ticks;
@@ -207,6 +208,10 @@ public final class ScenarioRunner {
 		}
 		String seconds = String.format("%.0f", ticks / 20.0);
 		rows.add("| " + s.id() + " | " + (pass ? "✅" : "❌") + " | " + s.title() + " | " + seconds + " 秒 | " + reason + " |");
+		BotPlayer measured = BotManager.get();
+		if (measured != null) {
+			perfRows.add("| " + s.id() + " | " + seconds + " 秒 | " + measured.perf().compact() + " |");
+		}
 		HelperBot.LOGGER.info("SCENARIO {} {} after {} s: {}", s.id(), pass ? "PASS" : "FAIL", seconds, reason);
 		if (!pass && log != null) {
 			String[] lines = log.toString().split("\n");
@@ -227,6 +232,10 @@ public final class ScenarioRunner {
 		StringBuilder report = new StringBuilder("# 测试场景结果\n\n通过 " + passed + " / " + rows.size() + "\n\n");
 		report.append("| 编号 | 结果 | 场景 | 用时（游戏时间） | 说明 |\n|---|---|---|---|---|\n");
 		rows.forEach(r -> report.append(r).append('\n'));
+		report.append('\n');
+		// Where the bot's time went in each scene (measuring only; see Perf).
+		report.append("## 机器人耗时（每刻平均，主线程）\n\n| 编号 | 时长 | 耗时 |\n|---|---|---|\n");
+		perfRows.forEach(r -> report.append(r).append('\n'));
 		report.append('\n');
 		details.forEach(d -> report.append(d).append('\n'));
 		Path file = server.getServerDirectory().resolve("scenario-report.md");

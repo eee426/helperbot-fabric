@@ -178,6 +178,7 @@ public class AcquireTask implements BotTask {
 		long started = System.nanoTime();
 		CraftPlanner planner = new CraftPlanner(bot.level(), bot, bot.getInventory(), noGather);
 		CraftPlanner.Plan plan = planner.plan(item, wanted - got, inventory);
+		bot.perf().add(com.vale.helperbot.bot.Perf.Part.PLANNER, System.nanoTime() - started);
 		long ms = (System.nanoTime() - started) / 1_000_000;
 		if (plan.timedOut()) {
 			bot.log("规划超时（" + ms + " 毫秒），用目前找到的最好方案：" + planner.stats());
