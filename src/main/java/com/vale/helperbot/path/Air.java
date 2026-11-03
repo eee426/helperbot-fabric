@@ -93,12 +93,21 @@ public final class Air {
 		if (unlimited(e)) {
 			return UNLIMITED;
 		}
-		return Math.max(0, e.getAirSupply()) + spareHealthTicks(e);
+		return (int) (Math.max(0, e.getAirSupply()) * airStretch(e)) + spareHealthTicks(e);
 	}
 
 	/** Same, after a full breath. */
 	public static int fullBudget(LivingEntity e) {
-		return unlimited(e) ? UNLIMITED : e.getMaxAirSupply() + spareHealthTicks(e);
+		return unlimited(e) ? UNLIMITED : (int) (e.getMaxAirSupply() * airStretch(e)) + spareHealthTicks(e);
+	}
+
+	/**
+	 * How many ticks one point of air lasts: Respiration (the oxygen bonus attribute, b) makes vanilla
+	 * skip using air on a tick with chance 1 - 1/(b+1), so on average air lasts b+1 times as long.
+	 */
+	private static double airStretch(LivingEntity e) {
+		var bonus = e.getAttribute(net.minecraft.world.entity.ai.attributes.Attributes.OXYGEN_BONUS);
+		return 1 + Math.max(0, bonus == null ? 0 : bonus.getValue());
 	}
 
 	private static boolean unlimited(LivingEntity e) {

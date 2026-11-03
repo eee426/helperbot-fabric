@@ -196,7 +196,53 @@ final class HuntTask {
 		List<Mob> mobs = level.getEntitiesOfClass(Mob.class, bot.getBoundingBox().inflate(radius),
 				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID())
 						&& MobDrops.mayHunt(m) && !ProtectionZones.isProtected(level, m.blockPosition()));
-		return mobs.stream().min(Comparator.comparingDouble(bot::distanceToSqr)).orElse(null);
+		shallowestTooDeep = Integer.MAX_VALUE;
+		Mob best = null;
+		for (Mob m : mobs) {
+			int depth = waterOver(level, m);
+			if (depth > 0 && !withinBreath(bot, depth)) {
+				shallowestTooDeep = Math.min(shallowestTooDeep, depth);
+				continue;
+			}
+			if (best == null || bot.distanceToSqr(m) < bot.distanceToSqr(best)) {
+				best = m;
+			}
+		}
+		return best;
+	}
+
+	/** Of the prey around left out as too deep for one breath (see withinBreath), the least deep; MAX_VALUE if none. */
+	private int shallowestTooDeep = Integer.MAX_VALUE;
+
+	/** Ticks of fighting under water, besides getting there: a few hits on a swimming mob. */
+	private static final double FIGHT_UNDERWATER_TICKS = 80;
+
+	/**
+	 * Blocks of water above what the bot must get to (within its reach of the mob, about 2 blocks
+	 * above it): 0 if that's in the open air.
+	 */
+	private static int waterOver(ServerLevel level, Mob m) {
+		BlockPos p = BlockPos.containing(m.getEyePosition()).above(2);
+		int n = 0;
+		while (n < 64 && com.vale.helperbot.path.LocalPathfinder.isWater(level, p)) {
+			p = p.above();
+			n++;
+		}
+		return n;
+	}
+
+	/**
+	 * Down there, the fight, back up, on one breath (the planner's rule, see Air#enough). Deep-sea
+	 * mobs (a glow squid 20 blocks down) are out of reach without water breathing: it used to go
+	 * for them anyway, dive as far as its air allowed, come back up, and do it again, forever.
+	 */
+	private static boolean withinBreath(BotPlayer bot, int depth) {
+		int full = com.vale.helperbot.path.Air.fullBudget(bot);
+		if (full >= com.vale.helperbot.path.Air.UNLIMITED) {
+			return true;
+		}
+		double up = com.vale.helperbot.path.Air.swimTicks(0, depth, 0);
+		return com.vale.helperbot.path.Air.enough(full - up, up, FIGHT_UNDERWATER_TICKS + com.vale.helperbot.path.Air.PLAN_SLACK);
 	}
 
 	/** Spawns naturally somewhere in this dimension (it's in some biome's spawn list). */
@@ -236,6 +282,10 @@ final class HuntTask {
 				setPhase(Phase.FETCH);
 				return BotTask.Status.RUNNING;
 			}
+		}
+		if (target == null && shallowestTooDeep != Integer.MAX_VALUE) {
+			return fail(bot, "附近的" + names().getString() + "都在水下太深（最浅的也在水面下 " + shallowestTooDeep
+					+ " 格），一口气潜不到、打完再回来。给我水下呼吸药水，或者戴一个有水下呼吸附魔的头盔，就能去");
 		}
 		if (target != null) {
 			bot.log("盯上了 " + target.getType().getDescription().getString() + " @" + target.blockPosition().toShortString());
@@ -551,6 +601,14 @@ final class HuntTask {
 	private BotTask.Status chase(BotPlayer bot) {
 		if (target == null || target.isRemoved() || !target.isAlive()) {
 			// What it dropped lies around now: a source like the next mob (see find).
+			bot.movement().stop();
+			setPhase(Phase.FIND);
+			return BotTask.Status.RUNNING;
+		}
+		int depth = waterOver(bot.level(), target);
+		if (depth > 0 && !withinBreath(bot, depth)) {
+			bot.log(target.getType().getDescription().getString() + " 游到了水下 " + depth + " 格，一口气够不着，换一只");
+			target = null;
 			bot.movement().stop();
 			setPhase(Phase.FIND);
 			return BotTask.Status.RUNNING;

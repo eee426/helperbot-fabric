@@ -678,6 +678,28 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.CLAY_BALL, 8, Mode.NORMAL);
 				}, Scenario.has(Items.CLAY_BALL, 8)),
 
+				new Scenario("W34", "发光墨鱼在水下 20 格（玩家报告）：一口气潜不到，直接说明，不来回白跑", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(4, 16, -6, 14, 40, 6, Blocks.WATER);
+					a.spawn(EntityType.GLOW_SQUID, 9, 18, 0);
+					teleport(bot, a, 1, 41, 0);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.GLOW_INK_SAC, 1, Mode.NORMAL);
+				}, c -> c.logCount("该换气了") > 1 ? Scenario.Outcome.fail("潜下去又上来（白跑）")
+						: c.ended() && c.logHas("太深") ? Scenario.Outcome.pass("说明了太深、没去")
+						: c.ended() ? Scenario.Outcome.fail("结束了，但没说是太深") : null),
+
+				new Scenario("W35", "浅水里的墨鱼（水下 3 格）：照样能打到墨囊", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(4, 35, -6, 14, 40, 6, Blocks.WATER);
+					for (int i = 0; i < 2; i++) {
+						a.spawn(EntityType.SQUID, 8 + i, 37, 0);
+					}
+					teleport(bot, a, 1, 41, 0);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.INK_SAC, 1, Mode.NORMAL);
+				}, Scenario.has(Items.INK_SAC, 1)),
+
 				new Scenario("F1", "装一桶水：地面上，9 格外有个小水池（血不多）", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(10, 39, 4, 12, 40, 6, Blocks.WATER); // a pond 3x3, 2 deep, in the grass
 					teleport(bot, a, 1, 41, 0);
