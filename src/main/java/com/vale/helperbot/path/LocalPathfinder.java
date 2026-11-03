@@ -3,6 +3,9 @@ package com.vale.helperbot.path;
 import net.minecraft.world.level.BlockGetter;
 import com.vale.helperbot.guard.Guard;
 import com.vale.helperbot.guard.ProtectionZones;
+import com.vale.helperbot.path.moves.Move;
+import com.vale.helperbot.path.moves.Moves;
+import com.vale.helperbot.path.moves.Planner;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.world.level.block.FallingBlock;
 import net.minecraft.core.BlockPos;
@@ -29,7 +32,7 @@ import java.util.function.Predicate;
  * <p>A search is resumable: {@link #step(long)} runs it for a time budget, so large windows can
  * be spread over several ticks instead of stalling the server.
  */
-public final class LocalPathfinder {
+public final class LocalPathfinder implements Planner {
 	/** Search window around the bot and how many nodes may be expanded in it. */
 	public record Limits(int radiusXZ, int up, int down, int maxNodes) {
 	}
@@ -58,9 +61,9 @@ public final class LocalPathfinder {
 	public static final double STEP_HEIGHT = 0.6;
 	/** Highest ledge a standing jump clears. */
 	public static final double JUMP_HEIGHT = 1.25;
-	private static final double PLAYER_HEIGHT = 1.8;
+	public static final double PLAYER_HEIGHT = 1.8;
 	/** Extra ticks a jump takes over walking. */
-	private static final double ASCEND_EXTRA = 4.0;
+	public static final double ASCEND_EXTRA = 4.0;
 	static final double BREAK_OVERHEAD = 3.0;
 	/** Feet height above the cell bottom when floating at a water surface. */
 	public static final double SWIM_FLOOR = 0.1;
@@ -71,9 +74,9 @@ public final class LocalPathfinder {
 	/** Air is tracked in steps of this many ticks: two routes to a cell differing by less are the same. */
 	private static final int AIR_BUCKET = 30;
 	/** Prefer the surface: swimming under water costs more (air). */
-	private static final double DIVE_COST_FACTOR = 1.4;
+	public static final double DIVE_COST_FACTOR = 1.4;
 	/** Vanilla right-click interval (4 ticks), plus a small charge for using a block up. */
-	private static final double PLACE_COST = 4 + 2;
+	public static final double PLACE_COST = 4 + 2;
 
 	/**
 	 * Weighted A* for partial searches: leans towards the target, expanding far fewer nodes.
@@ -146,18 +149,6 @@ public final class LocalPathfinder {
 			this.parent = parent;
 			this.step = step;
 			this.air = air;
-		}
-	}
-
-	/**
-	 * A possible step. {@code cost} is what the search minimises: real time, plus preferences
-	 * (stay near the surface, dig less in safe mode, avoid risky breaks). {@code ticks} is just the
-	 * real time it takes, which is what air is charged with: preferences mustn't use up air that
-	 * isn't really used (it made the bot think it couldn't get back up when it could).
-	 */
-	private record Candidate(PathStep step, double floor, double cost, double ticks) {
-		Candidate(PathStep step, double floor, double cost) {
-			this(step, floor, cost, cost);
 		}
 	}
 
@@ -297,21 +288,21 @@ public final class LocalPathfinder {
 				if (airLeft < 0) {
 					continue; // couldn't get back up from there in time
 				}
-				long key = c.step.to().asLong();
-				double g = node.g + c.cost * (favored.test(key) ? FAVOR_PREVIOUS : 1)
-						* (isWater(level, c.step.to()) ? WATER_COST_FACTOR : 1);
+				long key = c.step().to().asLong();
+				double g = node.g + c.cost() * (favored.test(key) ? FAVOR_PREVIOUS : 1)
+						* (isWater(level, c.step().to()) ? WATER_COST_FACTOR : 1);
 				int b = bucket(airLeft);
-				Node[] nodes = cell(c.step.to());
+				Node[] nodes = cell(c.step().to());
 				if (!dominated(nodes, b, g)) {
-					double toGoal = heuristic(c.step.to()) * heuristicWeight;
+					double toGoal = heuristic(c.step().to()) * heuristicWeight;
 					Node next = nodes[b];
 					if (next != null && next.heapIndex >= 0) {
-						next.set(c.floor, g, toGoal, node, c.step, airLeft); // still waiting: just cheaper now
-						next.ticks = c.ticks;
+						next.set(c.floor(), g, toGoal, node, c.step(), airLeft); // still waiting: just cheaper now
+						next.ticks = c.ticks();
 						open.decreased(next);
 					} else {
-						next = new Node(c.step.to(), c.floor, g, toGoal, node, c.step, airLeft);
-						next.ticks = c.ticks;
+						next = new Node(c.step().to(), c.floor(), g, toGoal, node, c.step(), airLeft);
+						next.ticks = c.ticks();
 						nodes[b] = next;
 						open.add(next);
 					}
@@ -411,9 +402,9 @@ public final class LocalPathfinder {
 	 * next to water ends under water too, whatever the cell looks like now: the water pours in.
 	 */
 	private int airAfter(Node from, Candidate c) {
-		BlockPos to = c.step.to();
+		BlockPos to = c.step().to();
 		boolean floods = false;
-		for (BlockPos b : c.step.toBreak()) {
+		for (BlockPos b : c.step().toBreak()) {
 			if (Escape.floodsWhenDug(level, b)) {
 				floods = true;
 				break;
@@ -426,7 +417,7 @@ public final class LocalPathfinder {
 			return 0;
 		}
 		// Charged with the real time the step takes, not its cost (which includes preferences).
-		int left = from.air - (int) Math.ceil(c.ticks);
+		int left = from.air - (int) Math.ceil(c.ticks());
 		if (left < Air.reserve(escape.ticks(to)) + 20) {
 			return -1;
 		}
@@ -600,7 +591,7 @@ public final class LocalPathfinder {
 	}
 
 	/** Ticks to fall {@code blocks} under vanilla gravity (0.08 blocks/tick²). */
-	private static double fallTicks(double blocks) {
+	public static double fallTicks(double blocks) {
 		return Math.sqrt(2 * blocks / 0.08);
 	}
 
@@ -627,223 +618,73 @@ public final class LocalPathfinder {
 
 	// ---- neighbours ---------------------------------------------------------------------
 
+	/** Every step out of {@code p}: each move the bot knows adds its own (see {@link Moves}). */
 	private List<Candidate> neighbours(BlockPos p, double cur) {
 		List<Candidate> out = new ArrayList<>(16);
-		for (int dx = -1; dx <= 1; dx++) {
-			for (int dz = -1; dz <= 1; dz++) {
-				if (dx != 0 || dz != 0) {
-					walkInto(p, cur, dx, dz, out);
-				}
-			}
-		}
-		double pen = digPenalty(p);
 		// In a protected chunk it's a ghost: it can pass through, but not dig or build from there.
-		boolean canAct = !ProtectionZones.isProtected(level, p);
-		if (isWater(level, p)) {
-			swimInto(p, out, pen, canAct);
-		}
 		// Digging and building assume we stand on a full block (or hold still in water).
-		if (canAct && Math.abs(cur - p.getY()) < 1e-3) {
-			for (Direction d : Direction.Plane.HORIZONTAL) {
-				digInto(p, d, out, pen);
-				if (canBuild) {
-					bridgeInto(p, d, out);
-				}
-			}
-			if (canBuild) {
-				pillarUp(p, out, pen);
-			}
-			BlockPos below = p.below();
-			if (inWindow(below)) {
-				List<BlockPos> breaks = new ArrayList<>(1);
-				digTicks = 0;
-				double dig = clearCost(below, breaks, pen);
-				if (dig > 0 && isSupport(level, below.below()) && !nearLava(below)) {
-					out.add(new Candidate(new PathStep(PathStep.Type.DESCEND, p, below, breaks), below.getY(),
-							fallTicks(1) + dig, fallTicks(1) + digTicks));
-				}
-			}
+		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), Math.abs(cur - p.getY()) < 1e-3);
+		for (Move move : Moves.ALL) {
+			move.addSteps(this, p, cur, from, out);
 		}
 		return out;
 	}
 
-	/**
-	 * From water, swim to any neighbouring water cell: level, diving down, or rising (3D). Also
-	 * dig straight up through a ceiling (sand that fell in, the sea floor from below).
-	 */
-	private void swimInto(BlockPos p, List<Candidate> out, double pen, boolean canDig) {
-		BlockPos up = p.above();
-		BlockPos overHead = up.above();
-		if (canDig && inWindow(overHead) && swimmable(up) && !swimmable(overHead)) {
-			List<BlockPos> breaks = new ArrayList<>(1);
-			digTicks = 0;
-			double dig = clearCost(overHead, breaks, pen);
-			if (dig > 0) {
-				// Once dug, water pours in (or it's air, if the ceiling was the last thing in the way).
-				double f = Escape.floodsWhenDug(level, overHead) || isWater(level, up) ? up.getY() : up.getY() + SWIM_FLOOR;
-				out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, up, breaks), f,
-						dig + 1 / Air.SWIM_UP_SPEED, digTicks + 1 / Air.SWIM_UP_SPEED));
-			}
-		}
-		for (int dx = -1; dx <= 1; dx++) {
-			for (int dy = -1; dy <= 1; dy++) {
-				for (int dz = -1; dz <= 1; dz++) {
-					if ((dx == 0 && dy == 0 && dz == 0) || (dx != 0 && dz != 0)) {
-						continue;
-					}
-					BlockPos c = p.offset(dx, dy, dz);
-					if (!inWindow(c) || !isWater(level, c)) {
-						continue;
-					}
-					// Moving up/down and sideways at once: both corner cells must be open too.
-					if (dy != 0 && (dx != 0 || dz != 0)
-							&& !(swimmable(p.offset(dx, 0, dz)) && swimmable(p.offset(0, dy, 0)))) {
-						continue;
-					}
-					double f = floor(c);
-					if (Double.isNaN(f)) {
-						continue;
-					}
-					boolean submerged = isWater(level, c.above());
-					double ticks = Math.sqrt(dx * dx + dy * dy + dz * dz) / SWIM_SPEED;
-					out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, c, List.of()), f,
-							ticks * (submerged ? DIVE_COST_FACTOR : 1), ticks));
-				}
-			}
-		}
+	// ---- what moves ask of the search (see Planner) --------------------------------------
+
+	@Override
+	public BlockGetter world() {
+		return level;
 	}
 
-	private boolean swimmable(BlockPos pos) {
+	@Override
+	public BlockPos origin() {
+		return origin;
+	}
+
+	@Override
+	public boolean swimmable(BlockPos pos) {
 		return passable(pos) || isOpenWater(level, pos);
 	}
 
-	/** Moves into a neighbouring column without digging: walk, step up, jump up, or drop. */
-	private void walkInto(BlockPos p, double cur, int dx, int dz, List<Candidate> out) {
-		boolean diagonal = dx != 0 && dz != 0;
-		BlockPos col = p.offset(dx, 0, dz);
-		if (diagonal && !(columnOpen(p.offset(dx, 0, 0)) && columnOpen(p.offset(0, 0, dz)))) {
-			return;
-		}
-		boolean entryClear = passable(col) && passable(col.above());
-		int top = (int) Math.floor(cur + JUMP_HEIGHT);
-		// Scan the whole window down: solid landings are capped by maxDrop below, water isn't.
-		for (int y = top; y >= origin.getY() - limits.down(); y--) {
-			BlockPos c = new BlockPos(col.getX(), y, col.getZ());
-			if (!inWindow(c)) {
-				continue;
-			}
-			double f = floor(c);
-			if (!Double.isNaN(f)) {
-				double dy = f - cur;
-				boolean intoWater = isWater(level, c);
-				if (dy > JUMP_HEIGHT || (dy < -STEP_HEIGHT && !entryClear) || (diagonal && Math.abs(dy) > STEP_HEIGHT)
-						|| (-dy > maxDrop + 0.01 && !intoWater)) {
-					return;
-				}
-				PathStep.Type type;
-				boolean swimming = intoWater || isWater(level, p);
-				double cost = (swimming ? 1.0 / SWIM_SPEED : walkCost) * (diagonal ? Math.sqrt(2) : 1);
-				if (dy > STEP_HEIGHT) {
-					// Going up a stair from its low side is two half steps, no jump: headroom for
-					// standing up a block higher is enough. Anything else is jumped, and a jump arcs
-					// higher than the ledge. (Stairs used to count as a jump too, so under a low
-					// ceiling, a cellar staircase say, it could walk down but never back up.)
-					boolean stair = !diagonal && stairStep(level, c, dx, dz) && dy <= 1 + 1e-3;
-					int headTop = (int) Math.floor(cur + (stair ? dy : JUMP_HEIGHT) + PLAYER_HEIGHT - 1e-4);
-					for (int hy = p.getY() + 1; hy <= headTop; hy++) {
-						if (!passable(new BlockPos(p.getX(), hy, p.getZ()))) {
-							return;
-						}
-					}
-					type = PathStep.Type.ASCEND;
-					cost += stair ? 0 : ASCEND_EXTRA;
-				} else if (dy < -STEP_HEIGHT) {
-					type = PathStep.Type.DESCEND;
-					double drop = -dy;
-					// Water breaks the fall, so only solid landings pay for damage.
-					cost += fallTicks(drop) + (intoWater ? 0 : Math.max(0, drop - 3) * 10);
-				} else {
-					type = PathStep.Type.WALK;
-				}
-				out.add(new Candidate(new PathStep(type, p, c, List.of()), f, cost));
-				return;
-			}
-			if (!passable(c) && y <= p.getY()) {
-				return;
-			}
-		}
+	@Override
+	public boolean water(BlockPos pos) {
+		return isWater(level, pos);
 	}
 
-	private boolean columnOpen(BlockPos pos) {
-		return passable(pos) && passable(pos.above());
+	@Override
+	public boolean support(BlockPos pos) {
+		return isSupport(level, pos);
 	}
 
-	/** Moves that need mining first: tunnel forward, dig a step up, dig a stair down. */
-	private void digInto(BlockPos p, Direction d, List<Candidate> out, double pen) {
-		BlockPos t = p.relative(d);
-		if (!inWindow(t)) {
-			return;
-		}
-		// Tunnel forward.
-		List<BlockPos> breaks = new ArrayList<>(2);
-		digTicks = 0;
-		double dig = clearCost(t, breaks, pen) + clearCost(t.above(), breaks, pen);
-		if (dig >= 0 && !breaks.isEmpty() && isSupport(level, t.below()) && !nearLava(t)) {
-			out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, t, breaks), t.getY(), walkCost + dig, walkCost + digTicks));
-		}
-
-		// Dig out a step and climb onto it.
-		BlockPos up = t.above();
-		breaks = new ArrayList<>(3);
-		digTicks = 0;
-		dig = clearCost(p.above(2), breaks, pen) + clearCost(up, breaks, pen) + clearCost(up.above(), breaks, pen);
-		if (dig >= 0 && !breaks.isEmpty() && isSupport(level, t) && !nearLava(up)) {
-			out.add(new Candidate(new PathStep(PathStep.Type.ASCEND, p, up, breaks), up.getY(),
-					walkCost + ASCEND_EXTRA + dig, walkCost + ASCEND_EXTRA + digTicks));
-		}
-
-		// Dig a stair down.
-		BlockPos down = t.below();
-		breaks = new ArrayList<>(3);
-		digTicks = 0;
-		dig = clearCost(t.above(), breaks, pen) + clearCost(t, breaks, pen) + clearCost(down, breaks, pen);
-		if (dig >= 0 && !breaks.isEmpty() && isSupport(level, down.below()) && !nearLava(down)) {
-			out.add(new Candidate(new PathStep(PathStep.Type.DESCEND, p, down, breaks), down.getY(),
-					walkCost + fallTicks(1) + dig, walkCost + fallTicks(1) + digTicks));
-		}
+	@Override
+	public boolean canPlace(BlockPos pos) {
+		return Guard.canPlace(level, pos);
 	}
 
-	/**
-	 * Place a block in front, below foot level, and walk onto it (over a gap or water).
-	 *
-	 * <p>No "is there something to place against" check against the current world: we only get
-	 * here standing on a full block, and the new block goes right next to it. That block may be
-	 * one this same path places a step earlier (a bridge or pillar still in the plan), which the
-	 * world doesn't contain yet; checking the world would stop every bridge after its first block.
-	 */
-	private void bridgeInto(BlockPos p, Direction d, List<Candidate> out) {
-		BlockPos t = p.relative(d);
-		BlockPos under = t.below();
-		if (!inWindow(t) || !passable(t) || !passable(t.above()) || !Double.isNaN(floor(t))
-				|| !Guard.canPlace(level, under) || nearLava(t)) {
-			return;
-		}
-		out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, t, List.of(), under), t.getY(), walkCost + PLACE_COST));
+	@Override
+	public void resetDig() {
+		digTicks = 0;
 	}
 
-	/** Jump and place a block under ourselves. */
-	private void pillarUp(BlockPos p, List<Candidate> out, double pen) {
-		BlockPos up = p.above();
-		if (!inWindow(up) || !Guard.canPlace(level, p) || isWater(level, p)) {
-			return;
-		}
-		List<BlockPos> breaks = new ArrayList<>(1);
-		digTicks = 0;
-		double dig = clearCost(p.above(2), breaks, pen);
-		if (dig >= 0 && !nearLava(up)) {
-			out.add(new Candidate(new PathStep(PathStep.Type.PILLAR, p, up, breaks, p), up.getY(),
-					ASCEND_EXTRA + PLACE_COST + dig, ASCEND_EXTRA + PLACE_COST + digTicks));
-		}
+	@Override
+	public double dugTicks() {
+		return digTicks;
+	}
+
+	@Override
+	public double walkCost() {
+		return walkCost;
+	}
+
+	@Override
+	public int maxDrop() {
+		return maxDrop;
+	}
+
+	@Override
+	public boolean canBuild() {
+		return canBuild;
 	}
 
 	/**
@@ -864,7 +705,8 @@ public final class LocalPathfinder {
 		return level.getFluidState(pos).is(FluidTags.WATER);
 	}
 
-	private boolean inWindow(BlockPos pos) {
+	@Override
+	public boolean inWindow(BlockPos pos) {
 		return Math.abs(pos.getX() - origin.getX()) <= limits.radiusXZ()
 				&& Math.abs(pos.getZ() - origin.getZ()) <= limits.radiusXZ()
 				&& pos.getY() - origin.getY() <= limits.up()
@@ -971,7 +813,8 @@ public final class LocalPathfinder {
 				&& BlockTable.clean(state);
 	}
 
-	private double floor(BlockPos c) {
+	@Override
+	public double floor(BlockPos c) {
 		Cells.Section s = cells.at(c);
 		int i = Cells.index(c);
 		if (s.floor == null) {
@@ -989,7 +832,8 @@ public final class LocalPathfinder {
 		return floor;
 	}
 
-	private boolean passable(BlockPos pos) {
+	@Override
+	public boolean passable(BlockPos pos) {
 		Cells.Section s = cells.at(pos);
 		int i = Cells.index(pos);
 		if (s.passable == null) {
@@ -1007,7 +851,8 @@ public final class LocalPathfinder {
 	 * Ticks (scaled by mode) to clear this cell, 0 if already open, or a large negative
 	 * number if it may not be cleared. Adds the cell to {@code breaks} when mining is needed.
 	 */
-	private double clearCost(BlockPos pos, List<BlockPos> breaks, double penalty) {
+	@Override
+	public double clearCost(BlockPos pos, List<BlockPos> breaks, double penalty) {
 		if (passable(pos)) {
 			return 0;
 		}
@@ -1056,7 +901,8 @@ public final class LocalPathfinder {
 
 	private final java.util.Map<BlockState, Double> wearCache = new java.util.HashMap<>();
 
-	private boolean nearLava(BlockPos feet) {
+	@Override
+	public boolean nearLava(BlockPos feet) {
 		Cells.Section s = cells.at(feet);
 		int i = Cells.index(feet);
 		if (s.lava == null) {
