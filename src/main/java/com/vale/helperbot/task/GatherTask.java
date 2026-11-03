@@ -92,7 +92,17 @@ public class GatherTask implements BotTask {
 	/** Ticks after a break to look at what it dropped (the drop tracker's window, plus a little). */
 	private static final int DROP_CHECK_TICKS = 7;
 	/** Targets it can't get to (no spot within reach, or not on one breath): skipped for this task. */
-	private final Set<BlockPos> unreachable = new HashSet<>();
+	/**
+	 * Judged out of reach, with the breath it had then (full, health it may spend included): under
+	 * water a bigger breath (health back) may bring them in reach again. It used to be for good:
+	 * after spending some health under water, every deep block was out of reach for the rest of the task.
+	 */
+	private final java.util.Map<BlockPos, Integer> unreachable = new java.util.HashMap<>();
+
+	private boolean outOfReach(BotPlayer bot, BlockPos pos) {
+		Integer breath = unreachable.get(pos);
+		return breath != null && breath >= Air.fullBudget(bot);
+	}
 	/** How many of the nearest targets are compared each time it picks the next one. */
 	private static final int TARGETS_COMPARED = 12;
 
@@ -362,7 +372,7 @@ public class GatherTask implements BotTask {
 
 	private Status find(BotPlayer bot) {
 		targets = scan(bot, SCAN_CHUNKS);
-		bot.log("附近扫描到 " + targets.size() + " 处" + itemName().getString() + "（不算已放弃的 " + (rejected.size() + unreachable.size()) + " 处）");
+		bot.log("附近扫描到 " + targets.size() + " 处" + itemName().getString() + "（不算已放弃的 " + rejected.size() + " 处、暂时够不着的 " + unreachable.size() + " 处）");
 		if (!targets.isEmpty()) {
 			return nextTarget(bot);
 		}
@@ -379,7 +389,7 @@ public class GatherTask implements BotTask {
 		ServerLevel level = bot.level();
 		return BlockScanner.find(level, bot.blockPosition(), chunkRadius,
 				state -> toolFor.containsKey(state.getBlock()) && DropAnalysis.dropsFrom(item, state),
-				pos -> !rejected.contains(pos) && !unreachable.contains(pos) && Guard.canHarvest(level, pos, level.getBlockState(pos)),
+				pos -> !rejected.contains(pos) && !outOfReach(bot, pos) && Guard.canHarvest(level, pos, level.getBlockState(pos)),
 				64);
 	}
 
@@ -445,7 +455,7 @@ public class GatherTask implements BotTask {
 			double cost = targetCost(bot, p, escape);
 			if (Double.isNaN(cost)) {
 				it.remove();
-				unreachable.add(p);
+				unreachable.put(p, Air.fullBudget(bot));
 				bot.log(p.toShortString() + " 判断为够不着（附近没有能站着伸手够到它的位置，或者一口气不够），跳过");
 				continue;
 			}
@@ -674,6 +684,20 @@ public class GatherTask implements BotTask {
 			return Status.RUNNING;
 		}
 		if (!bot.movement().isBreaking(aim)) {
+			// About to mine afloat (25 times slower than standing): find a spot to stand and mine it
+			// from (on top of it, say), as planning does for any block under water. Here, after the
+			// plan, it can come from something in the way (dirt over clay: mined afloat from where the
+			// clay was in reach) or from the target once that's out of the way (the hole the dirt left).
+			// It used to try afloat, find the air too short and give the target up, and do the same at
+			// the next covered one: six times in a row.
+			if (bot.movement().headUnderwater() && !LocalPathfinder.isSupport(level, bot.blockPosition().below())
+					&& standTried.add(aim)) {
+				bot.log(aim.toShortString() + " 的" + aimBlock.getName().getString() + (obstacle ? "挡着" + itemName().getString() + "，" : "")
+						+ "浮着挖太慢：先找个能站着挖它的位置");
+				goNear(bot, aim);
+				phase = Phase.APPROACH;
+				return Status.RUNNING;
+			}
 			Status air = airCheck(bot, aim, aimBlock, tool);
 			if (air != null) {
 				return air;
@@ -867,6 +891,8 @@ public class GatherTask implements BotTask {
 	/** True once it stopped because no tool it has can mine any source any more (worn out, taken). */
 	private boolean toolsGone;
 	private int unreachableInRow;
+	/** Blocks in the way it has gone to stand by (see mine): once each, then as it can. */
+	private final Set<BlockPos> standTried = new HashSet<>();
 
 	boolean toolsGone() {
 		return toolsGone;

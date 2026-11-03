@@ -656,6 +656,18 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.FLINT, 3, Mode.NORMAL);
 				}, Scenario.has(Items.FLINT, 3, c -> !c.logHas("不要了"), "放弃了一个燧石（没捡到）")),
 
+				new Scenario("W32", "水底黏土上盖着一层泥土（玩家报告）：站到泥土上挖开，再挖黏土", 4 * MINUTE, (a, bot, me) -> {
+					// 4 deep water (as the player had it) over a strip of clay, each covered by dirt: from
+					// afloat, the dirt in the way and then the clay are too slow to mine on the air left;
+					// standing on them, they aren't.
+					a.fill(6, 37, -3, 12, 40, 3, Blocks.WATER);
+					a.fill(7, 35, -1, 11, 35, 1, Blocks.CLAY);
+					a.fill(7, 36, -1, 11, 36, 1, Blocks.DIRT);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.CLAY_BALL, 8, Mode.NORMAL);
+				}, Scenario.has(Items.CLAY_BALL, 8)),
+
 				new Scenario("F1", "装一桶水：地面上，9 格外有个小水池（血不多）", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(10, 39, 4, 12, 40, 6, Blocks.WATER); // a pond 3x3, 2 deep, in the grass
 					teleport(bot, a, 1, 41, 0);
