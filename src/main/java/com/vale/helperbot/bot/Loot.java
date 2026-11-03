@@ -273,14 +273,13 @@ public final class Loot {
 	}
 
 	/** Path goal: standing (or swimming) in this cell, the pickup box would touch the item. */
-	private Predicate<BlockPos> pickupSpot(ItemEntity drop) {
-		ServerLevel level = bot.level();
+	private com.vale.helperbot.path.PathGoal pickupSpot(ItemEntity drop) {
 		AABB itemBox = drop.getBoundingBox();
 		double half = bot.getBbWidth() / 2, height = bot.getBbHeight();
-		return p -> {
-			double floor = LocalPathfinder.floorHeight(level, p);
+		return (w, p) -> {
+			double floor = LocalPathfinder.floorHeight(w, p);
 			// A ghost in a protected chunk doesn't pick anything up.
-			if (Double.isNaN(floor) || com.vale.helperbot.guard.ProtectionZones.isProtected(level, p)) {
+			if (Double.isNaN(floor) || com.vale.helperbot.guard.ProtectionZones.isProtected(w, p)) {
 				return false;
 			}
 			double cx = p.getX() + 0.5, cz = p.getZ() + 0.5;

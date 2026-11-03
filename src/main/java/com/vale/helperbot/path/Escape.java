@@ -1,5 +1,6 @@
 package com.vale.helperbot.path;
 
+import net.minecraft.world.level.BlockGetter;
 import com.vale.helperbot.guard.Guard;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -28,12 +29,14 @@ public final class Escape {
 	/** Columns per tile side, and how far past its edges a tile's field looks for ways up. */
 	private static final int TILE = 16, MARGIN = 12;
 	private static final int SIZE = TILE + 2 * MARGIN;
+	/** How far from a cell an estimate may look: sideways (a tile and its margin) and up. */
+	public static final int REACH_SIDEWAYS = TILE + MARGIN, REACH_UP = 64 + 2;
 	/** Give up looking up after this many blocks (deeper than any ocean). */
 	private static final int MAX_UP = 64;
 	private static final double UP_TICKS = 1 / Air.SWIM_UP_SPEED;
 	private static final double SIDE_TICKS = 1 / LocalPathfinder.SWIM_SPEED;
 
-	private final Level level;
+	private final BlockGetter level;
 	private final Inventory inventory;
 	private final double waterDigFactor;
 	private final Long2DoubleOpenHashMap upMemo = new Long2DoubleOpenHashMap();
@@ -41,7 +44,7 @@ public final class Escape {
 	/** Per tile and layer: ticks to air from each cell, swimming sideways first (no standing start). */
 	private final Long2ObjectOpenHashMap<double[]> fields = new Long2ObjectOpenHashMap<>();
 
-	public Escape(Level level, Inventory inventory, double waterDigFactor) {
+	public Escape(BlockGetter level, Inventory inventory, double waterDigFactor) {
 		this.level = level;
 		this.inventory = inventory;
 		this.waterDigFactor = waterDigFactor;
@@ -175,7 +178,7 @@ public final class Escape {
 	/** Ticks to dig this cell with the best tool (no penalties), or -1 if it can't or mustn't. */
 	private int digTicks(BlockPos pos) {
 		BlockState state = level.getBlockState(pos);
-		if (!level.hasChunkAt(pos) || !Guard.canBreak(level, pos, state) || Guard.isDangerous(state)) {
+		if (!Worlds.loaded(level, pos) || !Guard.canBreak(level, pos, state) || Guard.isDangerous(state)) {
 			return -1;
 		}
 		int ticks = BreakTimes.estimateTicks(inventory, level, pos, state);
@@ -187,7 +190,7 @@ public final class Escape {
 	 * which turns into water when broken over anything solid or liquid (vanilla). Ice over a pond
 	 * dug from below used to count as "head in the air"; it drowned digging it, floating.
 	 */
-	public static boolean floodsWhenDug(Level level, BlockPos pos) {
+	public static boolean floodsWhenDug(BlockGetter level, BlockPos pos) {
 		if (LocalPathfinder.isWater(level, pos.above())) {
 			return true;
 		}

@@ -1,5 +1,6 @@
 package com.vale.helperbot.path;
 
+import net.minecraft.world.level.BlockGetter;
 import com.vale.helperbot.guard.Guard;
 import com.vale.helperbot.guard.ProtectionZones;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
@@ -163,7 +164,7 @@ public final class LocalPathfinder {
 	/** Real ticks of the digging priced by the {@link #clearCost} calls since it was last reset. */
 	private double digTicks;
 
-	private final Level level;
+	private final BlockGetter level;
 	private final Inventory inventory;
 	private final Mode mode;
 	private final int maxDrop;
@@ -172,7 +173,7 @@ public final class LocalPathfinder {
 	/** The target's height is unknown (e.g. a far-away biome): steer by horizontal distance only. */
 	private final boolean horizontalOnly;
 	private final Limits limits;
-	private final Predicate<BlockPos> goal;
+	private final PathGoal goal;
 	/** Cells the bot found blocked in practice (see MovementController#learnObstacle): treated as walls. */
 	private final LongPredicate avoid;
 	private final double walkCost;
@@ -219,8 +220,8 @@ public final class LocalPathfinder {
 	 *                   drops into water are only limited by the search window
 	 * @param air        the bot's breath: under water, only routes it can always get back up from
 	 */
-	public LocalPathfinder(Level level, Inventory inventory, Mode mode, int maxDrop, BlockPos start, double startFloor,
-						   Predicate<BlockPos> goal, BlockPos target, boolean horizontalOnly, Limits limits,
+	public LocalPathfinder(BlockGetter level, Inventory inventory, Mode mode, int maxDrop, BlockPos start, double startFloor,
+						   PathGoal goal, BlockPos target, boolean horizontalOnly, Limits limits,
 						   LongPredicate avoid, Air.Profile air, LongPredicate favored) {
 		this.avoid = avoid;
 		this.favored = favored;
@@ -268,7 +269,7 @@ public final class LocalPathfinder {
 				return false;
 			}
 			Node node = open.poll();
-			if (goal.test(node.pos)) {
+			if (goal.test(level, node.pos)) {
 				result = reconstruct(node, true);
 				progress = (heuristic(origin) - heuristic(node.pos)) / walkCost;
 				return true;
@@ -803,7 +804,7 @@ public final class LocalPathfinder {
 	 * Is standing in {@code onto} reached by walking up a stair, moving (dx, dz)? The block under
 	 * it is a bottom-half stair rising that way: its lower half is a half step, then the top.
 	 */
-	public static boolean stairStep(Level level, BlockPos onto, int dx, int dz) {
+	public static boolean stairStep(BlockGetter level, BlockPos onto, int dx, int dz) {
 		BlockState state = level.getBlockState(onto.below());
 		if (!(state.getBlock() instanceof net.minecraft.world.level.block.StairBlock)
 				|| state.getValue(net.minecraft.world.level.block.StairBlock.HALF) != net.minecraft.world.level.block.state.properties.Half.BOTTOM) {
@@ -813,7 +814,7 @@ public final class LocalPathfinder {
 		return up.getStepX() == dx && up.getStepZ() == dz;
 	}
 
-	public static boolean isWater(Level level, BlockPos pos) {
+	public static boolean isWater(BlockGetter level, BlockPos pos) {
 		return level.getFluidState(pos).is(FluidTags.WATER);
 	}
 
@@ -830,8 +831,8 @@ public final class LocalPathfinder {
 	 * Height the feet rest at when standing with feet in cell {@code c}, or NaN if the bot
 	 * can't stand there (no ground, no headroom, liquid, hazard, or a block it must not step on).
 	 */
-	public static double floorHeight(Level level, BlockPos c) {
-		if (!level.hasChunkAt(c)) {
+	public static double floorHeight(BlockGetter level, BlockPos c) {
+		if (!Worlds.loaded(level, c)) {
 			return Double.NaN;
 		}
 		BlockState state = level.getBlockState(c);
@@ -870,13 +871,13 @@ public final class LocalPathfinder {
 	}
 
 	/** Feet height when swimming in water cell {@code c}: at the surface, or fully under. */
-	public static double swimHeight(Level level, BlockPos c) {
+	public static double swimHeight(BlockGetter level, BlockPos c) {
 		return isWater(level, c.above()) ? c.getY() : c.getY() + SWIM_FLOOR;
 	}
 
 	/** Water the bot can swim through: no collision, no bubble column or other hazard. */
-	public static boolean isOpenWater(Level level, BlockPos pos) {
-		if (!level.hasChunkAt(pos) || !isWater(level, pos)) {
+	public static boolean isOpenWater(BlockGetter level, BlockPos pos) {
+		if (!Worlds.loaded(level, pos) || !isWater(level, pos)) {
 			return false;
 		}
 		BlockState state = level.getBlockState(pos);
@@ -887,7 +888,7 @@ public final class LocalPathfinder {
 	 * Blocks of water to swim straight up from {@code pos} before reaching breathable air,
 	 * or -1 if that's more than {@link #MAX_DIVE_DEPTH} or blocked.
 	 */
-	public static int surfaceDistance(Level level, BlockPos pos) {
+	public static int surfaceDistance(BlockGetter level, BlockPos pos) {
 		for (int d = 0; d <= MAX_DIVE_DEPTH; d++) {
 			BlockPos p = pos.above(d);
 			if (isPassable(level, p)) {
@@ -900,8 +901,8 @@ public final class LocalPathfinder {
 		return -1;
 	}
 
-	public static boolean isPassable(Level level, BlockPos pos) {
-		if (!level.hasChunkAt(pos)) {
+	public static boolean isPassable(BlockGetter level, BlockPos pos) {
+		if (!Worlds.loaded(level, pos)) {
 			return false;
 		}
 		BlockState state = level.getBlockState(pos);
@@ -914,8 +915,8 @@ public final class LocalPathfinder {
 	}
 
 	/** A full-height block that can be stood on. */
-	public static boolean isSupport(Level level, BlockPos pos) {
-		if (!level.hasChunkAt(pos)) {
+	public static boolean isSupport(BlockGetter level, BlockPos pos) {
+		if (!Worlds.loaded(level, pos)) {
 			return false;
 		}
 		BlockState state = level.getBlockState(pos);
@@ -974,7 +975,7 @@ public final class LocalPathfinder {
 		if (stored == 0) {
 			BlockState state = level.getBlockState(pos);
 			// Liquids and other non-solid cells can't be mined out of the way.
-			boolean allowed = level.hasChunkAt(pos)
+			boolean allowed = Worlds.loaded(level, pos)
 					&& !BlockTable.empty(state, level, pos)
 					&& Guard.canBreak(level, pos, state)
 					&& !BlockTable.dangerous(state);

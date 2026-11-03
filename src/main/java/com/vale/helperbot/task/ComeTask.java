@@ -36,10 +36,10 @@ public class ComeTask implements BotTask {
 			return Status.DONE;
 		}
 		if (state.lastTarget == null || movement.status() == MovementController.Status.IDLE) {
-			movement.goTo(p -> p.closerThan(player.blockPosition(), ARRIVE_DISTANCE), playerPos, mode);
+			movement.goTo((w, p) -> p.closerThan(playerPos, ARRIVE_DISTANCE), playerPos, mode);
 			state.lastTarget = playerPos;
 		} else if (state.lastTarget.distSqr(playerPos) > 16) {
-			movement.retarget(p -> p.closerThan(player.blockPosition(), ARRIVE_DISTANCE), playerPos);
+			movement.retarget((w, p) -> p.closerThan(playerPos, ARRIVE_DISTANCE), playerPos);
 			state.lastTarget = playerPos;
 		}
 		return switch (movement.status()) {

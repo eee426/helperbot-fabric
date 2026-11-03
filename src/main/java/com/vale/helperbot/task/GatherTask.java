@@ -444,8 +444,9 @@ public class GatherTask implements BotTask {
 		Vec3 center = Vec3.atCenterOf(block);
 		// Not from inside a protected chunk: it can't do anything there (see ProtectionZones).
 		ServerLevel level = bot.level();
-		bot.movement().goTo(p -> !p.equals(block) && !ProtectionZones.isProtected(level, p)
-				&& new Vec3(p.getX() + 0.5, p.getY() + bot.getEyeHeight(), p.getZ() + 0.5).distanceTo(center) <= reach,
+		double eyeHeight = bot.getEyeHeight();
+		bot.movement().goTo((w, p) -> !p.equals(block) && !ProtectionZones.isProtected(w, p)
+				&& new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5).distanceTo(center) <= reach,
 				block, mode);
 	}
 
@@ -503,7 +504,7 @@ public class GatherTask implements BotTask {
 		// At the height its sources are at: on the surface for trees and flowers (see Habitat).
 		ServerLevel level = bot.level();
 		com.vale.helperbot.knowledge.Habitat.Layer layer = BiomeHints.layerFor(level, toolFor.keySet());
-		bot.movement().goTo(com.vale.helperbot.knowledge.Habitat.arrived(level, to, 16, layer),
+		bot.movement().goTo(com.vale.helperbot.knowledge.Habitat.arrived(to, 16, layer),
 				com.vale.helperbot.knowledge.Habitat.target(level, to, layer, bot.blockPosition()), mode,
 				!com.vale.helperbot.knowledge.Habitat.heightKnown(layer));
 		travelTicks = 0;
@@ -779,7 +780,7 @@ public class GatherTask implements BotTask {
 		}
 		ServerLevel level = bot.level();
 		if (bot.movement().headUnderwater() && bot.movement().status() != MovementController.Status.MOVING) {
-			bot.movement().goTo(p -> Air.breathable(level, p), bot.blockPosition().above(bot.movement().waterAbove() + 1), mode);
+			bot.movement().goTo((w, p) -> Air.breathable(w, p), bot.blockPosition().above(bot.movement().waterAbove() + 1), mode);
 		}
 		return Status.RUNNING;
 	}

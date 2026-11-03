@@ -435,7 +435,7 @@ final class HuntTask {
 	private void headFor(BotPlayer bot, BlockPos xz) {
 		ServerLevel level = bot.level();
 		Habitat.Layer l = layer(level);
-		bot.movement().goTo(Habitat.arrived(level, xz, 16, l), Habitat.target(level, xz, l, bot.blockPosition()), mode,
+		bot.movement().goTo(Habitat.arrived(xz, 16, l), Habitat.target(level, xz, l, bot.blockPosition()), mode,
 				!Habitat.heightKnown(l));
 	}
 
@@ -540,7 +540,7 @@ final class HuntTask {
 		// The prey keeps moving: follow it, re-aiming (without stopping) when it has wandered off.
 		// The spot must be in reach AND in sight: "close" isn't enough with a block in between.
 		Mob prey = target;
-		java.util.function.Predicate<BlockPos> inReach = com.vale.helperbot.bot.Sight.attackSpot(bot, prey);
+		com.vale.helperbot.path.PathGoal inReach = com.vale.helperbot.bot.Sight.attackSpot(bot, prey);
 		BlockPos at = prey.blockPosition();
 		if (bot.movement().status() != MovementController.Status.MOVING) {
 			bot.movement().goTo(inReach, at, mode);

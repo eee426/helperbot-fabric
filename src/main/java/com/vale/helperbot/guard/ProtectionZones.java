@@ -10,6 +10,7 @@ import it.unimi.dsi.fastutil.longs.Long2IntMap;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.storage.LevelResource;
@@ -41,6 +42,11 @@ public final class ProtectionZones {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	/** Per dimension id: chunk position (ChunkPos#toLong) to its number. */
 	private static final Map<String, Long2IntOpenHashMap> chunks = new HashMap<>();
+	/**
+	 * What lookups read: a copy of {@link #chunks}, replaced (never changed) after each change, so
+	 * path searches on a worker thread can read it while a command changes the zones.
+	 */
+	private static volatile Map<String, Long2IntOpenHashMap> published = Map.of();
 	private static int nextId = 1;
 	private static Path file;
 
@@ -55,6 +61,7 @@ public final class ProtectionZones {
 
 	public static void load(MinecraftServer server) {
 		chunks.clear();
+		published = Map.of();
 		nextId = 1;
 		file = server.getWorldPath(LevelResource.ROOT).resolve("helperbot").resolve("protected_chunks.json");
 		if (!Files.exists(file)) {
@@ -79,6 +86,17 @@ public final class ProtectionZones {
 		} catch (IOException | RuntimeException e) {
 			HelperBot.LOGGER.error("Failed to read protected chunks from {}", file, e);
 		}
+		publish();
+	}
+
+	private static void publish() {
+		Map<String, Long2IntOpenHashMap> copy = new HashMap<>();
+		chunks.forEach((dim, m) -> {
+			Long2IntOpenHashMap c = new Long2IntOpenHashMap(m);
+			c.defaultReturnValue(0);
+			copy.put(dim, c);
+		});
+		published = copy;
 	}
 
 	private static Long2IntOpenHashMap map(String dim) {
@@ -113,6 +131,7 @@ public final class ProtectionZones {
 		}
 		id = nextId++;
 		m.put(chunk.toLong(), id);
+		publish();
 		save();
 		return id;
 	}
@@ -123,6 +142,7 @@ public final class ProtectionZones {
 			for (Long2IntMap.Entry e : m.long2IntEntrySet()) {
 				if (e.getIntValue() == id) {
 					m.remove(e.getLongKey());
+					publish();
 					save();
 					return true;
 				}
@@ -133,7 +153,7 @@ public final class ProtectionZones {
 
 	/** The chunk's number, or 0 if it isn't protected. */
 	public static int idOf(Level level, ChunkPos chunk) {
-		Long2IntOpenHashMap m = chunks.get(dimensionId(level));
+		Long2IntOpenHashMap m = published.get(dimensionId(level));
 		return m == null ? 0 : m.get(chunk.toLong());
 	}
 
@@ -162,11 +182,13 @@ public final class ProtectionZones {
 		return out;
 	}
 
-	public static boolean isProtected(Level level, BlockPos pos) {
-		if (chunks.isEmpty()) {
+	/** Also takes a path search's copy of the world (see com.vale.helperbot.path.Snapshot). */
+	public static boolean isProtected(BlockGetter level, BlockPos pos) {
+		Map<String, Long2IntOpenHashMap> all = published;
+		if (all.isEmpty()) {
 			return false;
 		}
-		Long2IntOpenHashMap m = chunks.get(dimensionId(level));
+		Long2IntOpenHashMap m = all.get(com.vale.helperbot.path.Worlds.dimension(level).identifier().toString());
 		return m != null && m.get(ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4)) != 0;
 	}
 

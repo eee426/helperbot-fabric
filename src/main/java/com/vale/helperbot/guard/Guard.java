@@ -1,5 +1,6 @@
 package com.vale.helperbot.guard;
 
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.BlockTags;
@@ -68,7 +69,7 @@ public final class Guard {
 	}
 
 	/** May the bot break this block? */
-	public static boolean canBreak(Level level, BlockPos pos, BlockState state) {
+	public static boolean canBreak(BlockGetter level, BlockPos pos, BlockState state) {
 		if (ProtectionZones.isProtected(level, pos) || Restrictions.isBlocked(state.getBlock()) || state.getDestroySpeed(level, pos) < 0
 				|| state.is(Blocks.TNT) || isNextTo(level, pos, true)) {
 			return false;
@@ -86,7 +87,7 @@ public final class Guard {
 	 * it off anything with a block entity and off player-placed leaves; everything else that a
 	 * task targets is allowed (there is no placement log yet, see LAUNCH_CHECKLIST).
 	 */
-	public static boolean canHarvest(Level level, BlockPos pos, BlockState state) {
+	public static boolean canHarvest(BlockGetter level, BlockPos pos, BlockState state) {
 		if (ProtectionZones.isProtected(level, pos) || Restrictions.isBlocked(state.getBlock()) || state.getDestroySpeed(level, pos) < 0
 				|| state.is(Blocks.TNT) || isNextTo(level, pos, true)) {
 			return false;
@@ -104,7 +105,7 @@ public final class Guard {
 	 * Extra planning cost (ticks) for risky breaks that OPEN rules allow: a gravity block
 	 * coming down, or water flooding in.
 	 */
-	public static double breakRiskCost(Level level, BlockPos pos) {
+	public static double breakRiskCost(BlockGetter level, BlockPos pos) {
 		double cost = 0;
 		if (level.getBlockState(pos.above()).getBlock() instanceof FallingBlock) {
 			cost += 40;
@@ -119,14 +120,14 @@ public final class Guard {
 	 * May the bot put down its own crafting table or furnace here for a moment? Allowed under
 	 * strict rules too, since it takes the station back right after using it.
 	 */
-	public static boolean canPlaceStation(Level level, BlockPos pos) {
+	public static boolean canPlaceStation(BlockGetter level, BlockPos pos) {
 		return !ProtectionZones.isProtected(level, pos)
 				&& level.getBlockState(pos).canBeReplaced()
 				&& level.getFluidState(pos).isEmpty();
 	}
 
 	/** May the bot put a block here? */
-	public static boolean canPlace(Level level, BlockPos pos) {
+	public static boolean canPlace(BlockGetter level, BlockPos pos) {
 		return Rules.open()
 				&& !ProtectionZones.isProtected(level, pos)
 				&& level.getBlockState(pos).canBeReplaced()
@@ -134,7 +135,7 @@ public final class Guard {
 	}
 
 	/** Lava (lavaOnly) or any liquid next to this block. */
-	private static boolean isNextTo(Level level, BlockPos pos, boolean lavaOnly) {
+	private static boolean isNextTo(BlockGetter level, BlockPos pos, boolean lavaOnly) {
 		for (Direction dir : Direction.values()) {
 			var fluid = level.getFluidState(pos.relative(dir));
 			if (lavaOnly ? fluid.is(FluidTags.LAVA) : !fluid.isEmpty()) {

@@ -1,5 +1,6 @@
 package com.vale.helperbot.path;
 
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.effect.MobEffectUtil;
 import net.minecraft.world.entity.LivingEntity;
@@ -76,7 +77,7 @@ public final class Air {
 	 * Mining slowdown with feet in {@code feet}: head under water, and (vanilla) 5x again when not
 	 * standing on anything, i.e. floating.
 	 */
-	public static double digPenalty(Level level, BlockPos feet, double waterDigFactor) {
+	public static double digPenalty(BlockGetter level, BlockPos feet, double waterDigFactor) {
 		if (breathable(level, feet)) {
 			return 1;
 		}
@@ -84,7 +85,7 @@ public final class Air {
 	}
 
 	/** With feet in this cell (standing, or floating at the surface), is the head out of the water? */
-	public static boolean breathable(Level level, BlockPos feet) {
+	public static boolean breathable(BlockGetter level, BlockPos feet) {
 		return !LocalPathfinder.isWater(level, feet.above());
 	}
 
