@@ -1,5 +1,6 @@
 package com.vale.helperbot.path;
 
+import net.minecraft.world.level.BlockGetter;
 import com.vale.helperbot.knowledge.Habitat;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
@@ -26,7 +27,7 @@ public final class TravelEstimate {
 	private static final int CLIMB_BLOCKS = 3;
 	private static final double CLIMB_EXTRA = 4;
 
-	private final Level level;
+	private final BlockGetter level;
 	private final BlockPos target;
 	private final boolean horizontalOnly;
 	private final double walk;
@@ -36,7 +37,7 @@ public final class TravelEstimate {
 	private final double climb;
 	private final Long2IntOpenHashMap surface = new Long2IntOpenHashMap();
 
-	public TravelEstimate(Level level, Inventory inventory, Mode mode, BlockPos target, boolean horizontalOnly) {
+	public TravelEstimate(BlockGetter level, Inventory inventory, Mode mode, BlockPos target, boolean horizontalOnly) {
 		this.level = level;
 		this.target = target;
 		this.horizontalOnly = horizontalOnly;
@@ -92,15 +93,12 @@ public final class TravelEstimate {
 	 * surface" while digging down.
 	 */
 	private int depth(BlockPos p) {
-		if (!(level instanceof ServerLevel server)) {
-			return 0;
-		}
 		long key = BlockPos.asLong(p.getX(), 0, p.getZ());
 		int y = surface.get(key);
 		if (y == Integer.MIN_VALUE) {
-			y = Habitat.surfaceY(server, p.getX(), p.getZ());
+			y = Worlds.surfaceY(level, p.getX(), p.getZ());
 			for (int[] o : new int[][]{{AROUND, 0}, {-AROUND, 0}, {0, AROUND}, {0, -AROUND}}) {
-				y = Math.max(y, Habitat.surfaceY(server, p.getX() + o[0], p.getZ() + o[1]));
+				y = Math.max(y, Worlds.surfaceY(level, p.getX() + o[0], p.getZ() + o[1]));
 			}
 			surface.put(key, y);
 		}

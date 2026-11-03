@@ -147,7 +147,7 @@ public class FetchWaterTask implements BotTask {
 		// generation if the chunk isn't loaded), and be up under the sky on arrival, not under it.
 		ServerLevel level = bot.level();
 		var surface = com.vale.helperbot.knowledge.Habitat.Layer.SURFACE;
-		bot.movement().goTo(com.vale.helperbot.knowledge.Habitat.arrived(level, t, 16, surface),
+		bot.movement().goTo(com.vale.helperbot.knowledge.Habitat.arrived(t, 16, surface),
 				com.vale.helperbot.knowledge.Habitat.target(level, t, surface, bot.blockPosition()), mode, false);
 		travelTicks = 0;
 		phase = Phase.TRAVEL;
@@ -184,7 +184,7 @@ public class FetchWaterTask implements BotTask {
 	private void startApproach(BotPlayer bot) {
 		BlockPos w = water;
 		// Stand within reach of the source, at or slightly above its level.
-		bot.movement().goTo(p -> Math.abs(p.getX() - w.getX()) <= 2 && Math.abs(p.getZ() - w.getZ()) <= 2
+		bot.movement().goTo((world, p) -> Math.abs(p.getX() - w.getX()) <= 2 && Math.abs(p.getZ() - w.getZ()) <= 2
 				&& p.getY() >= w.getY() && p.getY() <= w.getY() + 2 && !p.equals(w), w, mode);
 		phase = Phase.GOTO;
 	}

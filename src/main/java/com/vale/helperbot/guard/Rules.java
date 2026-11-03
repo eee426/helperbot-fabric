@@ -14,7 +14,8 @@ public final class Rules {
 		OPEN, STRICT
 	}
 
-	private static Level current = Level.OPEN;
+	/** Volatile: path searches read it on a worker thread. */
+	private static volatile Level current = Level.OPEN;
 
 	private Rules() {
 	}

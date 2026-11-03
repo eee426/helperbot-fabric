@@ -30,6 +30,8 @@ import java.util.Set;
 public final class Restrictions {
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 	private static final Set<Block> blocked = new LinkedHashSet<>();
+	/** What path searches read, possibly on a worker thread: a copy, replaced after each change. */
+	private static volatile Set<Block> published = Set.of();
 	private static boolean noPortals;
 	private static Path file;
 
@@ -44,6 +46,7 @@ public final class Restrictions {
 
 	public static void load(MinecraftServer server) {
 		blocked.clear();
+		published = Set.of();
 		noPortals = false;
 		file = server.getWorldPath(LevelResource.ROOT).resolve("helperbot").resolve("restrictions.json");
 		if (!Files.exists(file)) {
@@ -60,6 +63,7 @@ public final class Restrictions {
 		} catch (IOException | RuntimeException e) {
 			HelperBot.LOGGER.error("Failed to read restrictions from {}", file, e);
 		}
+		published = Set.copyOf(blocked);
 	}
 
 	private static void save() {
@@ -81,7 +85,8 @@ public final class Restrictions {
 
 	/** Neither mined nor placed. */
 	public static boolean isBlocked(Block block) {
-		return !blocked.isEmpty() && blocked.contains(block);
+		Set<Block> set = published;
+		return !set.isEmpty() && set.contains(block);
 	}
 
 	/** An item that would place a blocked block. */
@@ -95,6 +100,7 @@ public final class Restrictions {
 		if (now) {
 			blocked.add(block);
 		}
+		published = Set.copyOf(blocked);
 		save();
 		return now;
 	}

@@ -70,7 +70,7 @@ final class Station {
 			}
 			bot.log("这里放不下" + new ItemStack(item).getHoverName().getString() + "，先去 " + dryGround.toShortString());
 			BlockPos t = dryGround;
-			bot.movement().goTo(p -> p.equals(t), t, com.vale.helperbot.path.Mode.DEFAULT);
+			bot.movement().goTo((w, p) -> p.equals(t), t, com.vale.helperbot.path.Mode.DEFAULT);
 			return BotTask.Status.RUNNING;
 		}
 		MovementController.Status status = bot.movement().status();

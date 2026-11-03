@@ -7,6 +7,9 @@ import com.vale.helperbot.path.BreakTimes;
 import com.vale.helperbot.path.Escape;
 import com.vale.helperbot.path.BuildingBlocks;
 import com.vale.helperbot.path.LocalPathfinder;
+import com.vale.helperbot.path.PathGoal;
+import com.vale.helperbot.path.Snapshot;
+import com.vale.helperbot.path.PathJob;
 import com.vale.helperbot.path.Mode;
 import com.vale.helperbot.path.PathStep;
 import com.vale.helperbot.path.TravelEstimate;
@@ -62,8 +65,11 @@ public final class MovementController {
 	/** Start planning the next stretch when this few steps of the current path are left. */
 	private static final int LOOKAHEAD_STEPS = 5;
 	private static final int MAX_EMPTY_PLANS = 2;
-	/** Pathfinding time per tick (a tick is 50 ms). Bigger searches continue next tick. */
-	private static final long PLAN_BUDGET_NANOS = 8_000_000;
+	/**
+	 * How long the server thread waits for a search it just started, so a short one (most of
+	 * them) is taken in the same tick; a longer one is picked up in a later tick.
+	 */
+	private static final long PLAN_WAIT_NANOS = 1_000_000;
 	/** A partial path must get at least this many blocks closer, or a bigger window is tried. */
 	private static final double MIN_USEFUL_PROGRESS = 3.0;
 	/** Search bigger (then give up) when the distance to the target hasn't improved for this long. */
@@ -78,18 +84,19 @@ public final class MovementController {
 	private final BotPlayer bot;
 	private Status status = Status.IDLE;
 	private String failReason = "";
-	private Predicate<BlockPos> goal;
+	private PathGoal goal;
 	private BlockPos target;
 	private Mode mode = Mode.DEFAULT;
 	private boolean horizontalOnly;
 
-	private LocalPathfinder search;
+	/** The search running in the background, if any (see PathJob). */
+	private PathJob search;
 	private int searchLevel;
 	/** Smallest search level to start from; raised when the bot stops making progress. */
 	private int minLevel;
 	private double escalatedAtDistance;
 	/** The next stretch, planned while walking the current one. */
-	private LocalPathfinder lookahead;
+	private PathJob lookahead;
 	private boolean pathReachesGoal;
 	private boolean replanRequested;
 
@@ -122,7 +129,7 @@ public final class MovementController {
 		this.bot = bot;
 	}
 
-	public void goTo(Predicate<BlockPos> goal, BlockPos target, Mode mode) {
+	public void goTo(PathGoal goal, BlockPos target, Mode mode) {
 		goTo(goal, target, mode, false);
 	}
 
@@ -131,7 +138,7 @@ public final class MovementController {
 	 *                       progress by horizontal distance, so the bot doesn't climb or dig
 	 *                       towards a made-up height
 	 */
-	public void goTo(Predicate<BlockPos> goal, BlockPos target, Mode mode, boolean horizontalOnly) {
+	public void goTo(PathGoal goal, BlockPos target, Mode mode, boolean horizontalOnly) {
 		stop();
 		this.goal = goal;
 		this.target = target;
@@ -147,12 +154,11 @@ public final class MovementController {
 	}
 
 	/** Changes the destination; the current step finishes, then a new plan is made. */
-	public void retarget(Predicate<BlockPos> goal, BlockPos target) {
+	public void retarget(PathGoal goal, BlockPos target) {
 		this.goal = goal;
 		this.target = target;
 		this.replanRequested = true;
-		this.lookahead = null;
-		this.search = null;
+		cancelSearches();
 		this.bestDistance = Double.MAX_VALUE;
 	}
 
@@ -165,8 +171,7 @@ public final class MovementController {
 		lastPath.clear(); // a new destination: the old route means nothing
 		status = Status.IDLE;
 		path = null;
-		search = null;
-		lookahead = null;
+		cancelSearches();
 		replanRequested = false;
 		goal = null;
 		target = null;
@@ -271,7 +276,7 @@ public final class MovementController {
 	// ---- chasing in a fight, then back to the task -------------------------------------
 
 	private boolean engaged;
-	private Predicate<BlockPos> savedGoal;
+	private PathGoal savedGoal;
 	private BlockPos savedTarget;
 	private Status savedStatus;
 	private boolean savedHorizontalOnly;
@@ -280,12 +285,12 @@ public final class MovementController {
 	 * Go somewhere for a fight (e.g. to get at a skeleton), remembering the task's own
 	 * destination, which {@link #disengage()} restores. Calling it again just re-aims.
 	 */
-	public void engage(Predicate<BlockPos> chaseGoal, BlockPos chaseTarget) {
+	public void engage(PathGoal chaseGoal, BlockPos chaseTarget) {
 		engage(chaseGoal, chaseTarget, "追击");
 	}
 
 	/** Same, with what it's going there for (for the log). */
-	public void engage(Predicate<BlockPos> chaseGoal, BlockPos chaseTarget, String why) {
+	public void engage(PathGoal chaseGoal, BlockPos chaseTarget, String why) {
 		paused = false;
 		if (!engaged) {
 			engaged = true;
@@ -357,8 +362,8 @@ public final class MovementController {
 		ignoreAir = true; // read when it plans, next tick
 		// A cell whose head space is still a block to dig only counts if it won't be water once dug
 		// (the goal sees the world as it is now, not as the path will leave it).
-		engage(p -> Air.breathable(level, p)
-				&& (LocalPathfinder.isPassable(level, p.above()) || !Escape.floodsWhenDug(level, p.above())),
+		engage((w, p) -> Air.breathable(w, p)
+				&& (LocalPathfinder.isPassable(w, p.above()) || !Escape.floodsWhenDug(w, p.above())),
 				f.above(Math.max(2, waterAbove())), "去换气");
 	}
 
@@ -470,7 +475,7 @@ public final class MovementController {
 		}
 		boolean atStepBoundary = !stepStarted && breakIndex == 0 && breakingPos == null;
 		if (atStepBoundary) {
-			if (goal.test(feet())) {
+			if (goal.test(bot.level(), feet())) {
 				status = Status.ARRIVED;
 				path = null;
 				return;
@@ -484,7 +489,7 @@ public final class MovementController {
 			if (path != null && headUnderwater() && bot.tickCount - plannedAt > WATER_REPLAN_TICKS) {
 				abortBreaking();
 				path = null;
-				lookahead = null;
+				cancelLookahead();
 			}
 			// About to go under from where it can breathe: top up first, like a player taking a
 			// breath before diving. The plan counted on a full breath.
@@ -528,9 +533,67 @@ public final class MovementController {
 			levels = LocalPathfinder.levels(headUnderwater());
 		}
 		searchLevel = levelIndex;
-		search = new LocalPathfinder(bot.level(), bot.getInventory(), mode, mode.maxDropFor(bot.getHealth()),
-				feet(), bot.getY(), goal, target, horizontalOnly, levels[levelIndex], this::isAvoided, airProfile(), lastPath::contains);
+		if (search != null) {
+			search.cancel();
+		}
+		search = startSearch(feet(), bot.getY(), levels[levelIndex]);
+		long started = System.nanoTime();
+		search.await(PLAN_WAIT_NANOS);
+		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
 		plannedAt = bot.tickCount;
+	}
+
+	/**
+	 * Starts a search in the background, on a copy of the blocks around it and of everything else
+	 * it reads (tools, cells to avoid, the last route), so it never touches what the server thread
+	 * is changing meanwhile. The copying is timed as pathfinding on the server thread.
+	 */
+	private PathJob startSearch(BlockPos start, double startFloor, LocalPathfinder.Limits limits) {
+		long started = System.nanoTime();
+		Air.Profile air = airProfile();
+		Snapshot world = Snapshot.around(bot.level(), start, limits, air.limited());
+		Inventory tools = new Inventory(bot, new net.minecraft.world.entity.EntityEquipment());
+		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
+			tools.setItem(slot, bot.getInventory().getItem(slot).copy());
+		}
+		it.unimi.dsi.fastutil.longs.LongOpenHashSet avoided = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+		for (var it = avoidUntil.long2IntEntrySet().iterator(); it.hasNext(); ) {
+			var e = it.next();
+			if (e.getIntValue() < bot.tickCount) {
+				it.remove(); // its time is up
+			} else {
+				avoided.add(e.getLongKey());
+			}
+		}
+		it.unimi.dsi.fastutil.longs.LongOpenHashSet favored = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(lastPath);
+		PathJob job = new PathJob(new LocalPathfinder(world, tools, mode, mode.maxDropFor(bot.getHealth()), start, startFloor,
+				goal, target, horizontalOnly, limits, avoided::contains, air, favored::contains));
+		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
+		return job;
+	}
+
+	/** Has the search finished? Counts its background time once, when it has. */
+	private boolean finished(PathJob job) {
+		if (!job.done()) {
+			return false;
+		}
+		bot.perf().add(Perf.Part.BACKGROUND, job.takeNanos());
+		return true;
+	}
+
+	private void cancelSearches() {
+		if (search != null) {
+			search.cancel();
+			search = null;
+		}
+		cancelLookahead();
+	}
+
+	private void cancelLookahead() {
+		if (lookahead != null) {
+			lookahead.cancel();
+			lookahead = null;
+		}
 	}
 
 	private boolean toppingUp;
@@ -567,34 +630,9 @@ public final class MovementController {
 	 * Runs the current search for this tick's budget. If it finds nothing useful (no path, or a
 	 * partial path that barely gets closer), the next bigger window is tried.
 	 */
-	/** Search time already spent this tick, and which tick that was. */
-	private long searchedThisTick;
-	private int searchTick = -1;
-
-	/**
-	 * Runs a search for what's left of this tick's budget, timing it (see Perf). True once it has
-	 * finished. The budget is for all searching in a tick together: planning the path and planning
-	 * ahead while walking used to get one each, twice the budget in some ticks.
-	 */
-	private boolean timedStep(LocalPathfinder s) {
-		if (searchTick != bot.tickCount) {
-			searchTick = bot.tickCount;
-			searchedThisTick = 0;
-		}
-		long left = PLAN_BUDGET_NANOS - searchedThisTick;
-		if (left <= 0) {
-			return false; // carries on next tick
-		}
-		long started = System.nanoTime();
-		boolean done = s.step(left);
-		long took = System.nanoTime() - started;
-		searchedThisTick += took;
-		bot.perf().add(Perf.Part.PATHFIND, took);
-		return done;
-	}
-
 	private void continuePlanning() {
-		if (!timedStep(search)) {
+		bot.perf().testWait(search.paceForTests());
+		if (!finished(search)) {
 			return;
 		}
 		LocalPathfinder.Result result = search.result();
@@ -626,7 +664,8 @@ public final class MovementController {
 	 */
 	private void advanceLookahead() {
 		if (lookahead != null) {
-			timedStep(lookahead);
+			bot.perf().testWait(lookahead.paceForTests());
+			finished(lookahead); // only to count its time; it's taken at the end of the path
 			return;
 		}
 		if (path == null || pathReachesGoal || replanRequested || path.size() - index > LOOKAHEAD_STEPS) {
@@ -643,8 +682,7 @@ public final class MovementController {
 		if (Double.isNaN(endFloor)) {
 			return;
 		}
-		lookahead = new LocalPathfinder(bot.level(), bot.getInventory(), mode, mode.maxDropFor(bot.getHealth()),
-				end, endFloor, goal, target, horizontalOnly, levels[minLevel], this::isAvoided, airProfile(), lastPath::contains);
+		lookahead = startSearch(end, endFloor, levels[minLevel]);
 	}
 
 	/**
@@ -652,12 +690,18 @@ public final class MovementController {
 	 * found a good one. Returns false if a normal (standing) re-plan is needed instead.
 	 */
 	private boolean switchToLookahead() {
-		LocalPathfinder next = lookahead;
+		PathJob next = lookahead;
 		lookahead = null;
 		if (next == null || replanRequested || path == null || !feet().equals(path.get(path.size() - 1).to())) {
+			if (next != null) {
+				next.cancel();
+			}
 			return false;
 		}
-		if (!timedStep(next)) {
+		long started = System.nanoTime();
+		next.await(PLAN_WAIT_NANOS);
+		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
+		if (!finished(next)) {
 			lookahead = next; // almost always done by now; if not, finish it next tick
 			return true;
 		}
@@ -820,18 +864,6 @@ public final class MovementController {
 		bot.log("被挡住，记下 " + cells.size() + " 格暂时绕开：" + cells.stream().map(BlockPos::toShortString).limit(4).toList());
 	}
 
-	private boolean isAvoided(long pos) {
-		int until = avoidUntil.getOrDefault(pos, 0);
-		if (until == 0) {
-			return false;
-		}
-		if (until < bot.tickCount) {
-			avoidUntil.remove(pos);
-			return false;
-		}
-		return true;
-	}
-
 	private void nextStep() {
 		index++;
 		resetStep();
@@ -950,8 +982,7 @@ public final class MovementController {
 		}
 		abortBreaking();
 		path = null;
-		search = null;
-		lookahead = null;
+		cancelSearches();
 		replanRequested = false;
 		resetStep();
 	}

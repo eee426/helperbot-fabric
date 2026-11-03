@@ -20,8 +20,10 @@ public final class Perf {
 		PLANNER("规划"),
 		/** Walking, digging, placing: following the path. */
 		MOVE("移动"),
-		/** Of the movement: the path search (A*). */
-		PATHFIND("寻路");
+		/** Of the movement: path search work on the server thread (with searches in the background: copying the blocks around). */
+		PATHFIND("寻路"),
+		/** The path search itself, on the background thread: not part of the server tick (counted when a search finishes). */
+		BACKGROUND("后台寻路（不占主线程）");
 
 		final String label;
 
@@ -46,7 +48,19 @@ public final class Perf {
 	private int lastTicks;
 
 	public void add(Part part, long nanos) {
+		if (part == Part.SURVIVAL || part == Part.MOVE) {
+			// The movement they drive includes any test-run wait (see PathJob#paceForTests): not the bot's time.
+			nanos = Math.max(0, nanos - testWait);
+			testWait = 0;
+		}
 		thisTick[part.ordinal()] += nanos;
+	}
+
+	private long testWait;
+
+	/** Test runs: time spent waiting for a background search to stand in for a real tick's length. */
+	public void testWait(long nanos) {
+		testWait += nanos;
 	}
 
 	/** End of a server tick: fold this tick's times into the window. */
@@ -108,7 +122,8 @@ public final class Perf {
 		double total = all(Part.VANILLA) + all(Part.SURVIVAL) + all(Part.TASK) + all(Part.MOVE);
 		return String.format(Locale.ROOT, "%.2f ms/刻（原版 %.2f、反应 %.2f、任务 %.2f 含规划 %.2f、移动 %.2f 含寻路 %.2f）；最慢一刻 %.1f ms（规划最慢 %.0f、寻路最慢 %.1f）",
 				total, all(Part.VANILLA), all(Part.SURVIVAL), all(Part.TASK), all(Part.PLANNER), all(Part.MOVE), all(Part.PATHFIND),
-				allWorstTick / 1e6, allMax[Part.PLANNER.ordinal()] / 1e6, allMax[Part.PATHFIND.ordinal()] / 1e6);
+				allWorstTick / 1e6, allMax[Part.PLANNER.ordinal()] / 1e6, allMax[Part.PATHFIND.ordinal()] / 1e6)
+				+ String.format(Locale.ROOT, "；后台寻路 %.2f ms/刻（最多一刻 %.1f）", all(Part.BACKGROUND), allMax[Part.BACKGROUND.ordinal()] / 1e6);
 	}
 
 	/** One line per part, and the bot's own total (the top-level parts) against a 50 ms tick. */
@@ -120,7 +135,7 @@ public final class Perf {
 			sb.append('\n').append(indent).append(p.label).append(String.format(Locale.ROOT, "：%.2f / %.1f", average(p), worst(p)));
 		}
 		double total = average(Part.VANILLA) + average(Part.SURVIVAL) + average(Part.TASK) + average(Part.MOVE);
-		sb.append(String.format(Locale.ROOT, "\n机器人自己合计：%.2f 毫秒/刻，占一刻（50 毫秒）的 %.1f%%", total, total / 50 * 100));
+		sb.append(String.format(Locale.ROOT, "\n机器人自己合计（不含后台）：%.2f 毫秒/刻，占一刻（50 毫秒）的 %.1f%%", total, total / 50 * 100));
 		return sb.toString();
 	}
 }
