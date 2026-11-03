@@ -738,6 +738,11 @@ public final class LocalPathfinder implements Planner {
 		return canBuild;
 	}
 
+	@Override
+	public boolean sprintSwim() {
+		return air.sprintSwim();
+	}
+
 	/**
 	 * Is standing in {@code onto} reached by walking up a stair, moving (dx, dz)? The block under
 	 * it is a bottom-half stair rising that way: its lower half is a half step, then the top.

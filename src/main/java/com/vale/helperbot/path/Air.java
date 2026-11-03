@@ -52,6 +52,21 @@ public final class Air {
 		return dryTicks * penalty + PICKUP_TICKS;
 	}
 
+	/**
+	 * Sprint-swimming (vanilla's swimming pose: sprinting with the head under water), blocks/tick, in
+	 * any direction: vanilla works out to about 0.18 across (friction 0.9 instead of 0.8, pull 0.02),
+	 * as fast or faster up and down (it swims where it looks). A touch under that, to be safe.
+	 */
+	public static final double SPRINT_SWIM_SPEED = 0.17;
+
+	/**
+	 * Ticks to swim (dx, dy, dz) blocks sprinting, when it can: fully under water at both ends (in the
+	 * swimming pose the eyes are low, so at the surface they'd be under and the air would run).
+	 */
+	public static double swimTicks(double dx, double dy, double dz, boolean sprint) {
+		return sprint ? Math.sqrt(dx * dx + dy * dy + dz * dz) / SPRINT_SWIM_SPEED : swimTicks(dx, dy, dz);
+	}
+
 	/** Ticks to swim (dx, dy, dz) blocks: at the swimming speed, but no faster up or down than {@link #SWIM_UP_SPEED}. */
 	public static double swimTicks(double dx, double dy, double dz) {
 		return Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz) / SWIM_SPEED, Math.abs(dy) / SWIM_UP_SPEED);
@@ -67,8 +82,10 @@ public final class Air {
 	 * @param workTicks      what it will do once there (mining a block, say), in ticks on dry land:
 	 *                       the goal must leave air for that too, at the speed it works there
 	 * @param refill         budget won back per tick with the head out of the water (see {@link #REFILL})
+	 * @param sprintSwim     it may sprint-swim (see {@link #SPRINT_SWIM_SPEED}): food enough to sprint, a mode that sprints
 	 */
-	public record Profile(int now, int full, double waterDigFactor, boolean limited, double workTicks, double refill) {
+	public record Profile(int now, int full, double waterDigFactor, boolean limited, double workTicks, double refill,
+						  boolean sprintSwim) {
 	}
 
 	/** Vanilla: air comes back 4 points a tick with the head out of the water. */
@@ -77,8 +94,13 @@ public final class Air {
 	private Air() {
 	}
 
-	public static Profile profile(LivingEntity e, boolean limited, double workTicks) {
-		return new Profile(budget(e), fullBudget(e), waterDigFactor(e), limited, workTicks, REFILL * airStretch(e));
+	public static Profile profile(LivingEntity e, boolean limited, double workTicks, boolean sprintSwim) {
+		return new Profile(budget(e), fullBudget(e), waterDigFactor(e), limited, workTicks, REFILL * airStretch(e), sprintSwim);
+	}
+
+	/** Fully under water: feet and head cells both water (where it may sprint-swim). */
+	public static boolean submerged(BlockGetter level, BlockPos feet) {
+		return LocalPathfinder.isWater(level, feet) && LocalPathfinder.isWater(level, feet.above());
 	}
 
 	/**

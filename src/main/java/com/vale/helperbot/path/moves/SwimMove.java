@@ -17,7 +17,10 @@ import java.util.List;
 final class SwimMove implements Move {
 	@Override
 	public void addSteps(Planner pf, BlockPos p, double cur, From from, List<Candidate> out) {
-		if (!pf.water(p)) {
+		// Feet or head in water: with the feet in an air pocket (a block just dug out) and the head in
+		// the water above, it swims up like from anywhere else. It used to need the feet in water: from
+		// such a pocket nothing led up, and the breathing layer had to pull it out.
+		if (!pf.water(p) && !pf.water(p.above())) {
 			return;
 		}
 		BlockPos up = p.above();
@@ -53,7 +56,8 @@ final class SwimMove implements Move {
 						continue;
 					}
 					boolean submerged = pf.water(c.above());
-					double ticks = Air.swimTicks(dx, dy, dz);
+					boolean sprint = pf.sprintSwim() && Air.submerged(pf.world(), p) && Air.submerged(pf.world(), c);
+					double ticks = Air.swimTicks(dx, dy, dz, sprint);
 					out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, c, List.of()), f,
 							ticks * (submerged ? LocalPathfinder.DIVE_COST_FACTOR : 1), ticks));
 				}

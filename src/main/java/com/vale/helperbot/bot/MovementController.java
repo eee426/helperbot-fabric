@@ -652,7 +652,12 @@ public final class MovementController {
 	private static final int WATER_REPLAN_TICKS = 20;
 
 	private Air.Profile airProfile() {
-		return Air.profile(bot, !ignoreAir, engaged ? 0 : goalWork);
+		return Air.profile(bot, !ignoreAir, engaged ? 0 : goalWork, canSprintSwim());
+	}
+
+	/** Sprinting is allowed (vanilla: more than 6 food, not eating) and this mode sprints. */
+	private boolean canSprintSwim() {
+		return mode.sprint && bot.getFoodData().getFoodLevel() > 6 && !bot.isUsingItem();
 	}
 
 	public boolean headUnderwater() {
@@ -1514,9 +1519,17 @@ public final class MovementController {
 	private void swimTowards(double tx, double ty, double tz) {
 		double dx = tx - bot.getX(), dy = ty - bot.getY(), dz = tz - bot.getZ();
 		double len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+		// Sprint-swim (vanilla's swimming pose, which the game takes on itself for a sprinting player
+		// under water) where the plan did: fully under water at both ends, sprinting allowed.
+		BlockPos here = feet();
+		BlockPos there = BlockPos.containing(tx, ty + 0.01, tz);
+		boolean sprint = canSprintSwim() && Air.submerged(bot.level(), here) && Air.submerged(bot.level(), there);
+		bot.setSprinting(sprint);
 		if (len > EPS) {
-			double s = Math.min(LocalPathfinder.SWIM_SPEED, len) / len;
-			double mx = dx * s, my = Math.max(-SWIM_VERTICAL_SPEED, Math.min(SWIM_VERTICAL_SPEED, dy * s)), mz = dz * s;
+			double speed = sprint ? Air.SPRINT_SWIM_SPEED : LocalPathfinder.SWIM_SPEED;
+			double vertical = sprint ? Air.SPRINT_SWIM_SPEED : SWIM_VERTICAL_SPEED;
+			double s = Math.min(speed, len) / len;
+			double mx = dx * s, my = Math.max(-vertical, Math.min(vertical, dy * s)), mz = dz * s;
 			if (Math.abs(dx) > EPS || Math.abs(dz) > EPS) {
 				face(dx, dz);
 			}
@@ -1531,6 +1544,8 @@ public final class MovementController {
 			}
 			if (moved) {
 				blockedTicks = 0;
+				// Vanilla's hunger for swimming: 0.01 a block (sprinting doesn't add to it in water).
+				bot.causeFoodExhaustion((float) (0.01 * Math.sqrt(mx * mx + my * my + mz * mz)));
 			} else if (++blockedTicks >= BLOCKED_LEARN_TICKS) {
 				learnObstacle(bot.getBoundingBox().move(mx, my, mz));
 				replan("游泳时被挡住");

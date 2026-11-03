@@ -700,6 +700,21 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.INK_SAC, 1, Mode.NORMAL);
 				}, Scenario.has(Items.INK_SAC, 1)),
 
+				new Scenario("W36", "9 格深的水底挖一块沙子（铁锹）：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(4, 32, -4, 12, 40, 4, Blocks.WATER);
+					a.set(8, 31, 0, Blocks.SAND);
+					teleport(bot, a, 2, 41, 0);
+					give(bot, Items.IRON_SHOVEL, 1);
+					give(bot, Items.BREAD, 16);
+					SWAM[0] = false;
+					return new AcquireTask(me, Items.SAND, 1, Mode.NORMAL);
+				}, c -> {
+					SWAM[0] |= c.bot().isSwimming();
+					return c.bot().getInventory().countItem(Items.SAND) >= 1
+							? (SWAM[0] ? Scenario.Outcome.pass("拿到了，用了游泳姿态") : Scenario.Outcome.fail("拿到了，但一直没用游泳姿态"))
+							: c.ended() ? Scenario.Outcome.fail("没拿到") : null;
+				}),
+
 				new Scenario("F1", "装一桶水：地面上，9 格外有个小水池（血不多）", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(10, 39, 4, 12, 40, 6, Blocks.WATER); // a pond 3x3, 2 deep, in the grass
 					teleport(bot, a, 1, 41, 0);
@@ -824,6 +839,8 @@ public final class Scenarios {
 
 	/** Result of the plan-only scene: [0] failure reason or null, [1] description. */
 	private static final String[] PLAN_RESULT = new String[2];
+	/** W36: whether the bot was seen in the swimming pose. */
+	private static final boolean[] SWAM = new boolean[1];
 
 	private static void give(BotPlayer bot, Item item, int count) {
 		bot.getInventory().add(new ItemStack(item, count));
