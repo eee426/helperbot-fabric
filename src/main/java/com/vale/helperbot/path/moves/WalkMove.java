@@ -1,5 +1,6 @@
 package com.vale.helperbot.path.moves;
 
+import com.vale.helperbot.path.Air;
 import com.vale.helperbot.path.Candidate;
 import com.vale.helperbot.path.LocalPathfinder;
 import com.vale.helperbot.path.PathStep;
@@ -63,8 +64,11 @@ final class WalkMove implements Move {
 				} else if (dy < -LocalPathfinder.STEP_HEIGHT) {
 					type = PathStep.Type.DESCEND;
 					double drop = -dy;
-					// Water breaks the fall, so only solid landings pay for damage.
-					cost += LocalPathfinder.fallTicks(drop) + (intoWater ? 0 : Math.max(0, drop - 3) * 10);
+					// Water breaks the fall, so only solid landings pay for damage. Starting in water it goes
+					// down at swimming speed, not like a fall: charged as a fall, every block down under
+					// water was planned 7 ticks short, and deep down the breath ran out before the plan's.
+					cost += (pf.water(p) ? Air.swimTicks(0, drop, 0) : LocalPathfinder.fallTicks(drop))
+							+ (intoWater ? 0 : Math.max(0, drop - 3) * 10);
 				} else {
 					type = PathStep.Type.WALK;
 				}

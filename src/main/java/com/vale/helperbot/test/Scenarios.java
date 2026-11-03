@@ -668,6 +668,16 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.CLAY_BALL, 8, Mode.NORMAL);
 				}, Scenario.has(Items.CLAY_BALL, 8)),
 
+				new Scenario("W33", "同上但水深 7 格：一口气干不完\"挖泥土 + 挖黏土\"，分两趟下水", 5 * MINUTE, (a, bot, me) -> {
+					// What's in the way is a job of its own: one dive for the dirt, the next for the clay.
+					a.fill(6, 34, -3, 12, 40, 3, Blocks.WATER);
+					a.fill(7, 32, -1, 11, 32, 1, Blocks.CLAY);
+					a.fill(7, 33, -1, 11, 33, 1, Blocks.DIRT);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.CLAY_BALL, 8, Mode.NORMAL);
+				}, Scenario.has(Items.CLAY_BALL, 8)),
+
 				new Scenario("F1", "装一桶水：地面上，9 格外有个小水池（血不多）", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(10, 39, 4, 12, 40, 6, Blocks.WATER); // a pond 3x3, 2 deep, in the grass
 					teleport(bot, a, 1, 41, 0);

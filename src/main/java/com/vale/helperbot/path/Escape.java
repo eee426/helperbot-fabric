@@ -191,7 +191,8 @@ public final class Escape {
 	 * dug from below used to count as "head in the air"; it drowned digging it, floating.
 	 */
 	public static boolean floodsWhenDug(BlockGetter level, BlockPos pos) {
-		if (LocalPathfinder.isWater(level, pos.above())) {
+		// Water right above, or above an air pocket over it (see Air#waterComing).
+		if (LocalPathfinder.isWater(level, pos.above()) || Air.waterComing(level, pos)) {
 			return true;
 		}
 		if (level.getBlockState(pos).getBlock() instanceof net.minecraft.world.level.block.IceBlock) {

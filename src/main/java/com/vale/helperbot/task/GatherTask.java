@@ -400,6 +400,7 @@ public class GatherTask implements BotTask {
 		ServerLevel level = bot.level();
 		BlockPos here = bot.blockPosition();
 		drops.stop();
+		behind = null;
 		// Items on the ground: sources like the blocks, on the same scale (see DropFetch). If they
 		// make up what's still missing, no more mining.
 		int needed = wanted - collected(bot);
@@ -510,7 +511,8 @@ public class GatherTask implements BotTask {
 		}, block, mode);
 		// Under water the plan must leave air to mine it too, not just to get there and back.
 		BlockState state = level.getBlockState(block);
-		int dry = dryTicks(bot, block, state, toolFor.getOrDefault(state.getBlock(), MovementController.HAND));
+		int dry = dryTicks(bot, block, state, behind != null ? MovementController.AUTO_TOOL
+				: toolFor.getOrDefault(state.getBlock(), MovementController.HAND));
 		if (dry != Integer.MAX_VALUE) {
 			bot.movement().workAtGoal(dry);
 		}
@@ -621,14 +623,15 @@ public class GatherTask implements BotTask {
 
 	private Status approach(BotPlayer bot) {
 		if (!bot.level().getBlockState(current).is(currentBlock)) {
-			return nextTarget(bot); // someone else got it
+			// Someone else got it (or, if it was only in the way, it's gone: good).
+			return behind != null ? backToTarget(bot) : nextTarget(bot);
 		}
 		MovementController.Status status = bot.movement().status();
 		if (status == MovementController.Status.ARRIVED) {
 			phase = Phase.MINE;
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
 			bot.log("走不到 " + current.toShortString() + "（" + bot.movement().failReason() + "），换下一个目标");
-			reject(current);
+			dropTarget();
 			if (++unreachableInRow >= MAX_UNREACHABLE_IN_ROW) {
 				return giveUp(bot, "连续 " + unreachableInRow + " 处都走不到（最后一次：" + bot.movement().failReason() + "）");
 			}
@@ -646,14 +649,11 @@ public class GatherTask implements BotTask {
 			phase = Phase.APPROACH;
 			return Status.RUNNING;
 		}
-		// Like a player, the bot has to see the block: if something is in the way, deal with that first.
+		// Like a player, the bot has to see the block: if something is in the way, that's the next job.
 		BlockPos blocker = blockerOf(level, eye, current);
-		BlockPos aim = current;
-		Block aimBlock = currentBlock;
-		boolean obstacle = false;
 		if (blocker != null) {
 			BlockState blockerState = level.getBlockState(blocker);
-			if (toolFor.containsKey(blockerState.getBlock()) && DropAnalysis.dropsFrom(item, blockerState)
+			if (behind == null && toolFor.containsKey(blockerState.getBlock()) && DropAnalysis.dropsFrom(item, blockerState)
 					&& Guard.canHarvest(level, blocker, blockerState)) {
 				// The blocker is something we want too: take it first, and the one behind it next
 				// (back on the list: it was taken off when picked, and used to be forgotten, leaving
@@ -666,10 +666,30 @@ public class GatherTask implements BotTask {
 				currentBlock = blockerState.getBlock();
 				return Status.RUNNING;
 			}
-			aim = blocker;
-			aimBlock = blockerState.getBlock();
-			obstacle = true;
+			if (!Guard.canBreak(level, blocker, blockerState)) {
+				bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
+						+ realTarget().toShortString() + "，又不能挖，换下一个目标");
+				dropTarget();
+				return nextTarget(bot);
+			}
+			// A job of its own (see behind): planned like any block (a spot to stand, a breath for
+			// it), with the target next.
+			if (behind == null) {
+				behind = current;
+				behindBlock = currentBlock;
+			}
+			bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
+					+ itemName().getString() + "，先挖它");
+			current = blocker;
+			currentBlock = blockerState.getBlock();
+			goNear(bot, current);
+			phase = Phase.APPROACH;
+			return Status.RUNNING;
 		}
+		// Mining what was only in the way: the best tool for it, nothing to check about its drops.
+		boolean obstacle = behind != null;
+		BlockPos aim = current;
+		Block aimBlock = currentBlock;
 		int tool = obstacle ? MovementController.AUTO_TOOL : toolFor.getOrDefault(currentBlock, MovementController.HAND);
 		// The slot was worked out earlier; the player may have rearranged the bag since.
 		if (tool >= 0 && bot.getInventory().getItem(tool).getItem() != toolItems.get(currentBlock)) {
@@ -684,20 +704,6 @@ public class GatherTask implements BotTask {
 			return Status.RUNNING;
 		}
 		if (!bot.movement().isBreaking(aim)) {
-			// About to mine afloat (25 times slower than standing): find a spot to stand and mine it
-			// from (on top of it, say), as planning does for any block under water. Here, after the
-			// plan, it can come from something in the way (dirt over clay: mined afloat from where the
-			// clay was in reach) or from the target once that's out of the way (the hole the dirt left).
-			// It used to try afloat, find the air too short and give the target up, and do the same at
-			// the next covered one: six times in a row.
-			if (bot.movement().headUnderwater() && !LocalPathfinder.isSupport(level, bot.blockPosition().below())
-					&& standTried.add(aim)) {
-				bot.log(aim.toShortString() + " 的" + aimBlock.getName().getString() + (obstacle ? "挡着" + itemName().getString() + "，" : "")
-						+ "浮着挖太慢：先找个能站着挖它的位置");
-				goNear(bot, aim);
-				phase = Phase.APPROACH;
-				return Status.RUNNING;
-			}
 			Status air = airCheck(bot, aim, aimBlock, tool);
 			if (air != null) {
 				return air;
@@ -719,7 +725,7 @@ public class GatherTask implements BotTask {
 			if (!toolFor.containsKey(currentBlock) || ++handFixes > 2) {
 				bot.log("还是不行，跳过这一块（这是个 bug，请把这段日志发给开发者）");
 				handFixes = 0;
-				reject(current);
+				dropTarget();
 				return nextTarget(bot);
 			}
 			return Status.RUNNING;
@@ -729,16 +735,19 @@ public class GatherTask implements BotTask {
 		}
 		if (result == MovementController.MineResult.FAILED) {
 			bot.log("挖不了 " + aim.toShortString() + "（" + aimBlock.getName().getString() + "），换下一个目标");
-			reject(current);
+			dropTarget();
 			return nextTarget(bot);
 		}
-		if (result == MovementController.MineResult.GONE && !obstacle) {
+		if (obstacle && (result == MovementController.MineResult.DONE || result == MovementController.MineResult.GONE)) {
+			return backToTarget(bot); // out of the way
+		}
+		if (result == MovementController.MineResult.GONE) {
 			// Changed or went by itself (fell off with its root, turned into another block,
 			// someone else took it): not its break, so nothing to record or check.
 			bot.log(current.toShortString() + " 的方块自己变了/没了，换下一个");
 			return nextTarget(bot);
 		}
-		if (result == MovementController.MineResult.DONE && !obstacle) {
+		if (result == MovementController.MineResult.DONE) {
 			blocksMined++;
 			unreachableInRow = 0;
 			// Noted to check it dropped what it should (see checkDrop); what came out is a source
@@ -790,7 +799,7 @@ public class GatherTask implements BotTask {
 			bot.log(aim.toShortString() + " 的" + state.getBlock().getName().getString() + " 在水下要挖 " + (int) mining / 20
 					+ " 秒（" + toolName(bot, tool) + "，岸上 " + dig + " 刻，站在 " + bot.blockPosition().toShortString()
 					+ (LocalPathfinder.isSupport(level, bot.blockPosition().below()) ? "，站着" : "，浮着") + "），一口气挖不完再游上去，跳过");
-			reject(current);
+			dropTarget();
 			return nextTarget(bot);
 		}
 		bot.log("剩下的气不够挖完 " + aim.toShortString() + "（要 " + (int) mining / 20 + " 秒），先去换气再挖");
@@ -891,8 +900,36 @@ public class GatherTask implements BotTask {
 	/** True once it stopped because no tool it has can mine any source any more (worn out, taken). */
 	private boolean toolsGone;
 	private int unreachableInRow;
-	/** Blocks in the way it has gone to stand by (see mine): once each, then as it can. */
-	private final Set<BlockPos> standTried = new HashSet<>();
+	/**
+	 * The target waiting behind the block it's on now, when that block is only in the way (dirt
+	 * over clay): what's in the way is a job like any other, planned and mined on its own (a breath
+	 * for it, a spot to stand), and then the target is next. It used to be mined on the spot as an
+	 * "obstacle", counted with the target as one piece of work: under deep water that never fit one
+	 * breath, and the target was given up.
+	 */
+	private BlockPos behind;
+	private Block behindBlock;
+
+	/** The block it's really after: the one behind what's in the way, or the current one. */
+	private BlockPos realTarget() {
+		return behind != null ? behind : current;
+	}
+
+	/** Can't do this target now (and whatever was in its way goes with it). */
+	private void dropTarget() {
+		reject(realTarget());
+		behind = null;
+	}
+
+	/** What was in the way is gone: on to the target behind it. */
+	private Status backToTarget(BotPlayer bot) {
+		current = behind;
+		currentBlock = behindBlock;
+		behind = null;
+		goNear(bot, current);
+		phase = Phase.APPROACH;
+		return Status.RUNNING;
+	}
 
 	boolean toolsGone() {
 		return toolsGone;

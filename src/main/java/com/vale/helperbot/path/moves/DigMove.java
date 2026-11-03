@@ -52,7 +52,7 @@ final class DigMove implements Move {
 		dig = pf.clearCost(t.above(), breaks, pen) + pf.clearCost(t, breaks, pen) + pf.clearCost(down, breaks, pen);
 		if (dig >= 0 && !breaks.isEmpty() && pf.support(down.below()) && !pf.nearLava(down)) {
 			out.add(new Candidate(new PathStep(PathStep.Type.DESCEND, p, down, breaks), down.getY(),
-					walk + LocalPathfinder.fallTicks(1) + dig, walk + LocalPathfinder.fallTicks(1) + pf.dugTicks()));
+					walk + DigDownMove.down(pf, p) + dig, walk + DigDownMove.down(pf, p) + pf.dugTicks()));
 		}
 	}
 }

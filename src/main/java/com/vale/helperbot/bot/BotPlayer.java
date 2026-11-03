@@ -312,8 +312,10 @@ public class BotPlayer extends ServerPlayer {
 			} else {
 				breath = Breath.ROUTE;
 				bestEscape = escape;
+				String plan = movement.planAirNote();
 				log("该换气了（还能撑 " + budget / 20 + " 秒，上去要 "
-						+ (Double.isInfinite(escape) ? "?" : String.valueOf((int) Math.ceil(escape / 20))) + " 秒）");
+						+ (Double.isInfinite(escape) ? "?" : String.valueOf((int) Math.ceil(escape / 20))) + " 秒；实际 " + budget + " 刻"
+						+ (plan != null ? "；路线" + plan : "") + "）");
 				movement.headForAir();
 			}
 		}

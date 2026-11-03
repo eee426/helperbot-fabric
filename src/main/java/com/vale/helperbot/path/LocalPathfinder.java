@@ -90,8 +90,9 @@ public final class LocalPathfinder implements Planner {
 	 * @param ticks for each step, the real time it should take (no preferences): the walker gives
 	 *              up on a step that takes far longer than this (see MovementController)
 	 */
-	public record Result(List<PathStep> steps, boolean reachesGoal, List<Double> ticks) {
-		static final Result EMPTY = new Result(List.of(), false, List.of());
+	/** {@code air}: the breath budget the plan expects on arriving at the end of each step (see Air). */
+	public record Result(List<PathStep> steps, boolean reachesGoal, List<Double> ticks, List<Integer> air) {
+		static final Result EMPTY = new Result(List.of(), false, List.of(), List.of());
 	}
 
 	/**
@@ -624,18 +625,22 @@ public final class LocalPathfinder implements Planner {
 	private static Result reconstruct(Node node, boolean reachesGoal) {
 		List<PathStep> steps = new ArrayList<>();
 		List<Double> ticks = new ArrayList<>();
+		List<Integer> air = new ArrayList<>();
 		for (Node n = node; n.step != null; n = n.parent) {
 			steps.add(n.step);
 			ticks.add(n.ticks);
+			air.add(n.air);
 		}
 		Collections.reverse(steps);
 		Collections.reverse(ticks);
+		Collections.reverse(air);
 		if (!reachesGoal && steps.size() >= CUTOFF_MIN_STEPS) {
 			int keep = (int) (steps.size() * CUTOFF_KEEP);
 			steps = new ArrayList<>(steps.subList(0, keep));
 			ticks = new ArrayList<>(ticks.subList(0, keep));
+			air = new ArrayList<>(air.subList(0, keep));
 		}
-		return new Result(steps, reachesGoal, ticks);
+		return new Result(steps, reachesGoal, ticks, air);
 	}
 
 	// ---- neighbours ---------------------------------------------------------------------

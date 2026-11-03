@@ -936,6 +936,7 @@ public final class MovementController {
 	}
 
 	void nextStep() {
+		stepBegan = bot.tickCount;
 		index++;
 		resetStep();
 	}
@@ -944,6 +945,27 @@ public final class MovementController {
 
 	/** Real ticks each step of the path should take. */
 	private List<Double> pathTicks = List.of();
+	/** Breath the plan expects at the end of each step (see LocalPathfinder.Result#air). */
+	private List<Integer> pathAir = List.of();
+
+	/**
+	 * For the log: where it is in the plan, as the plan saw it (the step, the breath it expected at
+	 * its start and end, its ticks planned and spent so far), or null if it's not following one.
+	 * Where the real breath falls well short, the plan's picture of what moving costs is off.
+	 */
+	public String planAirNote() {
+		if (path == null || index >= path.size() || index >= pathAir.size()) {
+			return null;
+		}
+		PathStep s = path.get(index);
+		int before = index > 0 ? pathAir.get(index - 1) : -1;
+		return "第 " + (index + 1) + "/" + path.size() + " 步（" + s.type() + (s.toBreak().isEmpty() ? "" : "，要挖 " + s.toBreak().size() + " 块")
+				+ "）计划开始时 " + (before >= 0 ? before + " 刻" : "?") + "、结束时 " + pathAir.get(index) + " 刻，计划用 "
+				+ String.format(java.util.Locale.ROOT, "%.0f", pathTicks.get(index)) + " 刻、已用 " + (bot.tickCount - stepBegan) + " 刻";
+	}
+
+	/** When the current step began (for planAirNote). */
+	private int stepBegan;
 	/** Cells of the most recent path towards the current goal: favoured when planning again. */
 	private final it.unimi.dsi.fastutil.longs.LongOpenHashSet lastPath = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
 	/** Ticks spent on the current step. */
@@ -957,6 +979,8 @@ public final class MovementController {
 	private void adopt(LocalPathfinder.Result result) {
 		path = result.steps();
 		pathTicks = result.ticks();
+		pathAir = result.air();
+		stepBegan = bot.tickCount;
 		pathReachesGoal = result.reachesGoal();
 		index = 0;
 		lastPath.clear();

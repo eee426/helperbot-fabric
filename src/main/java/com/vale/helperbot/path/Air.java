@@ -128,7 +128,29 @@ public final class Air {
 
 	/** With feet in this cell (standing, or floating at the surface), is the head out of the water? */
 	public static boolean breathable(BlockGetter level, BlockPos feet) {
-		return !LocalPathfinder.isWater(level, feet.above());
+		BlockPos head = feet.above();
+		return !LocalPathfinder.isWater(level, head) && !waterComing(level, head);
+	}
+
+	/** Most open cells looked up through for water about to pour in (see {@link #waterComing}). */
+	private static final int POCKET_HEIGHT = 8;
+
+	/**
+	 * Is there water straight above through open cells? Then this air is a pocket about to be filled
+	 * (water always flows down): a block just dug out under water, before the water came in. Taken
+	 * for air, the bot planned a long dig there expecting a breath at the end of it, and ran out halfway.
+	 */
+	public static boolean waterComing(BlockGetter level, BlockPos cell) {
+		BlockPos p = cell.above();
+		for (int i = 0; i < POCKET_HEIGHT; i++, p = p.above()) {
+			if (LocalPathfinder.isWater(level, p)) {
+				return true;
+			}
+			if (!LocalPathfinder.isPassable(level, p)) {
+				return false;
+			}
+		}
+		return false;
 	}
 
 	/**
