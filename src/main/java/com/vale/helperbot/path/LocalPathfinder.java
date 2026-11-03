@@ -16,7 +16,6 @@ import net.minecraft.world.level.block.state.BlockState;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.PriorityQueue;
 import java.util.function.LongPredicate;
 import java.util.function.Predicate;
 
@@ -117,31 +116,37 @@ public final class LocalPathfinder {
 	private static final int CUTOFF_MIN_STEPS = 30;
 	private static final double CUTOFF_KEEP = 0.9;
 
-	private static final class Node implements Comparable<Node> {
+	/**
+	 * One cell reached with a given air bucket. While it waits in the open set a cheaper way there
+	 * updates it in place (see {@link NodeHeap}); once expanded it is fixed, since later nodes
+	 * point back to it, and a cheaper way after that makes a new node.
+	 */
+	private static final class Node {
 		final BlockPos pos;
-		final double floor;
-		final double g;
-		final double f;
-		final Node parent;
-		final PathStep step;
+		double floor;
+		double g;
+		double f;
+		Node parent;
+		PathStep step;
 		/** Air budget left on arrival here (see {@link Air}). */
-		final int air;
+		int air;
 		/** Real ticks of the step that led here. */
 		double ticks;
+		/** Position in the open set, or -1 when not in it. */
+		int heapIndex = -1;
 
 		Node(BlockPos pos, double floor, double g, double h, Node parent, PathStep step, int air) {
 			this.pos = pos;
+			set(floor, g, h, parent, step, air);
+		}
+
+		void set(double floor, double g, double h, Node parent, PathStep step, int air) {
 			this.floor = floor;
 			this.g = g;
 			this.f = g + h;
 			this.parent = parent;
 			this.step = step;
 			this.air = air;
-		}
-
-		@Override
-		public int compareTo(Node o) {
-			return Double.compare(f, o.f);
 		}
 	}
 
@@ -195,12 +200,12 @@ public final class LocalPathfinder {
 	 */
 	private final TravelEstimate travel;
 
-	private final PriorityQueue<Node> open = new PriorityQueue<>();
+	private final NodeHeap open = new NodeHeap();
 	/**
-	 * Best cost found per cell and air bucket. A route to a cell is only worth exploring if no
-	 * other route got there at least as cheaply with at least as much air left.
+	 * Best node per cell and air bucket. A route to a cell is only worth exploring if no other
+	 * route got there at least as cheaply with at least as much air left.
 	 */
-	private final Long2ObjectOpenHashMap<double[]> bestG = new Long2ObjectOpenHashMap<>();
+	private final Long2ObjectOpenHashMap<Node[]> best = new Long2ObjectOpenHashMap<>();
 	private final Air.Profile air;
 	private final Escape escape;
 	private final int buckets;
@@ -254,7 +259,7 @@ public final class LocalPathfinder {
 		int startAir = Air.breathable(level, start) ? air.full() : air.now();
 		startNode = new Node(start, startFloor, 0, heuristic(start) * heuristicWeight, null, null, startAir);
 		open.add(startNode);
-		record(start.asLong(), bucket(startAir), 0);
+		cell(start.asLong())[bucket(startAir)] = startNode;
 		closest = startNode;
 		closestH = heuristic(start);
 		java.util.Arrays.fill(bestPartialValue, closestH);
@@ -274,9 +279,6 @@ public final class LocalPathfinder {
 				return false;
 			}
 			Node node = open.poll();
-			if (node.g > bestG.get(node.pos.asLong())[bucket(node.air)]) {
-				continue;
-			}
 			if (goal.test(node.pos)) {
 				result = reconstruct(node, true);
 				progress = (heuristic(origin) - heuristic(node.pos)) / walkCost;
@@ -309,11 +311,20 @@ public final class LocalPathfinder {
 				double g = node.g + c.cost * (favored.test(key) ? FAVOR_PREVIOUS : 1)
 						* (isWater(level, c.step.to()) ? WATER_COST_FACTOR : 1);
 				int b = bucket(airLeft);
-				if (!dominated(key, b, g)) {
-					record(key, b, g);
-					Node next = new Node(c.step.to(), c.floor, g, heuristic(c.step.to()) * heuristicWeight, node, c.step, airLeft);
-					next.ticks = c.ticks;
-					open.add(next);
+				Node[] nodes = cell(key);
+				if (!dominated(nodes, b, g)) {
+					double toGoal = heuristic(c.step.to()) * heuristicWeight;
+					Node next = nodes[b];
+					if (next != null && next.heapIndex >= 0) {
+						next.set(c.floor, g, toGoal, node, c.step, airLeft); // still waiting: just cheaper now
+						next.ticks = c.ticks;
+						open.decreased(next);
+					} else {
+						next = new Node(c.step.to(), c.floor, g, toGoal, node, c.step, airLeft);
+						next.ticks = c.ticks;
+						nodes[b] = next;
+						open.add(next);
+					}
 				}
 			}
 		}
@@ -391,27 +402,102 @@ public final class LocalPathfinder {
 	}
 
 	/** Some route already reached this cell at no more cost with at least as much air left. */
-	private boolean dominated(long key, int b, double g) {
-		double[] best = bestG.get(key);
-		if (best == null) {
-			return false;
-		}
-		for (int i = b; i < best.length; i++) {
-			if (best[i] <= g) {
+	private static boolean dominated(Node[] nodes, int b, double g) {
+		for (int i = b; i < nodes.length; i++) {
+			if (nodes[i] != null && nodes[i].g <= g) {
 				return true;
 			}
 		}
 		return false;
 	}
 
-	private void record(long key, int b, double g) {
-		double[] best = bestG.get(key);
-		if (best == null) {
-			best = new double[buckets];
-			java.util.Arrays.fill(best, Double.MAX_VALUE);
-			bestG.put(key, best);
+	/** The best node so far for each air bucket of this cell. */
+	private Node[] cell(long key) {
+		Node[] nodes = best.get(key);
+		if (nodes == null) {
+			nodes = new Node[buckets];
+			best.put(key, nodes);
 		}
-		best[b] = Math.min(best[b], g);
+		return nodes;
+	}
+
+	/**
+	 * The open set: a binary min-heap on f where each node knows its slot, so a cheaper way to a
+	 * waiting node moves it up in place. A plain priority queue can't, and kept a stale copy of
+	 * the node for every improvement, to be skipped when it came out.
+	 */
+	private static final class NodeHeap {
+		private Node[] heap = new Node[1024];
+		private int size;
+
+		boolean isEmpty() {
+			return size == 0;
+		}
+
+		void add(Node n) {
+			if (size == heap.length) {
+				heap = java.util.Arrays.copyOf(heap, size * 2);
+			}
+			n.heapIndex = size;
+			heap[size++] = n;
+			up(n.heapIndex);
+		}
+
+		/** {@code n} is in the heap and its f just went down. */
+		void decreased(Node n) {
+			up(n.heapIndex);
+		}
+
+		Node poll() {
+			Node top = heap[0];
+			top.heapIndex = -1;
+			Node last = heap[--size];
+			heap[size] = null;
+			if (size > 0) {
+				heap[0] = last;
+				last.heapIndex = 0;
+				down(0);
+			}
+			return top;
+		}
+
+		private void up(int i) {
+			Node n = heap[i];
+			while (i > 0) {
+				int parent = (i - 1) >>> 1;
+				Node p = heap[parent];
+				if (p.f <= n.f) {
+					break;
+				}
+				heap[i] = p;
+				p.heapIndex = i;
+				i = parent;
+			}
+			heap[i] = n;
+			n.heapIndex = i;
+		}
+
+		private void down(int i) {
+			Node n = heap[i];
+			int half = size >>> 1;
+			while (i < half) {
+				int child = 2 * i + 1;
+				Node c = heap[child];
+				int right = child + 1;
+				if (right < size && heap[right].f < c.f) {
+					child = right;
+					c = heap[child];
+				}
+				if (n.f <= c.f) {
+					break;
+				}
+				heap[i] = c;
+				c.heapIndex = i;
+				i = child;
+			}
+			heap[i] = n;
+			n.heapIndex = i;
+		}
 	}
 
 	/** Mining from feet in {@code p}: slower with the head under water, slower again floating. */
