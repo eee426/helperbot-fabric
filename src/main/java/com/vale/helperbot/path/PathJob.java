@@ -27,6 +27,8 @@ public final class PathJob {
 	private final AtomicBoolean cancelled = new AtomicBoolean();
 	private volatile boolean done;
 	private volatile boolean failed;
+	/** What went wrong, if it failed (for the bot's log). */
+	private volatile String error;
 	/** Time the search took on the background thread. */
 	private volatile long nanos;
 
@@ -44,6 +46,7 @@ public final class PathJob {
 			}
 		} catch (RuntimeException e) {
 			HelperBot.LOGGER.error("Path search failed", e);
+			error = e.toString();
 			failed = true;
 		} finally {
 			nanos = System.nanoTime() - started;
@@ -105,6 +108,11 @@ public final class PathJob {
 	/** The result once {@link #done()} (empty if the search failed). */
 	public LocalPathfinder.Result result() {
 		return failed ? LocalPathfinder.Result.EMPTY : search.result();
+	}
+
+	/** For the log when it found nothing: why (the error, or what the search saw). */
+	public String diagnose() {
+		return failed ? "后台搜索出错：" + error : search.diagnose();
 	}
 
 	public double progressBlocks() {

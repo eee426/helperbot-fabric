@@ -556,6 +556,16 @@ public final class MovementController {
 		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
 			tools.setItem(slot, bot.getInventory().getItem(slot).copy());
 		}
+		it.unimi.dsi.fastutil.longs.LongOpenHashSet avoided = avoidedNow();
+		it.unimi.dsi.fastutil.longs.LongOpenHashSet favored = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(lastPath);
+		PathJob job = new PathJob(new LocalPathfinder(world, tools, mode, mode.maxDropFor(bot.getHealth()), start, startFloor,
+				goal, target, horizontalOnly, limits, avoided::contains, air, favored::contains));
+		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
+		return job;
+	}
+
+	/** Cells it's steering around right now (see learnObstacle); expired ones are dropped. */
+	private it.unimi.dsi.fastutil.longs.LongOpenHashSet avoidedNow() {
 		it.unimi.dsi.fastutil.longs.LongOpenHashSet avoided = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
 		for (var it = avoidUntil.long2IntEntrySet().iterator(); it.hasNext(); ) {
 			var e = it.next();
@@ -565,11 +575,30 @@ public final class MovementController {
 				avoided.add(e.getLongKey());
 			}
 		}
-		it.unimi.dsi.fastutil.longs.LongOpenHashSet favored = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(lastPath);
-		PathJob job = new PathJob(new LocalPathfinder(world, tools, mode, mode.maxDropFor(bot.getHealth()), start, startFloor,
-				goal, target, horizontalOnly, limits, avoided::contains, air, favored::contains));
+		return avoided;
+	}
+
+	/**
+	 * Diagnosis, when it's about to give up for lack of a path: the same search once more, on the
+	 * live world on this thread, for the log. If this one finds a way, the copy the background
+	 * search worked on was missing something. Capped, and only at giving up, so it costs nothing
+	 * otherwise.
+	 */
+	private void crossCheck() {
+		LocalPathfinder.Limits limits = levels[minLevel];
+		LocalPathfinder live = new LocalPathfinder(bot.level(), bot.getInventory(), mode, mode.maxDropFor(bot.getHealth()),
+				feet(), bot.getY(), goal, target, horizontalOnly, limits, avoidedNow()::contains, airProfile(),
+				new it.unimi.dsi.fastutil.longs.LongOpenHashSet(lastPath)::contains);
+		long started = System.nanoTime();
+		boolean done = false;
+		while (!done && System.nanoTime() - started < 200_000_000L) {
+			done = live.step(20_000_000L);
+		}
 		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
-		return job;
+		String what = !done ? "200 毫秒内没搜完"
+				: !live.result().steps().isEmpty() ? "能找到 " + live.result().steps().size() + " 步（后台用的那份世界有问题！）"
+				: "也找不到：" + live.diagnose();
+		bot.log("对照：在真实世界上同样搜一次（±" + limits.radiusXZ() + " 格）：" + what);
 	}
 
 	/** Has the search finished? Counts its background time once, when it has. */
@@ -643,10 +672,14 @@ public final class MovementController {
 			return;
 		}
 		int radius = search.limits().radiusXZ();
+		PathJob finished = search;
 		search = null;
 		resetStep();
 		if (result.steps().isEmpty()) {
-			bot.log("在 ±" + radius + " 格内找不到路");
+			bot.log("在 ±" + radius + " 格内找不到路：" + finished.diagnose());
+			if (emptyPlans + 1 >= MAX_EMPTY_PLANS) {
+				crossCheck(); // about to give up (see onNoPath)
+			}
 			onNoPath();
 			return;
 		}

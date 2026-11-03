@@ -102,6 +102,18 @@ public final class Snapshot implements BlockGetter {
 				start.getX() + side, start.getY() + up, start.getZ() + side);
 	}
 
+	/** For the log: how much of the copied box is there. */
+	public String describe() {
+		int loaded = 0;
+		for (boolean b : loadedChunks) {
+			if (b) {
+				loaded++;
+			}
+		}
+		return "快照 " + loaded + "/" + loadedChunks.length + " 个区块已加载，高度 "
+				+ (minSection * 16) + "~" + ((minSection + sections) * 16 - 1);
+	}
+
 	public ResourceKey<Level> dimension() {
 		return dimension;
 	}

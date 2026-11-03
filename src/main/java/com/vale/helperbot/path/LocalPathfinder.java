@@ -356,6 +356,52 @@ public final class LocalPathfinder {
 		return limits;
 	}
 
+	/**
+	 * For the log when a search found nothing: how far it got, and what's around the start (each
+	 * neighbouring cell, how many first steps there were and how many the air ruled out). Called
+	 * once the search is over.
+	 */
+	public String diagnose() {
+		StringBuilder sb = new StringBuilder();
+		sb.append("搜了 ").append(expanded).append(" 格；起点 ").append(origin.toShortString())
+				.append(String.format(java.util.Locale.ROOT, "（脚高 %.2f）", startNode.floor));
+		if (level instanceof Snapshot snap) {
+			sb.append("；").append(snap.describe());
+		}
+		List<Candidate> first = neighbours(origin, startNode.floor);
+		int noAir = 0;
+		for (Candidate c : first) {
+			if (airAfter(startNode, c) < 0) {
+				noAir++;
+			}
+		}
+		sb.append("；起点的下一步 ").append(first.size()).append(" 个，因为气不够排除 ").append(noAir).append(" 个");
+		sb.append(String.format(java.util.Locale.ROOT, "（气 %d/%d%s）", air.now(), air.full(), air.limited() ? "" : "，不限"));
+		sb.append("；周围：");
+		String[] names = {"上", "下", "北", "南", "西", "东"};
+		Direction[] dirs = {Direction.UP, Direction.DOWN, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST};
+		for (int i = 0; i < dirs.length; i++) {
+			sb.append(i == 0 ? "" : "，").append(names[i]).append(" ").append(describeCell(origin.relative(dirs[i])));
+		}
+		sb.append("，脚 ").append(describeCell(origin)).append("，头 ").append(describeCell(origin.above()));
+		return sb.toString();
+	}
+
+	private String describeCell(BlockPos p) {
+		if (!Worlds.loaded(level, p)) {
+			return "未加载";
+		}
+		String avoided = avoid.test(p.asLong()) ? "（绕开中）" : "";
+		BlockState state = level.getBlockState(p);
+		if (isPassable(level, p)) {
+			return "空" + avoided;
+		}
+		if (isWater(level, p)) {
+			return "水" + avoided;
+		}
+		return state.getBlock().getName().getString() + (Guard.canBreak(level, p, state) ? "" : "（不能挖）") + avoided;
+	}
+
 	// ---- air ----------------------------------------------------------------------------
 
 	/**

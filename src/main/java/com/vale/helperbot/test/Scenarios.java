@@ -627,7 +627,30 @@ public final class Scenarios {
 					teleport(bot, a, 4, 42, 0);
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.PEONY, 2, Mode.NORMAL);
-				}, Scenario.has(Items.PEONY, 2, c -> !c.logHas("重新选工具"), "说手里的东西挖不出（拿上半截当没有掉落）"))
+				}, Scenario.has(Items.PEONY, 2, c -> !c.logHas("重新选工具"), "说手里的东西挖不出（拿上半截当没有掉落）")),
+
+				new Scenario("F1", "装一桶水：地面上，9 格外有个小水池（血不多）", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(10, 39, 4, 12, 40, 6, Blocks.WATER); // a pond 3x3, 2 deep, in the grass
+					teleport(bot, a, 1, 41, 0);
+					bot.setHealth(8);
+					give(bot, Items.BUCKET, 1);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.WATER_BUCKET, 1, Mode.NORMAL);
+				}, Scenario.has(Items.WATER_BUCKET, 1, c -> !c.logHas("找不到路"), "说找不到路")),
+
+				new Scenario("F2", "装一桶水：在地下小坑里，水池在斜上方（玩家报告）", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(10, 39, 4, 12, 40, 6, Blocks.WATER);
+					// A pocket it dug, under the ground and beside the pond, a block lower than its bottom.
+					a.fill(8, 37, 5, 8, 38, 5, Blocks.AIR);
+					teleport(bot, a, 8, 37, 5);
+					bot.setHealth(8);
+					give(bot, Items.BUCKET, 1);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 32);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.WATER_BUCKET, 1, Mode.NORMAL);
+				}, Scenario.has(Items.WATER_BUCKET, 1, c -> !c.logHas("找不到路"), "说找不到路"))
 		);
 	}
 
