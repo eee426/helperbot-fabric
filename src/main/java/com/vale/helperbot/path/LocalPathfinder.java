@@ -563,15 +563,19 @@ public final class LocalPathfinder {
 				boolean swimming = intoWater || isWater(level, p);
 				double cost = (swimming ? 1.0 / SWIM_SPEED : walkCost) * (diagonal ? Math.sqrt(2) : 1);
 				if (dy > STEP_HEIGHT) {
-					// Jumping needs headroom above where we stand now.
-					int headTop = (int) Math.floor(cur + JUMP_HEIGHT + PLAYER_HEIGHT - 1e-4);
+					// Going up a stair from its low side is two half steps, no jump: headroom for
+					// standing up a block higher is enough. Anything else is jumped, and a jump arcs
+					// higher than the ledge. (Stairs used to count as a jump too, so under a low
+					// ceiling, a cellar staircase say, it could walk down but never back up.)
+					boolean stair = !diagonal && stairStep(level, c, dx, dz) && dy <= 1 + 1e-3;
+					int headTop = (int) Math.floor(cur + (stair ? dy : JUMP_HEIGHT) + PLAYER_HEIGHT - 1e-4);
 					for (int hy = p.getY() + 1; hy <= headTop; hy++) {
 						if (!passable(new BlockPos(p.getX(), hy, p.getZ()))) {
 							return;
 						}
 					}
 					type = PathStep.Type.ASCEND;
-					cost += ASCEND_EXTRA;
+					cost += stair ? 0 : ASCEND_EXTRA;
 				} else if (dy < -STEP_HEIGHT) {
 					type = PathStep.Type.DESCEND;
 					double drop = -dy;
@@ -659,6 +663,20 @@ public final class LocalPathfinder {
 			out.add(new Candidate(new PathStep(PathStep.Type.PILLAR, p, up, breaks, p), up.getY(),
 					ASCEND_EXTRA + PLACE_COST + dig, ASCEND_EXTRA + PLACE_COST + digTicks));
 		}
+	}
+
+	/**
+	 * Is standing in {@code onto} reached by walking up a stair, moving (dx, dz)? The block under
+	 * it is a bottom-half stair rising that way: its lower half is a half step, then the top.
+	 */
+	public static boolean stairStep(Level level, BlockPos onto, int dx, int dz) {
+		BlockState state = level.getBlockState(onto.below());
+		if (!(state.getBlock() instanceof net.minecraft.world.level.block.StairBlock)
+				|| state.getValue(net.minecraft.world.level.block.StairBlock.HALF) != net.minecraft.world.level.block.state.properties.Half.BOTTOM) {
+			return false;
+		}
+		Direction up = state.getValue(net.minecraft.world.level.block.StairBlock.FACING);
+		return up.getStepX() == dx && up.getStepZ() == dz;
 	}
 
 	public static boolean isWater(Level level, BlockPos pos) {

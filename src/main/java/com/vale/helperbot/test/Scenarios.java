@@ -406,11 +406,44 @@ public final class Scenarios {
 					}
 					if (!impostor.isAlive() || impostor.isDeadOrDying()) {
 						var chest = impostor.getItemBySlot(net.minecraft.world.entity.EquipmentSlot.CHEST);
-						impostor.connection.disconnect(Component.literal("测试结束"));
+						// Out of the player list, or the next scenes can't summon the bot ("name taken").
+						c.arena().level.getServer().getPlayerList().remove(impostor);
 						return Scenario.Outcome.pass("冒名假人死了（下界合金胸甲耐久没掉：" + (chest.isEmpty() ? "已掉落" : chest.getDamageValue() == 0) + "）；同名铁傀儡和真机器人都没事");
 					}
 					return c.ticks() >= 6 * 20 ? Scenario.Outcome.fail("冒名假人 6 秒还活着") : null;
 				}),
+
+				new Scenario("ST1", "地窖：三排台阶下去（每级上方 3 格空，刚够人走），从地窖走上来到你身边", 3 * MINUTE, (a, bot, me) -> {
+					cellar(a);
+					teleport(bot, a, 9, 34, 0);
+					me.teleportTo(a.level, a.origin.getX() - 6.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.bot().position().distanceTo(c.arena().at(-7, Arena.SURFACE, 0).getBottomCenter()) <= 3
+						? Scenario.Outcome.pass("走上来了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没上来，最后在 y=" + c.bot().getBlockY()) : null),
+
+				new Scenario("ST1p", "地窖在保护区块里（不能挖）：顺着台阶走上来到你身边", 3 * MINUTE, (a, bot, me) -> {
+					cellar(a);
+					for (int x = -8; x <= 14; x += 4) {
+						for (int z = -4; z <= 4; z += 4) {
+							protect(a, x, z);
+						}
+					}
+					teleport(bot, a, 9, 34, 0);
+					me.teleportTo(a.level, a.origin.getX() - 6.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.bot().position().distanceTo(c.arena().at(-7, Arena.SURFACE, 0).getBottomCenter()) <= 3
+						? Scenario.Outcome.pass("走上来了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没上来，最后在 y=" + c.bot().getBlockY()) : null),
+
+				new Scenario("ST2", "地窖：从地面顺着台阶走下去到你身边", 3 * MINUTE, (a, bot, me) -> {
+					cellar(a);
+					teleport(bot, a, -6, Arena.SURFACE, 0);
+					me.teleportTo(a.level, a.origin.getX() + 9.5, 34, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.bot().position().distanceTo(c.arena().at(9, 34, 0).getBottomCenter()) <= 3
+						? Scenario.Outcome.pass("走下去了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没下去") : null),
 
 				new Scenario("C33", "白色地毯：做好的不拿去染色", 5 * MINUTE, (a, bot, me) -> {
 					for (int i = 0; i < 4; i++) {
@@ -601,6 +634,30 @@ public final class Scenarios {
 			return new ComeTask(me, mode);
 		}, c -> c.bot().position().distanceTo(c.arena().at(25, Arena.SURFACE, 0).getBottomCenter()) <= 3
 				? Scenario.Outcome.pass("到了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null);
+	}
+
+	/**
+	 * A cellar: three stone stairs side by side going down seven steps (x 0..6, rising westwards)
+	 * into a room (x 7..11, floor y=34, 3 high), all in solid stone: deeper down each step has 3
+	 * blocks of air above it, just what a player needs to walk up (2 isn't: the head hits the
+	 * ceiling of the step it's leaving). No doors, no tight spots.
+	 */
+	private static void cellar(Arena a) {
+		a.fill(-1, 30, -3, 13, Arena.SURFACE - 1, 3, Blocks.STONE);
+		a.fill(7, 34, -2, 11, 36, 2, Blocks.AIR);
+		var stair = Blocks.STONE_STAIRS.defaultBlockState()
+				.setValue(net.minecraft.world.level.block.StairBlock.FACING, net.minecraft.core.Direction.WEST);
+		for (int k = 0; k <= 6; k++) {
+			int y = Arena.SURFACE - 1 - k;
+			for (int z = -1; z <= 1; z++) {
+				a.set(k, y, z, stair);
+				a.set(k, y + 1, z, Blocks.AIR);
+				a.set(k, y + 2, z, Blocks.AIR);
+				a.set(k, y + 3, z, Blocks.AIR);
+			}
+		}
+		// Step off the last stair into the room.
+		a.fill(7, 34, -1, 7, 36, 1, Blocks.AIR);
 	}
 
 	/** N1: [0] the impostor, [1] the golem with the bot's name. */

@@ -1359,10 +1359,16 @@ public final class MovementController {
 
 		// 1. Up: vanilla step-up for small rises, a real jump arc for bigger ones.
 		double rise = ty - bot.getY();
+		BlockPos from = step.from();
+		boolean stair = LocalPathfinder.stairStep(bot.level(), to, to.getX() - from.getX(), to.getZ() - from.getZ());
 		if (rise > EPS) {
 			boolean grounded = isSupported();
 			if (rise <= LocalPathfinder.STEP_HEIGHT + EPS && grounded) {
 				tryMove(0, rise, 0);
+			} else if (stair && rise <= 1 + EPS && (grounded || verticalVelocity == 0)) {
+				// Up a stair: half a block at a time, like a player walking up it (no jump: under
+				// a low ceiling a jump bumps the head).
+				tryMove(0, Math.min(rise, 0.5), 0);
 			} else if (grounded || verticalVelocity > 0) {
 				if (grounded) {
 					verticalVelocity = JUMP_VELOCITY;
