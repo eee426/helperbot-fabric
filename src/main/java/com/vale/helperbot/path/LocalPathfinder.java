@@ -130,6 +130,8 @@ public final class LocalPathfinder implements Planner {
 		double ticks;
 		/** Position in the open set, or -1 when not in it. */
 		int heapIndex = -1;
+		/** The floor this route dug through into water, if it did (see {@link #wayUp}). */
+		BlockPos hole;
 
 		Node(BlockPos pos, double floor, double g, double h, Node parent, PathStep step, int air) {
 			this.pos = pos;
@@ -140,6 +142,7 @@ public final class LocalPathfinder implements Planner {
 			this.floor = floor;
 			this.g = g;
 			this.f = g + h;
+			this.hole = parent == null ? null : holeAfter(parent, step);
 			this.parent = parent;
 			this.step = step;
 			this.air = air;
@@ -406,6 +409,25 @@ public final class LocalPathfinder implements Planner {
 	 * {@link Air#reserve}). Ending with the head in air is a fresh breath. A step that digs a block
 	 * next to water ends under water too, whatever the cell looks like now: the water pours in.
 	 */
+	/** The hole a route has opened once it's taken this step: dropped through a floor into the water two down (see DigDownMove). */
+	private static BlockPos holeAfter(Node from, PathStep step) {
+		return step.type() == PathStep.Type.DESCEND && !step.toBreak().isEmpty() && step.from().getY() - step.to().getY() == 2
+				? step.toBreak().get(0) : from.hole;
+	}
+
+	/**
+	 * Ticks to air from {@code feet}, as things stand, or by the hole the route itself opened: the
+	 * world it plans on still has that floor, and {@link Escape} would have it dug from below.
+	 */
+	private double wayUp(BlockPos feet, BlockPos hole) {
+		double way = escape.ticks(feet);
+		if (hole == null) {
+			return way;
+		}
+		int across = Math.abs(feet.getX() - hole.getX()) + Math.abs(feet.getZ() - hole.getZ());
+		return Math.min(way, Air.swimTicks(across, hole.getY() - feet.getY(), 0));
+	}
+
 	private int airAfter(Node from, Candidate c) {
 		BlockPos to = c.step().to();
 		boolean floods = false;
@@ -427,7 +449,8 @@ public final class LocalPathfinder implements Planner {
 		// Kept all through the step, not just at its end: mining first, it stays where it set off
 		// meanwhile, maybe further from air than where it ends up (a long dig down there ran out of
 		// breath half way through, by the start's reckoning, on a step that ended fine).
-		double way = c.step().toBreak().isEmpty() ? escape.ticks(to) : Math.max(escape.ticks(to), escape.ticks(from.pos));
+		BlockPos hole = holeAfter(from, c.step());
+		double way = c.step().toBreak().isEmpty() ? wayUp(to, hole) : Math.max(wayUp(to, hole), wayUp(from.pos, from.hole));
 		if (!Air.enough(left, way, Air.PLAN_SLACK)) {
 			airRejected++;
 			return -1;
@@ -442,7 +465,8 @@ public final class LocalPathfinder implements Planner {
 	 * differed the bot turned back half way along a planned route.
 	 */
 	private Candidate breathe(Node node) {
-		if (!air.limited() || node.air >= air.full() || !Air.breathable(level, node.pos)) {
+		// (A block for a head isn't air: it landed under ice just dug through, which the world here still has.)
+		if (!air.limited() || node.air >= air.full() || !Air.breathable(level, node.pos) || !passable(node.pos.above())) {
 			return null;
 		}
 		double ticks = Math.ceil((air.full() - node.air) / air.refill());
@@ -460,7 +484,7 @@ public final class LocalPathfinder implements Planner {
 			return true;
 		}
 		double work = Air.workUnderWater(air.workTicks(), digPenalty(node.pos));
-		return Air.enough(node.air, escape.ticks(node.pos), work + Air.PLAN_SLACK);
+		return Air.enough(node.air, wayUp(node.pos, node.hole), work + Air.PLAN_SLACK);
 	}
 
 	private int bucket(int airLeft) {

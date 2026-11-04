@@ -359,7 +359,8 @@ public final class MovementController {
 	}
 
 	public Escape newEscape() {
-		return new Escape(bot.level(), bot.getInventory(), airProfile());
+		Escape escape = new Escape(bot.level(), bot.getInventory(), airProfile());
+		return headUnderwater() ? escape : escape.fromAbove();
 	}
 
 	public boolean takeAirRequest() {

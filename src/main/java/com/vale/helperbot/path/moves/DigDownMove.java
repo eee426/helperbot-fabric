@@ -2,6 +2,7 @@ package com.vale.helperbot.path.moves;
 
 import com.vale.helperbot.path.Air;
 import com.vale.helperbot.path.Candidate;
+import com.vale.helperbot.path.Escape;
 import com.vale.helperbot.path.LocalPathfinder;
 import com.vale.helperbot.path.PathStep;
 import net.minecraft.core.BlockPos;
@@ -14,6 +15,7 @@ import java.util.List;
  * already (an air pocket left by a block just dug out under water, before the water flows in),
  * just drop in. Without the second, nothing led into an open cell right below: walking only goes
  * sideways, swimming only into water; the bot hovered over a drop in such a pocket and found no way to it.
+ * With water under the floor (ice on a pond, a roof over a flooded cave) it lands in that water.
  */
 final class DigDownMove implements Move {
 	/** One block down: swimming in water, falling otherwise. */
@@ -42,9 +44,19 @@ final class DigDownMove implements Move {
 		List<BlockPos> breaks = new ArrayList<>(1);
 		pf.resetDig();
 		double dig = pf.clearCost(below, breaks, from.digPenalty());
-		if (dig > 0 && pf.support(below.below()) && !pf.nearLava(below)) {
+		if (dig <= 0 || pf.nearLava(below)) {
+			return;
+		}
+		BlockPos under = below.below();
+		if (pf.support(under)) {
 			out.add(new Candidate(new PathStep(PathStep.Type.DESCEND, p, below, breaks), below.getY(),
 					down(pf, p) + dig, down(pf, p) + pf.dugTicks()));
+		} else if (pf.water(under) && pf.inWindow(under)) {
+			// Through the floor, into the water two down. Ice turns to water when broken, so the head
+			// is under; other blocks (packed ice) leave a hole, and it floats with its head in that.
+			double f = Escape.floodsWhenDug(pf.world(), below) ? under.getY() : under.getY() + LocalPathfinder.SWIM_FLOOR;
+			double ticks = down(pf, p) + Air.swimTicks(0, 1, 0);
+			out.add(new Candidate(new PathStep(PathStep.Type.DESCEND, p, under, breaks), f, ticks + dig, ticks + pf.dugTicks()));
 		}
 	}
 }

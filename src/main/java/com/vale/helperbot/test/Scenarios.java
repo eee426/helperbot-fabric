@@ -716,6 +716,26 @@ public final class Scenarios {
 				}, c -> c.bot().getY() < 34 ? Scenario.Outcome.fail("下去了")
 						: c.ended() ? Scenario.Outcome.pass("没下去") : null),
 
+				new Scenario("W41", "站在结冰的池塘上，黏土在 4 格深的水底：凿开脚下的冰下去挖，从洞口上来", 4 * MINUTE, (a, bot, me) -> {
+					// Nothing tells it to come back by the hole: the hole is simply the cheapest way up.
+					a.fill(4, 36, -6, 14, 39, 6, Blocks.WATER);
+					a.fill(4, 40, -6, 14, 40, 6, Blocks.ICE);
+					a.set(9, 35, 0, Blocks.CLAY);
+					teleport(bot, a, 9, Arena.SURFACE, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.CLAY_BALL, 4, Mode.NORMAL);
+				}, Scenario.has(Items.CLAY_BALL, 4, c -> c.bot().getHealth() > 12, "淹着了")),
+
+				new Scenario("W42", "同上但是浮冰（挖开不变水，留个洞）", 4 * MINUTE, (a, bot, me) -> {
+					a.fill(4, 36, -6, 14, 39, 6, Blocks.WATER);
+					a.fill(4, 40, -6, 14, 40, 6, Blocks.PACKED_ICE);
+					a.set(9, 35, 0, Blocks.CLAY);
+					teleport(bot, a, 9, Arena.SURFACE, 0);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.CLAY_BALL, 4, Mode.NORMAL);
+				}, Scenario.has(Items.CLAY_BALL, 4, c -> c.bot().getHealth() > 12, "淹着了")),
+
 				new Scenario("W30", "6 格深的池底挖一块沙子（空手）：一口气下去站着挖完、捡起来，不来回换气", 3 * MINUTE, (a, bot, me) -> {
 					// Floating where it's nearest, mining by hand takes 25x as long: too long for one
 					// breath. Standing on the bottom it's 5x, and there's air for that and the pickup.

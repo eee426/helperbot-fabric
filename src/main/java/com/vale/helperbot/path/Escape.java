@@ -47,6 +47,9 @@ public final class Escape {
 	/** Per tile and layer: ticks to air from each cell, swimming sideways first (no standing start). */
 	private final Long2ObjectOpenHashMap<double[]> fields = new Long2ObjectOpenHashMap<>();
 
+	/** See {@link #fromAbove}. */
+	private boolean fromAbove;
+
 	public Escape(BlockGetter level, Inventory inventory, Air.Profile air) {
 		this.level = level;
 		this.inventory = inventory;
@@ -55,6 +58,15 @@ public final class Escape {
 		this.sideTicks = 1 / (sprintBlocks >= SIZE * 2 ? Air.SPRINT_SWIM_SPEED : LocalPathfinder.SWIM_SPEED);
 		upMemo.defaultReturnValue(Double.NaN);
 		memo.defaultReturnValue(Double.NaN);
+	}
+
+	/**
+	 * For judging a job from outside the water: a one-block ceiling (ice on a pond) it would dig on
+	 * the way in, standing on top, at the plain speed, and then it's open on the way out.
+	 */
+	public Escape fromAbove() {
+		fromAbove = true;
+		return this;
 	}
 
 	/** Ticks to get the head into air with feet starting in {@code feet}; 0 if it already is, infinity if stuck. */
@@ -159,7 +171,7 @@ public final class Escape {
 					break;
 				}
 				// Under water it mines 5x slower, and 5x again once floating (vanilla).
-				t += dig * waterDigFactor * (grounded ? 1 : 5);
+				t += fromAbove && LocalPathfinder.isPassable(level, next.above()) ? dig : dig * waterDigFactor * (grounded ? 1 : 5);
 				sprint = false;
 			}
 			grounded = false;

@@ -604,7 +604,7 @@ public final class CraftPlanner {
 			// What each costs once there. Under water that's much more than the walk: it goes last
 			// even if it's nearest, and if it can't be done on a breath it isn't a source at all.
 			Air.Profile air = Air.profile((LivingEntity) breaker, true, 0, breaker instanceof Player p ? Air.sprintBlocks(p) : 0);
-			Escape escape = new Escape(level, realInventory, air);
+			Escape escape = new Escape(level, realInventory, air).fromAbove();
 			Map<BlockPos, Double> work = new HashMap<>();
 			for (BlockPos p : found) {
 				double w = mineCost(item, p, found.size(), air, escape);
