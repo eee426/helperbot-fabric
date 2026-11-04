@@ -468,7 +468,13 @@ public final class MovementController {
 			return;
 		}
 		if (status == Status.MOVING) {
+			double x = bot.getX(), y = bot.getY(), z = bot.getZ();
 			tickMoving();
+			// Not going anywhere this tick (thinking, mining, placing): not sprinting either. Under
+			// water it would stay in the swimming pose, lying still with its eyes low.
+			if (bot.getX() == x && bot.getY() == y && bot.getZ() == z) {
+				bot.setSprinting(false);
+			}
 		} else {
 			bot.setSprinting(false);
 			fall();
@@ -677,6 +683,9 @@ public final class MovementController {
 		boolean useful = result.reachesGoal()
 				|| (!result.steps().isEmpty() && search.progressBlocks() >= MIN_USEFUL_PROGRESS);
 		if (!useful && searchLevel < levels.length - 1) {
+			// The last line before a long think: if it never comes back, this says what it was doing.
+			bot.log("±" + search.limits().radiusXZ() + " 格内没有可用的路（用了 " + (bot.tickCount - plannedAt) / 20.0 + " 秒），扩大到 ±"
+					+ levels[searchLevel + 1].radiusXZ() + " 格，目标 " + (target == null ? "（无）" : target.toShortString()));
 			startPlanning(searchLevel + 1);
 			return;
 		}
