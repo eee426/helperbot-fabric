@@ -201,13 +201,15 @@ public final class Air {
 
 	/**
 	 * Mining slowdown with feet in {@code feet}: head under water, and (vanilla) 5x again when not
-	 * standing on anything, i.e. floating.
+	 * standing on anything, i.e. floating. That goes for floating at the surface too, head out: it
+	 * used to count as dry land, so a block under 3 of water looked as cheap as one on the shore.
 	 */
 	public static double digPenalty(BlockGetter level, BlockPos feet, double waterDigFactor) {
+		boolean standing = LocalPathfinder.isSupport(level, feet.below());
 		if (breathable(level, feet)) {
-			return 1;
+			return LocalPathfinder.isWater(level, feet) && !standing ? 5 : 1;
 		}
-		return waterDigFactor * (LocalPathfinder.isSupport(level, feet.below()) ? 1 : 5);
+		return waterDigFactor * (standing ? 1 : 5);
 	}
 
 	/** With feet in this cell (standing, or floating at the surface), is the head out of the water? */

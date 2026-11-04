@@ -669,6 +669,16 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.PEONY, 2, Mode.NORMAL);
 				}, Scenario.has(Items.PEONY, 2, c -> !c.logHas("重新选工具"), "说手里的东西挖不出（拿上半截当没有掉落）")),
 
+				new Scenario("W43", "要 4 块黏土：3 格深的水底有（浮在水面够得着），25 格外的岸上也有：去岸上", 4 * MINUTE, (a, bot, me) -> {
+					// Reachable from the surface, head out: no dives, but floating it mines 5x slower.
+					a.fill(6, 38, -3, 12, 40, 3, Blocks.WATER);
+					a.fill(6, 37, -3, 12, 37, 3, Blocks.CLAY);
+					a.fill(28, 40, -2, 32, 40, 2, Blocks.CLAY);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.CLAY_BALL, 16, Mode.NORMAL);
+				}, Scenario.has(Items.CLAY_BALL, 16, c -> !c.bot().isInWater(), "下水了")),
+
 				new Scenario("W22", "要 4 块黏土：近处 5 格深的水底有，25 格外的岸上也有：去岸上，不下水", 4 * MINUTE, (a, bot, me) -> {
 					// By hand under water each block takes a whole dive; the walk is only paid once.
 					a.fill(6, 36, -3, 12, 40, 3, Blocks.WATER);

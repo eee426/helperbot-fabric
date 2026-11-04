@@ -140,11 +140,14 @@ public class GatherTask implements BotTask {
 						continue;
 					}
 					anyStand = true;
-					if (Air.breathable(level, q)) {
-						bestNeed = 0;
+					double penalty = Air.digPenalty(level, q, waterFactor);
+					if (Air.breathable(level, q) && penalty == 1) {
+						bestNeed = 0; // on the ground, head out: nothing extra to pay
 						break search;
 					}
-					double need = Air.diving(air, blocks, Air.workUnderWater(dig, Air.digPenalty(level, q, waterFactor)), escape.ticks(q));
+					// Floating at the surface it needs no dives, but it does mine that much slower.
+					double work = Air.workUnderWater(dig, penalty);
+					double need = Air.breathable(level, q) ? blocks * work : Air.diving(air, blocks, work, escape.ticks(q));
 					if (Double.isInfinite(need)) {
 						continue; // not on one breath
 					}
