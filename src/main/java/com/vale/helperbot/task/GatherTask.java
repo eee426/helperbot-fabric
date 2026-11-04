@@ -108,9 +108,9 @@ public class GatherTask implements BotTask {
 
 	/**
 	 * Rough ticks to go and mine {@code p}, or NaN if it can't: there must be a spot to stand (or
-	 * swim) within reach of it; under water the round trip plus mining at under-water speed must
-	 * fit in one breath. So under water, kelp (breaks instantly) is fine, an ore that would take
-	 * most of a breath is skipped if there are any others.
+	 * swim) within reach of it; under water each block must fit in one breath, and it pays for all
+	 * the blocks still wanted from such a spot, dives and breaths included (see Air#diving): what's
+	 * near but under water loses to dry land further off, unless it's only a block or two more.
 	 */
 	private double targetCost(BotPlayer bot, BlockPos p, Escape escape) {
 		ServerLevel level = bot.level();
@@ -125,7 +125,8 @@ public class GatherTask implements BotTask {
 			return Double.NaN;
 		}
 		double waterFactor = Air.waterDigFactor(bot);
-		int full = Air.fullBudget(bot);
+		Air.Profile air = bot.movement().airProfile();
+		int blocks = (int) Math.ceil(Math.max(1, wanted - collected(bot)) / Math.max(0.01, DropAnalysis.rate(item, state.getBlock())));
 		double bestNeed = Double.NaN;
 		boolean anyStand = false;
 		int r = (int) Math.ceil(reach);
@@ -143,17 +144,10 @@ public class GatherTask implements BotTask {
 						bestNeed = 0;
 						break search;
 					}
-					double up = escape.ticks(q);
-					double mining = Air.workUnderWater(dig, Air.digPenalty(level, q, waterFactor));
-					// Down there (about as long as the way up) and mine, on one breath, keeping what the
-					// way back up needs: the planner's rule and margin (see Air#enough). The way down used
-					// to be left out (every dive ran out halfway through the block), then the way up was
-					// counted twice (once more than the reserve already has it): blocks well within one
-					// breath were skipped as out of reach.
-					if (!Air.enough(full - up, up, mining + Air.PLAN_SLACK)) {
-						continue;
+					double need = Air.diving(air, blocks, Air.workUnderWater(dig, Air.digPenalty(level, q, waterFactor)), escape.ticks(q));
+					if (Double.isInfinite(need)) {
+						continue; // not on one breath
 					}
-					double need = 2 * up + mining;
 					if (Double.isNaN(bestNeed) || need < bestNeed) {
 						bestNeed = need;
 					}
@@ -172,9 +166,7 @@ public class GatherTask implements BotTask {
 		}
 		// Per item it gives, not per block: a dead bush (about a stick each) before leaves (1 in 50).
 		double perBlock = Math.max(0.01, Math.min(1.0, DropAnalysis.rate(item, state.getBlock())));
-		double cost = (Math.sqrt(p.distSqr(bot.blockPosition())) * 5 + bestNeed) / perBlock;
-		// Experimental: like the path planner, prefer dry land (see LocalPathfinder#WATER_COST_FACTOR).
-		return inWater(level, p) ? cost * LocalPathfinder.WATER_COST_FACTOR : cost;
+		return (Math.sqrt(p.distSqr(bot.blockPosition())) * 5 + bestNeed) / perBlock;
 	}
 
 	/** In or under water (as opposed to on dry land, or at the water's edge from the shore). */
@@ -407,9 +399,10 @@ public class GatherTask implements BotTask {
 		net.minecraft.world.entity.item.ItemEntity bestItem = null;
 		double bestItemCost = Double.MAX_VALUE;
 		int lying = 0;
+		Escape escape = bot.movement().newEscape();
 		for (net.minecraft.world.entity.item.ItemEntity e : drops.nearby(bot, item, DROP_RANGE)) {
 			lying += e.getItem().getCount();
-			double c = DropFetch.cost(bot, e, needed);
+			double c = DropFetch.cost(bot, e, needed, escape);
 			if (c < bestItemCost) {
 				bestItemCost = c;
 				bestItem = e;
@@ -433,7 +426,6 @@ public class GatherTask implements BotTask {
 		// costs (getting there and back, mining at the slow under-water speed). Ones it can't reach
 		// on a breath, or can't reach at all, are skipped; e.g. the bottom of a kelp stalk deeper
 		// than it can dive, when the top of the same stalk is right there.
-		Escape escape = bot.movement().newEscape();
 		BlockPos best = null;
 		double bestCost = Double.MAX_VALUE;
 		// The nearest few; and if some of those are in water, also the nearest few on dry land, even

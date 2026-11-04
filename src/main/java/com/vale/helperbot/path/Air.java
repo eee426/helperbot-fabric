@@ -53,6 +53,25 @@ public final class Air {
 	}
 
 	/**
+	 * Real ticks for {@code blocks} pieces of work at a spot {@code up} ticks from air, each costing
+	 * {@code work} air (see {@link #workUnderWater}), counting everything it really takes: as many
+	 * dives as one breath divides the work into, each with the way down (about as long as the way up),
+	 * the way up, and the air won back at the surface. Infinite if not even one piece fits in a breath.
+	 * This is what lets water be weighed against land: 50 clay by hand from 5 deep isn't twice the
+	 * trouble of a cave, it's a dozen times, and a little work from 2 deep is hardly any.
+	 */
+	public static double diving(Profile air, int blocks, double work, double up) {
+		double room = air.full() - up - reserve(up) - PLAN_SLACK; // the rule of enough, for a full dive
+		if (room <= work) {
+			return Double.POSITIVE_INFINITY;
+		}
+		int perDive = (int) Math.min(blocks, room / work);
+		int dives = (blocks + perDive - 1) / perDive;
+		double breath = 2 * up + perDive * work;
+		return blocks * work + dives * (2 * up + breath / air.refill());
+	}
+
+	/**
 	 * Sprint-swimming (vanilla's swimming pose: sprinting with the head under water), blocks/tick, in
 	 * any direction: vanilla works out to about 0.18 across (friction 0.9 instead of 0.8, pull 0.02),
 	 * as fast or faster up and down (it swims where it looks). A touch under that, to be safe.

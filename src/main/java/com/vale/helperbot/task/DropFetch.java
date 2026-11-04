@@ -3,9 +3,12 @@ package com.vale.helperbot.task;
 import com.vale.helperbot.bot.BotPlayer;
 import com.vale.helperbot.bot.MovementController;
 import com.vale.helperbot.guard.ProtectionZones;
+import com.vale.helperbot.path.Air;
+import com.vale.helperbot.path.Escape;
 import com.vale.helperbot.path.LocalPathfinder;
 import com.vale.helperbot.path.Mode;
 import com.vale.helperbot.path.PathGoal;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.phys.AABB;
@@ -74,14 +77,15 @@ final class DropFetch {
 
 	/**
 	 * What getting it takes, per item, on the scale of a block's cost (GatherTask#targetCost): the
-	 * walk, and in water as much again as on land (see LocalPathfinder#WATER_COST_FACTOR).
+	 * walk, and under water a dive for it (see Air#diving; infinite if it's too deep for a breath).
 	 */
-	static double cost(BotPlayer bot, ItemEntity e, int needed) {
-		double walk = bot.distanceTo(e) * 5;
-		int useful = Math.max(1, Math.min(e.getItem().getCount(), needed));
-		double cost = walk / useful;
-		boolean wet = LocalPathfinder.isWater(bot.level(), e.blockPosition());
-		return wet ? cost * LocalPathfinder.WATER_COST_FACTOR : cost;
+	static double cost(BotPlayer bot, ItemEntity e, int needed, Escape escape) {
+		double ticks = bot.distanceTo(e) * 5;
+		BlockPos at = e.blockPosition();
+		if (LocalPathfinder.isWater(bot.level(), at)) {
+			ticks += Air.diving(bot.movement().airProfile(), 1, Air.PICKUP_TICKS, escape.ticks(at));
+		}
+		return ticks / Math.max(1, Math.min(e.getItem().getCount(), needed));
 	}
 
 	boolean active() {

@@ -657,7 +657,7 @@ public final class MovementController {
 	/** Under water, plan again this often: the world there changes fast (sand, flowing water, kelp). */
 	private static final int WATER_REPLAN_TICKS = 20;
 
-	private Air.Profile airProfile() {
+	public Air.Profile airProfile() {
 		return Air.profile(bot, !ignoreAir, engaged ? 0 : goalWork, canSprintSwim());
 	}
 

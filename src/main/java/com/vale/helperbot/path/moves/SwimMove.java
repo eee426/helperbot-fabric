@@ -55,11 +55,9 @@ final class SwimMove implements Move {
 					if (Double.isNaN(f)) {
 						continue;
 					}
-					boolean submerged = pf.water(c.above());
 					boolean sprint = pf.sprintSwim() && Air.submerged(pf.world(), p) && Air.submerged(pf.world(), c);
 					double ticks = Air.swimTicks(dx, dy, dz, sprint);
-					out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, c, List.of()), f,
-							ticks * (submerged ? LocalPathfinder.DIVE_COST_FACTOR : 1), ticks));
+					out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, c, List.of()), f, ticks));
 				}
 			}
 		}

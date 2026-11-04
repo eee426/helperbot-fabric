@@ -267,7 +267,7 @@ final class HuntTask {
 		int lying = 0;
 		for (net.minecraft.world.entity.item.ItemEntity e : drops.nearby(bot, item, SCAN_RADIUS)) {
 			lying += e.getItem().getCount();
-			double c = DropFetch.cost(bot, e, needed);
+			double c = DropFetch.cost(bot, e, needed, bot.movement().newEscape());
 			if (c < bestItemCost) {
 				bestItemCost = c;
 				bestItem = e;

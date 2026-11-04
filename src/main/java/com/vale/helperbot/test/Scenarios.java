@@ -669,6 +669,35 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.PEONY, 2, Mode.NORMAL);
 				}, Scenario.has(Items.PEONY, 2, c -> !c.logHas("重新选工具"), "说手里的东西挖不出（拿上半截当没有掉落）")),
 
+				new Scenario("W22", "要 4 块黏土：近处 5 格深的水底有，25 格外的岸上也有：去岸上，不下水", 4 * MINUTE, (a, bot, me) -> {
+					// By hand under water each block takes a whole dive; the walk is only paid once.
+					a.fill(6, 36, -3, 12, 40, 3, Blocks.WATER);
+					a.fill(6, 35, -3, 12, 35, 3, Blocks.CLAY);
+					a.fill(28, 40, -2, 32, 40, 2, Blocks.CLAY);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.CLAY_BALL, 16, Mode.NORMAL);
+				}, Scenario.has(Items.CLAY_BALL, 16, c -> !c.bot().movement().headUnderwater(), "下水了")),
+
+				new Scenario("W37", "只要 1 块黏土：2 格深的水里就在眼前，岸上的在 50 格外：下水拿", 3 * MINUTE, (a, bot, me) -> {
+					// The other side of W22: not "never in water", a dive that costs less than the walk.
+					a.fill(5, 39, -2, 9, 40, 2, Blocks.WATER);
+					a.fill(5, 38, -2, 9, 38, 2, Blocks.CLAY);
+					a.fill(52, 40, -2, 56, 40, 2, Blocks.CLAY);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.CLAY_BALL, 4, Mode.NORMAL);
+				}, Scenario.has(Items.CLAY_BALL, 4, c -> c.bot().blockPosition().getX() < c.arena().origin.getX() + 30, "走去了远处")),
+
+				new Scenario("W38", "去对岸，水塘绕一下就过去了：走陆地，不游泳", 2 * MINUTE, (a, bot, me) -> {
+					// Swimming takes about twice as long a block as walking: real time alone keeps it on land.
+					a.fill(8, 38, -3, 13, 40, 3, Blocks.WATER);
+					teleport(bot, a, 3, 41, 0);
+					me.setPos(a.origin.getX() + 18.5, Arena.SURFACE, a.origin.getZ() + 0.5); // not a teleport: no client to answer it
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.bot().isInWater() ? Scenario.Outcome.fail("下水了")
+						: c.ended() ? Scenario.Outcome.pass("绕过去了") : null),
+
 				new Scenario("W30", "6 格深的池底挖一块沙子（空手）：一口气下去站着挖完、捡起来，不来回换气", 3 * MINUTE, (a, bot, me) -> {
 					// Floating where it's nearest, mining by hand takes 25x as long: too long for one
 					// breath. Standing on the bottom it's 5x, and there's air for that and the pickup.

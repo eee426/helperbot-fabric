@@ -75,8 +75,6 @@ public final class LocalPathfinder implements Planner {
 	public static final int MAX_DIVE_DEPTH = 10;
 	/** Air is tracked in steps of this many ticks: two routes to a cell differing by less are the same. */
 	private static final int AIR_BUCKET = 30;
-	/** Prefer the surface: swimming under water costs more (air). */
-	public static final double DIVE_COST_FACTOR = 1.4;
 	/** Vanilla right-click interval (4 ticks), plus a small charge for using a block up. */
 	public static final double PLACE_COST = 4 + 2;
 
@@ -103,13 +101,6 @@ public final class LocalPathfinder implements Planner {
 	 * swinging to a different route at every re-plan (borrowed from Baritone).
 	 */
 	private static final double FAVOR_PREVIOUS = 0.5;
-	/**
-	 * Experimental: every step that ends in water (swimming, diving, digging under water) counts
-	 * this many times its time. Water is slow, risky (air, drowning, drops floating off) and a
-	 * player keeps to dry land when there's a reasonable way round; a much shorter swim still wins.
-	 * Only the preference changes: air is still charged by real ticks.
-	 */
-	public static final double WATER_COST_FACTOR = 2.0;
 	/**
 	 * A partial path is picked by trading progress against cost at several weights (lowest first),
 	 * taking the first that gets at least {@link #MIN_PARTIAL_BLOCKS} away from the start: not
@@ -297,8 +288,7 @@ public final class LocalPathfinder implements Planner {
 					continue; // couldn't get back up from there in time
 				}
 				long key = c.step().to().asLong();
-				double g = node.g + c.cost() * (favored.test(key) ? FAVOR_PREVIOUS : 1)
-						* (isWater(level, c.step().to()) ? WATER_COST_FACTOR : 1);
+				double g = node.g + c.cost() * (favored.test(key) ? FAVOR_PREVIOUS : 1);
 				int b = bucket(airLeft);
 				Node[] nodes = cell(c.step().to());
 				if (!dominated(nodes, b, g)) {

@@ -1,10 +1,15 @@
 package com.vale.helperbot.knowledge;
 
 import net.minecraft.core.BlockPos;
+import com.vale.helperbot.path.Air;
+import com.vale.helperbot.path.BreakTimes;
+import com.vale.helperbot.path.Escape;
+import com.vale.helperbot.path.LocalPathfinder;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.entity.player.Player;
@@ -560,7 +565,8 @@ public final class CraftPlanner {
 	 */
 	private double gatherCost(Item item, int n, boolean quiet) {
 		List<BlockPos> found = sites(item);
-		if (found.isEmpty()) {
+		Route r = found.isEmpty() ? null : route(item, found);
+		if (r == null || r.cost.length == 1) {
 			long started = System.nanoTime();
 			boolean nowhere = BiomeHints.biomesFor(level, sourceBlocks.get(item)).isEmpty();
 			tBiome += System.nanoTime() - started;
@@ -571,8 +577,7 @@ public final class CraftPlanner {
 			int blocks = (int) Math.ceil(n / Math.max(1e-3, gatherRate(item)));
 			return GATHER_IN_BIOME + GATHER_PER_ITEM * blocks;
 		}
-		Route r = route(item, found);
-		int all = found.size();
+		int all = r.cost.length - 1;
 		for (int k = 1; k <= all; k++) {
 			if (r.yield[k] >= n) {
 				return r.cost[k];
@@ -582,7 +587,7 @@ public final class CraftPlanner {
 		return r.cost[all] + (n - r.yield[all]) * (r.cost[all] / Math.max(1e-3, r.yield[all])) * 1.5;
 	}
 
-	/** Visiting the first k sources, nearest first: what that costs, and how many of the item it gives. */
+	/** Visiting the first k sources, cheapest first: what that costs, and how many of the item it gives. */
 	private record Route(double[] cost, double[] yield) {
 	}
 
@@ -596,23 +601,44 @@ public final class CraftPlanner {
 	private Route route(Item item, List<BlockPos> found) {
 		return routes.computeIfAbsent(item, i -> {
 			long started = System.nanoTime();
-			double[] cost = new double[found.size() + 1];
-			double[] yield = new double[found.size() + 1];
-			BlockPos prev = breaker.blockPosition();
-			for (int k = 0; k < found.size(); k++) {
-				BlockPos p = found.get(k);
-				double leg = Math.sqrt(prev.distSqr(p)) / WALK_SPEED
-						+ buried(p, sourceBlocks.get(item)) * DIG_PER_BLOCK + MINE_PER_BLOCK;
-				// Experimental: sources in or under water count extra, as in the path planner.
-				boolean wet = com.vale.helperbot.path.LocalPathfinder.isWater(level, p)
-						|| com.vale.helperbot.path.LocalPathfinder.isWater(level, p.above());
-				cost[k + 1] = cost[k] + (wet ? leg * com.vale.helperbot.path.LocalPathfinder.WATER_COST_FACTOR : leg);
+			// What each costs once there. Under water that's much more than the walk: it goes last
+			// even if it's nearest, and if it can't be done on a breath it isn't a source at all.
+			Air.Profile air = Air.profile((LivingEntity) breaker, true, 0, false);
+			Escape escape = new Escape(level, realInventory, air.waterDigFactor());
+			Map<BlockPos, Double> work = new HashMap<>();
+			for (BlockPos p : found) {
+				double w = mineCost(item, p, found.size(), air, escape);
+				if (!Double.isInfinite(w)) {
+					work.put(p, w);
+				}
+			}
+			BlockPos start = breaker.blockPosition();
+			List<BlockPos> order = new ArrayList<>(work.keySet());
+			order.sort(Comparator.comparingDouble(p -> Math.sqrt(start.distSqr(p)) / WALK_SPEED + work.get(p)));
+			double[] cost = new double[order.size() + 1];
+			double[] yield = new double[order.size() + 1];
+			BlockPos prev = start;
+			for (int k = 0; k < order.size(); k++) {
+				BlockPos p = order.get(k);
+				cost[k + 1] = cost[k] + Math.sqrt(prev.distSqr(p)) / WALK_SPEED + work.get(p);
 				yield[k + 1] = yield[k] + DropAnalysis.rate(item, level.getBlockState(p).getBlock());
 				prev = p;
 			}
 			tRoute += System.nanoTime() - started;
 			return new Route(cost, yield);
 		});
+	}
+
+	/** Ticks to mine one source, once there; under water its share of all {@code blocks} (see Air#diving). */
+	private double mineCost(Item item, BlockPos p, int blocks, Air.Profile air, Escape escape) {
+		double dry = buried(p, sourceBlocks.get(item)) * DIG_PER_BLOCK + MINE_PER_BLOCK;
+		BlockPos feet = LocalPathfinder.isWater(level, p) ? p : p.above();
+		if (!LocalPathfinder.isWater(level, feet) || Air.breathable(level, feet)) {
+			return dry;
+		}
+		int dig = BreakTimes.estimateTicks(realInventory, level, p, level.getBlockState(p));
+		double work = dry + (dig == Integer.MAX_VALUE ? 0 : dig - MINE_PER_BLOCK);
+		return Air.diving(air, blocks, Air.workUnderWater(work, Air.digPenalty(level, feet, air.waterDigFactor())), escape.ticks(feet)) / blocks;
 	}
 
 	private final Map<Item, Route> routes = new HashMap<>();
