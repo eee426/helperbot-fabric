@@ -355,11 +355,11 @@ public final class MovementController {
 
 	/** Ticks from here until the head is out of the water (see {@link Escape}). */
 	public double escapeTicks() {
-		return new Escape(bot.level(), bot.getInventory(), Air.waterDigFactor(bot)).ticks(feet());
+		return newEscape().ticks(feet());
 	}
 
 	public Escape newEscape() {
-		return new Escape(bot.level(), bot.getInventory(), Air.waterDigFactor(bot));
+		return new Escape(bot.level(), bot.getInventory(), airProfile());
 	}
 
 	public boolean takeAirRequest() {
@@ -658,7 +658,7 @@ public final class MovementController {
 	private static final int WATER_REPLAN_TICKS = 20;
 
 	public Air.Profile airProfile() {
-		return Air.profile(bot, !ignoreAir, engaged ? 0 : goalWork, canSprintSwim());
+		return Air.profile(bot, !ignoreAir, engaged ? 0 : goalWork, mode.sprint && !bot.isUsingItem() ? Air.sprintBlocks(bot) : 0);
 	}
 
 	/** Sprinting is allowed (vanilla: more than 6 food, not eating) and this mode sprints. */
@@ -1720,10 +1720,13 @@ public final class MovementController {
 			fall();
 			return true;
 		}
-		if (tryMove(0, SWIM_VERTICAL_SPEED, 0)) {
+		// As fast as the plan reckons (see Escape), or its way up takes longer than the air was kept for.
+		BlockPos f = feet();
+		boolean sprint = canSprintSwim() && Air.submerged(level, f) && Air.submerged(level, f.above());
+		bot.setSprinting(sprint);
+		if (tryMove(0, sprint ? Air.SPRINT_SWIM_SPEED : SWIM_VERTICAL_SPEED, 0)) {
 			return false;
 		}
-		BlockPos f = feet();
 		BlockPos best = null;
 		for (int r = 0; r <= 4 && best == null; r++) {
 			for (int dx = -r; dx <= r; dx++) {

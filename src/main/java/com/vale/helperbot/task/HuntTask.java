@@ -241,7 +241,7 @@ final class HuntTask {
 		if (full >= com.vale.helperbot.path.Air.UNLIMITED) {
 			return true;
 		}
-		double up = com.vale.helperbot.path.Air.swimTicks(0, depth, 0);
+		double up = com.vale.helperbot.path.Air.ascentTicks(bot.movement().airProfile(), depth);
 		return com.vale.helperbot.path.Air.enough(full - up, up, FIGHT_UNDERWATER_TICKS + com.vale.helperbot.path.Air.PLAN_SLACK);
 	}
 

@@ -698,6 +698,24 @@ public final class Scenarios {
 				}, c -> c.bot().isInWater() ? Scenario.Outcome.fail("下水了")
 						: c.ended() ? Scenario.Outcome.pass("绕过去了") : null),
 
+				new Scenario("W39", "吃饱的时候 11 格深的水底空手挖黏土：疾跑游上来够快，一口气够", 4 * MINUTE, (a, bot, me) -> {
+					// At the plain swimming speed the way up alone would take too much of the breath.
+					a.fill(6, 30, -2, 10, 40, 2, Blocks.WATER);
+					a.set(8, 29, 0, Blocks.CLAY);
+					teleport(bot, a, 3, 41, 0);
+					return new AcquireTask(me, Items.CLAY_BALL, 4, Mode.NORMAL);
+				}, Scenario.has(Items.CLAY_BALL, 4)),
+
+				new Scenario("W40", "同上但饿着（不能疾跑）：一口气不够，不下去", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(6, 30, -2, 10, 40, 2, Blocks.WATER);
+					a.set(8, 29, 0, Blocks.CLAY);
+					teleport(bot, a, 3, 41, 0);
+					bot.getFoodData().setFoodLevel(6);
+					bot.getFoodData().setSaturation(0);
+					return new AcquireTask(me, Items.CLAY_BALL, 4, Mode.NORMAL);
+				}, c -> c.bot().getY() < 34 ? Scenario.Outcome.fail("下去了")
+						: c.ended() ? Scenario.Outcome.pass("没下去") : null),
+
 				new Scenario("W30", "6 格深的池底挖一块沙子（空手）：一口气下去站着挖完、捡起来，不来回换气", 3 * MINUTE, (a, bot, me) -> {
 					// Floating where it's nearest, mining by hand takes 25x as long: too long for one
 					// breath. Standing on the bottom it's 5x, and there's air for that and the pickup.

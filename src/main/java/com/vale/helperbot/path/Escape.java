@@ -34,20 +34,25 @@ public final class Escape {
 	/** Give up looking up after this many blocks (deeper than any ocean). */
 	private static final int MAX_UP = 64;
 	private static final double UP_TICKS = 1 / Air.SWIM_UP_SPEED;
-	private static final double SIDE_TICKS = 1 / LocalPathfinder.SWIM_SPEED;
 
 	private final BlockGetter level;
 	private final Inventory inventory;
 	private final double waterDigFactor;
+	/** How far up it can sprint-swim on its food: the first so many blocks are the fast ones. */
+	private final double sprintBlocks;
+	/** A block sideways. Only sprinting if the food lasts for any way across a field. */
+	private final double sideTicks;
 	private final Long2DoubleOpenHashMap upMemo = new Long2DoubleOpenHashMap();
 	private final Long2DoubleOpenHashMap memo = new Long2DoubleOpenHashMap();
 	/** Per tile and layer: ticks to air from each cell, swimming sideways first (no standing start). */
 	private final Long2ObjectOpenHashMap<double[]> fields = new Long2ObjectOpenHashMap<>();
 
-	public Escape(BlockGetter level, Inventory inventory, double waterDigFactor) {
+	public Escape(BlockGetter level, Inventory inventory, Air.Profile air) {
 		this.level = level;
 		this.inventory = inventory;
-		this.waterDigFactor = waterDigFactor;
+		this.waterDigFactor = air.waterDigFactor();
+		this.sprintBlocks = air.sprintBlocks();
+		this.sideTicks = 1 / (sprintBlocks >= SIZE * 2 ? Air.SPRINT_SWIM_SPEED : LocalPathfinder.SWIM_SPEED);
 		upMemo.defaultReturnValue(Double.NaN);
 		memo.defaultReturnValue(Double.NaN);
 	}
@@ -65,7 +70,7 @@ public final class Escape {
 			// or sideways first: from here, or from a neighbour (here may be too tight to swim in).
 			best = Math.min(up(feet, true), field(feet));
 			for (Direction dir : Direction.Plane.HORIZONTAL) {
-				best = Math.min(best, SIDE_TICKS + field(feet.relative(dir)));
+				best = Math.min(best, sideTicks + field(feet.relative(dir)));
 			}
 		}
 		memo.put(key, best);
@@ -119,7 +124,7 @@ public final class Escape {
 					continue;
 				}
 				int nIdx = n[0] * SIZE + n[1];
-				double cost = e[0] + SIDE_TICKS;
+				double cost = e[0] + sideTicks;
 				if (swim[nIdx] && cost < f[nIdx]) {
 					f[nIdx] = cost;
 					queue.add(new double[]{cost, nIdx});
@@ -147,6 +152,7 @@ public final class Escape {
 				break;
 			}
 			BlockPos next = head.above();
+			boolean sprint = i < sprintBlocks && LocalPathfinder.isWater(level, head) && LocalPathfinder.isWater(level, next);
 			if (!open(next)) {
 				int dig = digTicks(next);
 				if (dig < 0) {
@@ -154,9 +160,11 @@ public final class Escape {
 				}
 				// Under water it mines 5x slower, and 5x again once floating (vanilla).
 				t += dig * waterDigFactor * (grounded ? 1 : 5);
+				sprint = false;
 			}
 			grounded = false;
-			t += UP_TICKS;
+			// Like the swim itself (see Air#submerged): the last block, head coming out, isn't sprinted.
+			t += sprint ? 1 / Air.SPRINT_SWIM_SPEED : UP_TICKS;
 			head = next;
 		}
 		upMemo.put(key, result);

@@ -211,7 +211,7 @@ public final class LocalPathfinder implements Planner {
 		this.avoid = avoid;
 		this.favored = favored;
 		this.air = air;
-		this.escape = new Escape(level, inventory, air.waterDigFactor());
+		this.escape = new Escape(level, inventory, air);
 		this.buckets = air.limited() ? Math.max(1, Math.min(air.full(), Air.MAX_AIR * 4) / AIR_BUCKET + 1) : 1;
 		this.level = level;
 		this.inventory = inventory;
@@ -732,7 +732,7 @@ public final class LocalPathfinder implements Planner {
 
 	@Override
 	public boolean sprintSwim() {
-		return air.sprintSwim();
+		return air.sprintBlocks() > 0;
 	}
 
 	/**

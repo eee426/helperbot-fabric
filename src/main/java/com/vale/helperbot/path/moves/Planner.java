@@ -60,6 +60,6 @@ public interface Planner {
 	/** Open rules and something to build with: bridges and pillars are possible. */
 	boolean canBuild();
 
-	/** It may sprint-swim where fully under water (see Air#SPRINT_SWIM_SPEED). */
+	/** It may sprint-swim where fully under water (see Air#SPRINT_SWIM_SPEED): food enough, a mode that sprints. */
 	boolean sprintSwim();
 }

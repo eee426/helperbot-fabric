@@ -5,6 +5,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.effect.MobEffectUtil;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.food.FoodData;
 import net.minecraft.world.level.Level;
 
 /**
@@ -101,10 +103,10 @@ public final class Air {
 	 * @param workTicks      what it will do once there (mining a block, say), in ticks on dry land:
 	 *                       the goal must leave air for that too, at the speed it works there
 	 * @param refill         budget won back per tick with the head out of the water (see {@link #REFILL})
-	 * @param sprintSwim     it may sprint-swim (see {@link #SPRINT_SWIM_SPEED}): food enough to sprint, a mode that sprints
+	 * @param sprintBlocks   blocks it can sprint-swim on the food it has (see {@link #sprintBlocks}); 0: not at all
 	 */
 	public record Profile(int now, int full, double waterDigFactor, boolean limited, double workTicks, double refill,
-						  boolean sprintSwim) {
+						  double sprintBlocks) {
 	}
 
 	/** Vanilla: air comes back 4 points a tick with the head out of the water. */
@@ -113,8 +115,36 @@ public final class Air {
 	private Air() {
 	}
 
-	public static Profile profile(LivingEntity e, boolean limited, double workTicks, boolean sprintSwim) {
-		return new Profile(budget(e), fullBudget(e), waterDigFactor(e), limited, workTicks, REFILL * airStretch(e), sprintSwim);
+	public static Profile profile(LivingEntity e, boolean limited, double workTicks, double sprintBlocks) {
+		return new Profile(budget(e), fullBudget(e), waterDigFactor(e), limited, workTicks, REFILL * airStretch(e), sprintBlocks);
+	}
+
+	/** Vanilla: swimming costs this much exhaustion a block, and 4 exhaustion cost a point of saturation, then of food. */
+	private static final double EXHAUSTION_PER_BLOCK = 0.01, EXHAUSTION_PER_POINT = 4;
+	/** Vanilla: no sprinting at this much food or less. */
+	private static final int SPRINT_FOOD = 6;
+
+	/**
+	 * Blocks it can sprint-swim before hunger stops it: what's left above {@link #SPRINT_FOOD}, in
+	 * saturation and food. How far the current point has gone isn't told, so one point is left out.
+	 */
+	public static double sprintBlocks(Player p) {
+		FoodData food = p.getFoodData();
+		if (food.getFoodLevel() <= SPRINT_FOOD) {
+			return 0;
+		}
+		double points = food.getFoodLevel() - SPRINT_FOOD + food.getSaturationLevel() - 1;
+		return Math.max(0, points) * EXHAUSTION_PER_POINT / EXHAUSTION_PER_BLOCK;
+	}
+
+	/**
+	 * Ticks up through {@code depth} blocks of open water: sprinting as far as the food goes, not
+	 * for the last block (its head comes out, and that's where sprint-swimming ends). See
+	 * {@link Escape}, which works this out cell by cell.
+	 */
+	public static double ascentTicks(Profile air, int depth) {
+		int fast = (int) Math.min(Math.max(0, depth - 1), air.sprintBlocks());
+		return fast / SPRINT_SWIM_SPEED + (depth - fast) / SWIM_UP_SPEED;
 	}
 
 	/** Fully under water: feet and head cells both water (where it may sprint-swim). */
