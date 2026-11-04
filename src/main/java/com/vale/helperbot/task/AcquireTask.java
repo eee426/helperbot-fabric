@@ -43,8 +43,12 @@ public class AcquireTask implements BotTask {
 	private int startCount = -1;
 	private boolean announced;
 	private int steps;
+	/** The step last planned, and how many times running it has got nothing of what it makes. */
 	private String lastAction;
 	private int repeats;
+	/** What the step under way makes, and how many of it there were when it began. */
+	private Item stepProduct;
+	private int stepProductBefore;
 
 	private GatherTask gather;
 	private HuntTask hunt;
@@ -120,7 +124,7 @@ public class AcquireTask implements BotTask {
 			}
 			case CRAFT -> stepDone(bot, craft.tick(bot), craft.failure());
 			case SMELT -> stepDone(bot, smelt.tick(bot), smelt.failure());
-			case RETURN -> requester.hasDisconnected() ? Status.FAILED : ComeTask.followTick(bot, requester, mode, returnLeg);
+			case RETURN -> ComeTask.followTick(bot, requester, mode, returnLeg);
 		};
 	}
 
@@ -163,6 +167,13 @@ public class AcquireTask implements BotTask {
 	}
 
 	private Status plan(BotPlayer bot) {
+		// A step that made what it makes got somewhere, however like the last one it reads: logs one
+		// by one, each for a different need, read "gather 1 log" four times over and were taken for
+		// a step that keeps failing, while every one of them had worked.
+		if (stepProduct != null && bot.getInventory().countItem(stepProduct) > stepProductBefore) {
+			lastAction = null;
+		}
+		stepProduct = null;
 		int got = count(bot.getInventory()) - startCount;
 		if (got >= wanted) {
 			bot.say(requester, Component.literal("准备好了 " + got + " 个").append(name(item)).append("，正在回来。"));
@@ -220,8 +231,10 @@ public class AcquireTask implements BotTask {
 		repeats = key.equals(lastAction) ? repeats + 1 : 0;
 		lastAction = key;
 		if (repeats >= MAX_REPEATS) {
-			return giveUp(bot, "同一步反复失败");
+			return giveUp(bot, describePlan(List.of(next)).getString().replace("计划：", "") + " 连续 " + repeats + " 次都没有进展");
 		}
+		stepProduct = product(next);
+		stepProductBefore = bot.getInventory().countItem(stepProduct);
 		switch (next) {
 			case CraftPlanner.Gather g -> {
 				gatherItem = g.item();
@@ -249,6 +262,17 @@ public class AcquireTask implements BotTask {
 			}
 		}
 		return Status.RUNNING;
+	}
+
+	/** What a step is for: more of this in the bag means it worked. */
+	private static Item product(CraftPlanner.Action action) {
+		return switch (action) {
+			case CraftPlanner.Gather g -> g.item();
+			case CraftPlanner.Hunt h -> h.item();
+			case CraftPlanner.Fill f -> Items.WATER_BUCKET;
+			case CraftPlanner.Craft c -> c.recipe().result();
+			case CraftPlanner.Smelt s -> s.recipe().result();
+		};
 	}
 
 	/** Items the plan makes or uses: under strict rules only these get picked up. */

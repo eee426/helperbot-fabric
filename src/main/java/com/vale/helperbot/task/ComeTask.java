@@ -21,15 +21,21 @@ public class ComeTask implements BotTask {
 
 	@Override
 	public Status tick(BotPlayer bot) {
-		if (player.hasDisconnected() || player.level() != bot.level()) {
-			bot.say(player, "你不在这个维度或已下线，我先停下。");
-			return Status.FAILED;
-		}
 		return followTick(bot, player, mode, this);
 	}
 
-	/** Shared "walk to player" logic; returns DONE on arrival. */
-	static Status followTick(BotPlayer bot, ServerPlayer player, Mode mode, ComeTask state) {
+	/**
+	 * Shared "walk to player" logic; returns DONE on arrival. Follows the player as they are now,
+	 * going by who they are: dying (or logging back in) makes a new player object, and the one the
+	 * task was given stays behind where they died, so the bot walked back to that spot. Elsewhere
+	 * (offline, another dimension) it stops: coordinates from another dimension mean nothing here.
+	 */
+	static Status followTick(BotPlayer bot, ServerPlayer asked, Mode mode, ComeTask state) {
+		ServerPlayer player = bot.current(asked);
+		if (player == null || player.level() != bot.level()) {
+			bot.say(asked, "你不在这个维度或已下线，我先停下。");
+			return Status.FAILED;
+		}
 		BlockPos playerPos = player.blockPosition();
 		MovementController movement = bot.movement();
 		if (bot.distanceTo(player) <= ARRIVE_DISTANCE && movement.status() != MovementController.Status.MOVING) {

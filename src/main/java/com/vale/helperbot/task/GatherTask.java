@@ -309,7 +309,7 @@ public class GatherTask implements BotTask {
 			case APPROACH -> approach(bot);
 			case MINE -> mine(bot);
 			case FETCH -> fetch(bot);
-			case RETURN -> requester.hasDisconnected() ? Status.FAILED : ComeTask.followTick(bot, requester, mode, returnLeg);
+			case RETURN -> ComeTask.followTick(bot, requester, mode, returnLeg);
 		};
 	}
 

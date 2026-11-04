@@ -413,6 +413,46 @@ public final class Scenarios {
 					return c.ticks() >= 6 * 20 ? Scenario.Outcome.fail("冒名假人 6 秒还活着") : null;
 				}),
 
+				new Scenario("P2", "回到主人身边，途中主人死了重生到别处：跟到新位置（玩家报告）", MINUTE, (a, bot, me) -> {
+					var server = a.level.getServer();
+					var profile = new com.mojang.authlib.GameProfile(java.util.UUID.randomUUID(), "Owner");
+					var owner = new net.minecraft.server.level.ServerPlayer(server, a.level, profile,
+							net.minecraft.server.level.ClientInformation.createDefault());
+					server.getPlayerList().placeNewPlayer(new com.vale.helperbot.bot.FakeConnection(), owner,
+							new net.minecraft.server.network.CommonListenerCookie(profile, 0, owner.clientInformation(), false));
+					owner.setPos(a.origin.getX() + 10.5, Arena.SURFACE, a.origin.getZ() + 0.5); // not a teleport: no client to answer it
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					NAME_TEST[0] = owner;
+					NAME_TEST[1] = null;
+					return new ComeTask(owner, Mode.NORMAL);
+				}, c -> {
+					var players = c.arena().level.getServer().getPlayerList();
+					if (NAME_TEST[1] == null && c.ticks() >= 20) {
+						// What dying does: a new player object, the old one left where it was.
+						var fresh = players.respawn((net.minecraft.server.level.ServerPlayer) NAME_TEST[0], false,
+								net.minecraft.world.entity.Entity.RemovalReason.KILLED);
+						NAME_TEST[1] = fresh;
+					}
+					if (NAME_TEST[1] == null) {
+						return null;
+					}
+					var fresh = (net.minecraft.server.level.ServerPlayer) NAME_TEST[1];
+					// Held where it "respawned", away from the world spawn: the old object ends up at the
+					// spawn, so the old code heads the other way (a fake player has no client for teleports).
+					fresh.setPos(c.arena().origin.getX() + 25.5, Arena.SURFACE, c.arena().origin.getZ() + 0.5);
+					boolean there = c.bot().distanceTo(fresh) <= 4;
+					if (there || c.ended()) {
+						players.remove(fresh); // out of the list, like N1
+						return there ? Scenario.Outcome.pass("跟到了重生后的位置")
+								: Scenario.Outcome.fail("任务结束了，没到新位置，最后 x=" + (c.bot().getBlockX() - c.arena().origin.getX()));
+					}
+					if (c.ticks() >= 45 * 20) {
+						players.remove(fresh);
+						return Scenario.Outcome.fail("45 秒没到新位置，最后 x=" + (c.bot().getBlockX() - c.arena().origin.getX()));
+					}
+					return null;
+				}),
+
 				new Scenario("ST1", "地窖：三排台阶下去（每级上方 3 格空，刚够人走），从地窖走上来到你身边", 3 * MINUTE, (a, bot, me) -> {
 					cellar(a);
 					teleport(bot, a, 9, 34, 0);

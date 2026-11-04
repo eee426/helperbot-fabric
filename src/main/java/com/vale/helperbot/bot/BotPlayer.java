@@ -792,14 +792,24 @@ public class BotPlayer extends ServerPlayer {
 		return all.subList(Math.max(0, all.size() - n), all.size());
 	}
 
+	/**
+	 * That player as they are now, or null if they're offline. Tasks are given a player object, but
+	 * dying or logging back in makes a new one, and the old one stays behind, frozen where it was.
+	 */
+	public ServerPlayer current(ServerPlayer player) {
+		ServerPlayer listed = level().getServer().getPlayerList().getPlayer(player.getUUID());
+		return listed != null ? listed : player.hasDisconnected() ? null : player;
+	}
+
 	public void say(ServerPlayer to, String message) {
 		say(to, Component.literal(message));
 	}
 
 	/** Components let item and block names show in the player's own language. */
 	public void say(ServerPlayer to, Component message) {
-		if (to != null && !to.hasDisconnected()) {
-			to.sendSystemMessage(Component.literal("[" + getGameProfile().name() + "] ").append(message));
+		ServerPlayer player = to == null ? null : current(to);
+		if (player != null) {
+			player.sendSystemMessage(Component.literal("[" + getGameProfile().name() + "] ").append(message));
 		}
 		if (logTap != null) {
 			logTap.accept("说：" + message.getString());

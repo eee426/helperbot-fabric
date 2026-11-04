@@ -78,12 +78,7 @@ public class FetchWaterTask implements BotTask {
 			case TRAVEL -> travel(bot);
 			case GOTO -> approach(bot);
 			case FILL -> fill(bot);
-			case RETURN -> {
-				if (requester.hasDisconnected()) {
-					yield Status.FAILED;
-				}
-				yield ComeTask.followTick(bot, requester, mode, returnLeg);
-			}
+			case RETURN -> ComeTask.followTick(bot, requester, mode, returnLeg);
 		};
 	}
 
