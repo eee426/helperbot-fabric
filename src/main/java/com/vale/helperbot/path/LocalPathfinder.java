@@ -20,6 +20,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.LongPredicate;
 import java.util.function.Predicate;
+import java.util.function.ToDoubleFunction;
 
 /**
  * A* over foot cells inside a small window around the bot. A node is the block cell that
@@ -179,6 +180,14 @@ public final class LocalPathfinder implements Planner {
 	private final boolean partial;
 	private final double heuristicWeight;
 	/**
+	 * Goes through the window to the end, however far: no stopping at its edge, no leaning. If the
+	 * goal isn't in it, the path ends at the cell that was best by {@link #ahead}. For places that
+	 * can't be dug through, where the way that looks best is what ends in a dead end.
+	 */
+	private final boolean whole;
+	/** What's left to go from a cell, if the caller knows better than the distance to the target. */
+	private final ToDoubleFunction<BlockPos> ahead;
+	/**
 	 * What's left beyond the window. Only for partial searches: there it decides which edge of the
 	 * window to head for (up to the surface to run, or on through the rock). Searches that can see
 	 * the target keep plain running distance, which never overestimates.
@@ -211,6 +220,16 @@ public final class LocalPathfinder implements Planner {
 	public LocalPathfinder(BlockGetter level, Inventory inventory, Mode mode, int maxDrop, BlockPos start, double startFloor,
 						   PathGoal goal, BlockPos target, boolean horizontalOnly, Limits limits,
 						   LongPredicate avoid, Air.Profile air, LongPredicate favored) {
+		this(level, inventory, mode, maxDrop, start, startFloor, goal, target, horizontalOnly, limits, avoid, air, favored, false, null);
+	}
+
+	/** @param whole see {@link #whole}; @param ahead see {@link #ahead}, or null */
+	public LocalPathfinder(BlockGetter level, Inventory inventory, Mode mode, int maxDrop, BlockPos start, double startFloor,
+						   PathGoal goal, BlockPos target, boolean horizontalOnly, Limits limits,
+						   LongPredicate avoid, Air.Profile air, LongPredicate favored,
+						   boolean whole, ToDoubleFunction<BlockPos> ahead) {
+		this.whole = whole;
+		this.ahead = ahead;
 		this.avoid = avoid;
 		this.favored = favored;
 		this.air = air;
@@ -227,9 +246,9 @@ public final class LocalPathfinder implements Planner {
 		this.goal = goal;
 		this.walkCost = 1.0 / mode.speed();
 		this.canBuild = com.vale.helperbot.guard.Rules.open() && BuildingBlocks.count(inventory) > 0;
-		this.partial = horizontalOnly
+		this.partial = !whole && (horizontalOnly
 				? Math.max(Math.abs(target.getX() - start.getX()), Math.abs(target.getZ() - start.getZ())) > limits.radiusXZ()
-				: !inWindow(target);
+				: !inWindow(target));
 		this.heuristicWeight = partial ? PARTIAL_HEURISTIC_WEIGHT : 1.0;
 		this.travel = new TravelEstimate(level, inventory, mode, target, horizontalOnly);
 
@@ -318,6 +337,9 @@ public final class LocalPathfinder implements Planner {
 
 	/** Where a path that doesn't reach the goal should end (see {@link #PARTIAL_WEIGHTS}). */
 	private Node partialEnd() {
+		if (whole) {
+			return closest;
+		}
 		for (Node n : bestPartial) {
 			if (n.pos.distSqr(origin) >= MIN_PARTIAL_BLOCKS * MIN_PARTIAL_BLOCKS) {
 				return n;
@@ -659,7 +681,7 @@ public final class LocalPathfinder implements Planner {
 	}
 
 	private double heuristic(BlockPos pos) {
-		return partial ? travel.ticks(pos) : travel.straight(pos);
+		return ahead != null ? ahead.applyAsDouble(pos) : partial ? travel.ticks(pos) : travel.straight(pos);
 	}
 
 	private static Result reconstruct(Node node, boolean reachesGoal) {

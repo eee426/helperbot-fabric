@@ -669,6 +669,95 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.PEONY, 2, Mode.NORMAL);
 				}, Scenario.has(Items.PEONY, 2, c -> !c.logHas("重新选工具"), "说手里的东西挖不出（拿上半截当没有掉落）")),
 
+				new Scenario("Z6", "大保护区中间，要用工作台：走出去再放，不连败 3 次放弃", 5 * MINUTE, (a, bot, me) -> {
+					zoneWithDeadEnds(a);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.OAK_PLANKS, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.WOODEN_PICKAXE, 1, Mode.NORMAL);
+				}, Scenario.has(Items.WOODEN_PICKAXE, 1)),
+
+				new Scenario("Z7", "大保护区中间，树在区外，脚下的群系就长树：走出去才看得到", 5 * MINUTE, (a, bot, me) -> {
+					zoneWithDeadEnds(a);
+					a.tree(110, 0, 5);
+					a.tree(-110, 0, 5);
+					a.tree(0, 110, 5);
+					a.tree(0, -110, 5);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.OAK_LOG, 1, Mode.NORMAL);
+				}, Scenario.has(Items.OAK_LOG, 1)),
+
+				new Scenario("Z8", "回字形保护区：旁边的洞不算出去，要走到真外面", 5 * MINUTE, (a, bot, me) -> {
+					for (int cx = -5; cx <= 5; cx++) {
+						for (int cz = -5; cz <= 5; cz++) {
+							if (cx != 2 || cz != 0) {
+								protect(a, cx * 16, cz * 16); // the chunk two along is a hole
+							}
+						}
+					}
+					a.tree(100, 0, 5);
+					a.tree(-100, 0, 5);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.OAK_LOG, 1, Mode.NORMAL);
+				}, Scenario.has(Items.OAK_LOG, 1)),
+
+				new Scenario("Z9", "凹字形保护区，从缺口里面穿过到对面：不原路进出来回", 5 * MINUTE, (a, bot, me) -> {
+					for (int cx = -4; cx <= 4; cx++) {
+						for (int cz = -5; cz <= 5; cz++) {
+							if (cx >= -1 || Math.abs(cz) > 1) {
+								protect(a, cx * 16, cz * 16); // open to the west, closed to the east
+							}
+						}
+					}
+					teleport(bot, a, -30, 41, 0);
+					me.setPos(a.origin.getX() + 110.5, Arena.SURFACE, a.origin.getZ() + 0.5); // not a teleport: no client to answer it
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.ended() ? (c.bot().getX() - c.arena().origin.getX() > 90 ? Scenario.Outcome.pass("穿过去了")
+						: Scenario.Outcome.fail("没到")) : null),
+
+				new Scenario("Z10", "保护区比视距大得多（中心到边 200 多格）：一段一段走出去", 6 * MINUTE, (a, bot, me) -> {
+					// These tests see 112 blocks out: the first searches can't reach the edge at all.
+					for (int cx = -13; cx <= 13; cx++) {
+						for (int cz = -13; cz <= 13; cz++) {
+							protect(a, cx * 16, cz * 16);
+						}
+					}
+					a.fill(60, 41, -30, 60, 44, 30, Blocks.STONE); // in the way of the shortest way out, east
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.OAK_PLANKS, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.WOODEN_PICKAXE, 1, Mode.NORMAL);
+				}, Scenario.has(Items.WOODEN_PICKAXE, 1)),
+
+				new Scenario("Z11", "大保护区中间打猎，牛在区外：走出去打", 5 * MINUTE, (a, bot, me) -> {
+					zoneWithDeadEnds(a);
+					for (int i = 0; i < 3; i++) {
+						a.spawn(EntityType.COW, -118, 41, -2 + i * 2);
+						a.spawn(EntityType.COW, 118, 41, -2 + i * 2);
+						a.spawn(EntityType.COW, -2 + i * 2, 41, 118);
+						a.spawn(EntityType.COW, -2 + i * 2, 41, -118);
+					}
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.BEEF, 1, Mode.NORMAL);
+				}, Scenario.has(Items.BEEF, 1)),
+
+				new Scenario("Z12", "大保护区中间打水，水在区外：走出去打", 5 * MINUTE, (a, bot, me) -> {
+					zoneWithDeadEnds(a);
+					a.fill(-120, 40, -3, -115, 40, 3, Blocks.WATER);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BUCKET, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.WATER_BUCKET, 1, Mode.NORMAL);
+				}, Scenario.has(Items.WATER_BUCKET, 1)),
+
 				new Scenario("W43", "要 4 块黏土：3 格深的水底有（浮在水面够得着），25 格外的岸上也有：去岸上", 4 * MINUTE, (a, bot, me) -> {
 					// Reachable from the surface, head out: no dives, but floating it mines 5x slower.
 					a.fill(6, 38, -3, 12, 40, 3, Blocks.WATER);
@@ -910,6 +999,19 @@ public final class Scenarios {
 	private static final int[] ZONE_COUNT = {0};
 
 	/** Protects the chunk holding arena cell (x, z), if it isn't already. */
+	/** 13 by 13 protected chunks (past the view distance of these tests), walls making dead ends to the east and north. */
+	private static void zoneWithDeadEnds(Arena a) {
+		for (int cx = -6; cx <= 6; cx++) {
+			for (int cz = -6; cz <= 6; cz++) {
+				protect(a, cx * 16, cz * 16);
+			}
+		}
+		// A pocket open to the west only: the nearest edges of the area, east and north, are behind its wall.
+		a.fill(40, 41, -40, 40, 44, 40, Blocks.STONE);
+		a.fill(-20, 41, -40, 40, 44, -40, Blocks.STONE);
+		a.fill(-20, 41, 40, 40, 44, 40, Blocks.STONE);
+	}
+
 	private static void protect(Arena a, int x, int z) {
 		com.vale.helperbot.guard.ProtectionZones.protect(a.level, new net.minecraft.world.level.ChunkPos(a.at(x, 0, z)));
 	}

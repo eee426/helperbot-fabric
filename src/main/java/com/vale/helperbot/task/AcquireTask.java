@@ -1,6 +1,8 @@
 package com.vale.helperbot.task;
 
 import com.vale.helperbot.bot.BotPlayer;
+import com.vale.helperbot.bot.MovementController;
+import com.vale.helperbot.guard.ZoneExit;
 import com.vale.helperbot.knowledge.CraftPlanner;
 import com.vale.helperbot.path.Mode;
 import net.minecraft.network.chat.Component;
@@ -29,7 +31,7 @@ public class AcquireTask implements BotTask {
 	private static final int MAX_PROBLEMS_SHOWN = 4;
 
 	private enum Phase {
-		PLAN, GATHER, HUNT, FILL, CRAFT, SMELT, RETURN
+		PLAN, GATHER, HUNT, FILL, CRAFT, SMELT, LEAVE_ZONE, RETURN
 	}
 
 	private final ServerPlayer requester;
@@ -119,11 +121,13 @@ public class AcquireTask implements BotTask {
 					fill.onEnd(bot, s);
 					fill = null;
 					phase = Phase.PLAN;
+					failedHere |= s == Status.FAILED;
 				}
 				yield Status.RUNNING;
 			}
 			case CRAFT -> stepDone(bot, craft.tick(bot), craft.failure());
 			case SMELT -> stepDone(bot, smelt.tick(bot), smelt.failure());
+			case LEAVE_ZONE -> leaveZone(bot);
 			case RETURN -> ComeTask.followTick(bot, requester, mode, returnLeg);
 		};
 	}
@@ -142,6 +146,7 @@ public class AcquireTask implements BotTask {
 	 * ruled out for this order.
 	 */
 	private void stepFailed(BotPlayer bot, Item what, String how) {
+		failedHere = true;
 		int n = failures.merge(what, 1, Integer::sum);
 		if (n >= MAX_STEP_FAILURES) {
 			noGather.add(what);
@@ -160,13 +165,67 @@ public class AcquireTask implements BotTask {
 			bot.say(requester, failure);
 			bot.log("这一步失败：" + failure);
 		}
+		failedHere |= s == Status.FAILED;
 		craft = null;
 		smelt = null;
 		phase = Phase.PLAN;
 		return Status.RUNNING;
 	}
 
+	/** A step just failed: where it failed may be why (see {@link #tryLeavingZone}). */
+	private boolean failedHere;
+	private int zoneExits;
+	/** Times one order may walk out of a protected area to try again. */
+	private static final int MAX_ZONE_EXITS = 2;
+
+	/**
+	 * The one rule for protected areas, whatever the step: nothing can be gathered, hunted, placed
+	 * or filled in there, and from the middle of a big one the outside isn't even in view. So when a
+	 * step fails, or the order is about to be given up, while it's in one, the place is the likely
+	 * reason: it walks out and starts over, with what failed in there forgotten. True if it's on its way.
+	 */
+	private boolean tryLeavingZone(BotPlayer bot) {
+		if (zoneExits >= MAX_ZONE_EXITS) {
+			return false;
+		}
+		ZoneExit exit = ZoneExit.at(bot.level(), bot.movement().feet());
+		if (exit == null) {
+			return false;
+		}
+		zoneExits++;
+		bot.log("在保护区里做不了，先走出保护区再试");
+		bot.movement().leaveZone(exit, mode);
+		phase = Phase.LEAVE_ZONE;
+		return true;
+	}
+
+	private Status leaveZone(BotPlayer bot) {
+		MovementController.Status status = bot.movement().status();
+		if (status == MovementController.Status.MOVING) {
+			return Status.RUNNING;
+		}
+		if (status == MovementController.Status.ARRIVED) {
+			bot.log("走出保护区了，重新规划");
+			failures.clear();
+			noGather.clear();
+			lastFailure = null;
+			lastAction = null;
+			repeats = 0;
+		} else {
+			lastFailure = "走不出保护区（" + bot.movement().failReason() + "）";
+			bot.log(lastFailure);
+		}
+		bot.movement().stop();
+		phase = Phase.PLAN;
+		return Status.RUNNING;
+	}
+
 	private Status plan(BotPlayer bot) {
+		boolean failed = failedHere;
+		failedHere = false;
+		if (failed && tryLeavingZone(bot)) {
+			return Status.RUNNING;
+		}
 		// A step that made what it makes got somewhere, however like the last one it reads: logs one
 		// by one, each for a different need, read "gather 1 log" four times over and were taken for
 		// a step that keeps failing, while every one of them had worked.
@@ -322,6 +381,10 @@ public class AcquireTask implements BotTask {
 
 	/** Stops. If anything was made, still brings it back. */
 	private Status giveUp(BotPlayer bot, String reason) {
+		// Every way of giving up comes through here: none is final before it has tried outside.
+		if (tryLeavingZone(bot)) {
+			return Status.RUNNING;
+		}
 		int got = count(bot.getInventory()) - startCount;
 		bot.log("放弃：" + reason);
 		if (got > 0) {
@@ -376,6 +439,7 @@ public class AcquireTask implements BotTask {
 			case CRAFT -> "获取 " + what + " → " + craft.describe().getString();
 			case FILL -> "获取 " + what + " → " + fill.describe();
 			case SMELT -> "获取 " + what + " → " + smelt.describe().getString();
+			case LEAVE_ZONE -> "获取 " + what + "：先走出保护区";
 			case RETURN -> "获取 " + what + "：返回";
 		};
 	}

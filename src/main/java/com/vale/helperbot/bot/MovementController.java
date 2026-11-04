@@ -1,7 +1,9 @@
 package com.vale.helperbot.bot;
 
 import com.vale.helperbot.guard.Guard;
+import com.vale.helperbot.guard.ProtectionZones;
 import com.vale.helperbot.guard.Rules;
+import com.vale.helperbot.guard.ZoneExit;
 import com.vale.helperbot.path.Air;
 import com.vale.helperbot.path.BreakTimes;
 import com.vale.helperbot.path.Escape;
@@ -140,6 +142,7 @@ public final class MovementController {
 	 */
 	public void goTo(PathGoal goal, BlockPos target, Mode mode, boolean horizontalOnly) {
 		stop();
+		this.leaving = null;
 		this.goal = goal;
 		this.target = target;
 		this.mode = mode;
@@ -152,6 +155,12 @@ public final class MovementController {
 		this.recoveries = 0;
 		this.frozenTicks = 0;
 		this.goalWork = 0;
+	}
+
+	/** Walk out of the protected area it's in, by the nearest way that leads out. */
+	public void leaveZone(ZoneExit exit, Mode mode) {
+		goTo((w, p) -> exit.outside(w, p), exit.nearestOutside(feet()), mode);
+		leaving = exit;
 	}
 
 	/**
@@ -554,7 +563,54 @@ public final class MovementController {
 		}
 	}
 
+	/**
+	 * In a protected area, where nothing can be dug or built, a wall is a wall: the small windows
+	 * and "go as far as you can see, then think again" that do so well outdoors walk it into dead
+	 * ends. And little needs thinking about there (it can only walk), so one search can take in all
+	 * that's loaded. It finishes what it starts: within what it sees, a dead end is simply never
+	 * chosen. If the way out lies past that, the path ends where it's nearest to it, and it looks
+	 * again from there. False if it isn't in a protected area.
+	 */
+	private boolean startZoneSearch() {
+		BlockPos from = feet();
+		ZoneExit exit = leaving != null ? leaving : ZoneExit.at(bot.level(), from);
+		if (exit == null) {
+			return false;
+		}
+		PathGoal searchGoal = goal;
+		java.util.function.ToDoubleFunction<BlockPos> ahead = null;
+		int reach = Math.max(LocalPathfinder.LEVELS[2].radiusXZ(), (int) Math.sqrt(from.distSqr(target)) + 16);
+		if (leaving != null) {
+			double walk = 1.0 / mode.speed();
+			ahead = p -> exit.blocksOut(p) * walk;
+		} else if (!exit.contains(target)) {
+			// Going through: any way out nearer the target than here will do. One further off is the
+			// way it came in, and it would come straight back in.
+			PathGoal original = goal;
+			BlockPos to = target;
+			double now = flatDistSq(from, to);
+			searchGoal = (w, p) -> original.test(w, p) || (exit.outside(w, p) && flatDistSq(p, to) < now);
+		}
+		int radius = Math.min(reach, (bot.level().getServer().getPlayerList().getViewDistance() + 1) * 16);
+		LocalPathfinder.Limits last = LocalPathfinder.LEVELS[2];
+		bot.log("在保护区里，一次搜完 ±" + radius + " 格" + (leaving != null ? "找出口" : "，目标 " + target.toShortString()));
+		if (search != null) {
+			search.cancel();
+		}
+		search = startSearch(from, bot.getY(), new LocalPathfinder.Limits(radius, last.up(), last.down(), ZONE_NODES), searchGoal, ahead);
+		zoneSearch = true;
+		plannedAt = bot.tickCount;
+		return true;
+	}
+
+	private static double flatDistSq(BlockPos a, BlockPos b) {
+		double dx = a.getX() - b.getX(), dz = a.getZ() - b.getZ();
+		return dx * dx + dz * dz;
+	}
+
 	private void startPlanning(int levelIndex) {
+		zoneSearch = false;
+		zoneRoute = false;
 		if (levelIndex == minLevel) {
 			levels = LocalPathfinder.levels(headUnderwater());
 		}
@@ -575,6 +631,17 @@ public final class MovementController {
 	 * is changing meanwhile. The copying is timed as pathfinding on the server thread.
 	 */
 	private PathJob startSearch(BlockPos start, double startFloor, LocalPathfinder.Limits limits) {
+		return startSearch(start, startFloor, limits, goal, null, false);
+	}
+
+	/** A search through a protected area (see startZoneSearch). */
+	private PathJob startSearch(BlockPos start, double startFloor, LocalPathfinder.Limits limits, PathGoal goal,
+								java.util.function.ToDoubleFunction<BlockPos> ahead) {
+		return startSearch(start, startFloor, limits, goal, ahead, true);
+	}
+
+	private PathJob startSearch(BlockPos start, double startFloor, LocalPathfinder.Limits limits, PathGoal goal,
+								java.util.function.ToDoubleFunction<BlockPos> ahead, boolean whole) {
 		long started = System.nanoTime();
 		Air.Profile air = airProfile();
 		Snapshot world = Snapshot.around(bot.level(), start, limits, air.limited());
@@ -585,7 +652,7 @@ public final class MovementController {
 		it.unimi.dsi.fastutil.longs.LongOpenHashSet avoided = avoidedNow();
 		it.unimi.dsi.fastutil.longs.LongOpenHashSet favored = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(lastPath);
 		PathJob job = new PathJob(new LocalPathfinder(world, tools, mode, mode.maxDropFor(bot.getHealth()), start, startFloor,
-				goal, target, horizontalOnly, limits, avoided::contains, air, favored::contains));
+				goal, target, horizontalOnly, limits, avoided::contains, air, favored::contains, whole, ahead));
 		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
 		return job;
 	}
@@ -655,6 +722,14 @@ public final class MovementController {
 	/** Search windows in use: a small cube first under water (see LocalPathfinder#WATER_LEVELS). */
 	private LocalPathfinder.Limits[] levels = LocalPathfinder.LEVELS;
 	private int plannedAt;
+	/** The search under way is one of startZoneSearch's. */
+	private boolean zoneSearch;
+	/** The path being walked came from one: it's what it should be, not something to second-guess. */
+	private boolean zoneRoute;
+	/** Set while getting out of a protected area is the whole point (see leaveZone). */
+	private ZoneExit leaving;
+	/** Most nodes of a search through a protected area: its window is many times the usual ones. */
+	private static final int ZONE_NODES = 400_000;
 	/** Under water, plan again this often: the world there changes fast (sand, flowing water, kelp). */
 	private static final int WATER_REPLAN_TICKS = 20;
 
@@ -681,9 +756,14 @@ public final class MovementController {
 			return;
 		}
 		LocalPathfinder.Result result = search.result();
-		boolean useful = result.reachesGoal()
+		boolean wasZone = zoneSearch;
+		zoneSearch = false;
+		if (!wasZone && !result.reachesGoal() && !headUnderwater() && startZoneSearch()) {
+			return;
+		}
+		boolean useful = result.reachesGoal() || (wasZone && !result.steps().isEmpty())
 				|| (!result.steps().isEmpty() && search.progressBlocks() >= MIN_USEFUL_PROGRESS);
-		if (!useful && searchLevel < levels.length - 1) {
+		if (!useful && !wasZone && searchLevel < levels.length - 1) {
 			// The last line before a long think: if it never comes back, this says what it was doing.
 			bot.log("±" + search.limits().radiusXZ() + " 格内没有可用的路（用了 " + (bot.tickCount - plannedAt) / 20.0 + " 秒），扩大到 ±"
 					+ levels[searchLevel + 1].radiusXZ() + " 格，目标 " + (target == null ? "（无）" : target.toShortString()));
@@ -706,6 +786,7 @@ public final class MovementController {
 		bot.log("规划出 " + result.steps().size() + " 步（±" + radius + " 格，"
 				+ (result.reachesGoal() ? "能到终点" : "先走一段") + "）");
 		adopt(result);
+		zoneRoute = wasZone;
 		emptyPlans = 0;
 	}
 
@@ -721,7 +802,7 @@ public final class MovementController {
 			finished(lookahead); // only to count its time; it's taken at the end of the path
 			return;
 		}
-		if (path == null || pathReachesGoal || replanRequested || path.size() - index > LOOKAHEAD_STEPS) {
+		if (path == null || pathReachesGoal || replanRequested || zoneRoute || path.size() - index > LOOKAHEAD_STEPS) {
 			return;
 		}
 		for (int i = index; i < path.size(); i++) {
@@ -761,7 +842,7 @@ public final class MovementController {
 		LocalPathfinder.Result result = next.result();
 		boolean useful = result.reachesGoal()
 				|| (!result.steps().isEmpty() && next.progressBlocks() >= MIN_USEFUL_PROGRESS);
-		if (!useful) {
+		if (!useful || (!result.reachesGoal() && ProtectionZones.isProtected(bot.level(), feet()))) {
 			return false; // let the normal planner try (and widen the search if needed)
 		}
 		adopt(result);
@@ -800,7 +881,7 @@ public final class MovementController {
 	}
 
 	private void checkProgress() {
-		if (target == null || status != Status.MOVING || breakingPos != null) {
+		if (target == null || status != Status.MOVING || breakingPos != null || zoneRoute) {
 			return;
 		}
 		BlockPos here = bot.blockPosition();
