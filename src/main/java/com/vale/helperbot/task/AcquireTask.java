@@ -167,6 +167,9 @@ public class AcquireTask implements BotTask {
 			bot.say(requester, failure);
 			bot.log("这一步失败：" + failure);
 		}
+		if (s != Status.FAILED && failure != null && !failure.isEmpty()) {
+			bot.log("这一步没做完：" + failure); // it stopped early with what it had: why, or it looks like it just ended
+		}
 		failedHere |= s == Status.FAILED;
 		craft = null;
 		smelt = null;

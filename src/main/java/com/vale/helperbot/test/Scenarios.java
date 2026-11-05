@@ -31,6 +31,28 @@ public final class Scenarios {
 
 	public static List<Scenario> all() {
 		return List.of(
+				// First in the list: after other scenes, in a sped-up run, a new chunk's entity data may never
+				// turn up, and a furnace won't run without it. Not seen in the game: furnaces work there.
+				new Scenario("W48", "在 30 格宽的水底要烧东西（玩家报告）：游到岸上再放熔炉", 5 * MINUTE, (a, bot, me) -> {
+					a.fill(-30, 30, -30, 30, 40, 30, Blocks.WATER);
+					teleport(bot, a, 0, 30, 0);
+					give(bot, Items.FURNACE, 1);
+					give(bot, Items.RAW_IRON, 1);
+					give(bot, Items.COAL, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.IRON_INGOT, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.IRON_INGOT, 1, c -> !c.logHas("干地方"), "说找不到干地方了")),
+
+				new Scenario("W49", "加载范围内全是水（超过视距）：先往有陆地的地方走，再放熔炉", 6 * MINUTE, (a, bot, me) -> {
+					a.fill(-130, 40, -130, 130, 40, 130, Blocks.WATER);
+					teleport(bot, a, 0, 40, 0);
+					give(bot, Items.FURNACE, 1);
+					give(bot, Items.RAW_IRON, 1);
+					give(bot, Items.COAL, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.IRON_INGOT, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.IRON_INGOT, 1)),
+
 				new Scenario("S1", "跨过沟走到你身边", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(10, 20, -6, 13, 40, 6, Blocks.AIR); // a ravine 4 wide, 20 deep
 					me.teleportTo(a.level, a.origin.getX() + 25.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
@@ -790,7 +812,7 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.OAK_LOG, 1, Mode.NORMAL);
 				}, Scenario.has(Items.OAK_LOG, 1)),
 
-				new Scenario("E2", "牛在 300 格外：探索找到，一圈圈往外扩", 9 * MINUTE, (a, bot, me) -> {
+				new Scenario("E2", "牛在 300 格外：探索找到，一圈圈往外扩", 12 * MINUTE, (a, bot, me) -> {
 					for (int i = 0; i < 2; i++) {
 						a.spawn(EntityType.COW, 300, 41, i);
 						a.spawn(EntityType.COW, -300, 41, i);
