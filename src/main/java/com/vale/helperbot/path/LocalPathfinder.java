@@ -726,7 +726,9 @@ public final class LocalPathfinder implements Planner {
 		List<Candidate> out = new ArrayList<>(16);
 		// In a protected chunk it's a ghost: it can pass through, but not dig or build from there.
 		// Digging and building assume we stand on a full block (or hold still in water).
-		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), Math.abs(cur - p.getY()) < 1e-3);
+		// (On top of a fence it's standing too, half a block up: from there digging may be the only way off.)
+		boolean standing = Math.abs(cur - p.getY()) < 1e-3 || (!isWater(level, p) && BlockTable.top(level.getBlockState(p.below()), level, p.below()) > 1 + 1e-6);
+		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), standing);
 		for (Move move : Moves.ALL) {
 			move.addSteps(this, p, cur, from, out);
 		}
@@ -845,10 +847,17 @@ public final class LocalPathfinder implements Planner {
 			// Swimming at the surface, head out of the water.
 			base = c.getY() + SWIM_FLOOR;
 		} else if (empty) {
-			if (!isPassable(level, c) || !isSupport(level, c.below())) {
+			double under = BlockTable.top(level.getBlockState(c.below()), level, c.below());
+			if (under > 1 + 1e-6 && BlockTable.clean(state)) {
+				// On top of a fence or a wall, half a block up in this cell: where it is if it dropped
+				// onto one, the props of a mineshaft say. Not standable, it was stuck there for good,
+				// with no first step to take. (Only got to from above: it's higher than a jump.)
+				base = c.getY() + under - 1;
+			} else if (!isPassable(level, c) || !isSupport(level, c.below())) {
 				return Double.NaN;
+			} else {
+				base = c.getY();
 			}
-			base = c.getY();
 		} else {
 			// A low block in the feet cell (slab, path, snow layer, carpet) is the ground itself.
 			double top = BlockTable.top(state, level, c);

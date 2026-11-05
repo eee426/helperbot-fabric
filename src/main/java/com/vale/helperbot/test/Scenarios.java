@@ -825,6 +825,16 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.BEEF, 1, Mode.NORMAL);
 				}, Scenario.has(Items.BEEF, 1)),
 
+				new Scenario("M9", "站在一排栅栏顶上（矿井的支撑架）：能走下来，不卡死", 2 * MINUTE, (a, bot, me) -> {
+					// A line of fences with walls of stone beside them: no way off but along the top, or down the end.
+					a.fill(3, 41, -3, 3, 41, 3, Blocks.OAK_FENCE);
+					a.fill(2, 41, -3, 2, 43, 3, Blocks.STONE);
+					a.fill(4, 41, -3, 4, 43, 3, Blocks.STONE);
+					bot.teleportTo(a.level, a.origin.getX() + 3.5, 42.5, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					me.setPos(a.origin.getX() + 3.5, Arena.SURFACE, a.origin.getZ() + 12.5); // not a teleport: no client to answer it
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.ended() ? (c.logHas("找不到路") ? Scenario.Outcome.fail("卡住了") : Scenario.Outcome.pass("走下来了")) : null),
+
 				new Scenario("W43", "要 4 块黏土：3 格深的水底有（浮在水面够得着），25 格外的岸上也有：去岸上", 4 * MINUTE, (a, bot, me) -> {
 					// Reachable from the surface, head out: no dives, but floating it mines 5x slower.
 					a.fill(6, 38, -3, 12, 40, 3, Blocks.WATER);
@@ -1128,7 +1138,7 @@ public final class Scenarios {
 
 	/** Is there really nowhere to mine it from? Null if so, otherwise where. */
 	private static String verdictOn(Arena a, BotPlayer bot, BlockPos block, BlockPos from, int air, int full) {
-		var goal = com.vale.helperbot.task.GatherTask.reachGoal(block, bot.blockInteractionRange() - 0.3, bot.getEyeHeight(), true);
+		var goal = com.vale.helperbot.task.MineSpot.reachGoal(block, bot.blockInteractionRange() - 0.3, bot.getEyeHeight(), true);
 		for (BlockPos p : BlockPos.betweenClosed(block.offset(-5, -5, -5), block.offset(5, 5, 5))) {
 			if (!Double.isNaN(com.vale.helperbot.path.LocalPathfinder.floorHeight(a.level, p)) && goal.test(a.level, p)) {
 				return "能站在 " + p.toShortString() + " 挖到";

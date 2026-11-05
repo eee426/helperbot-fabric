@@ -59,7 +59,6 @@ public class GatherTask implements BotTask {
 	/** Looked through when already standing in the right biome (about the usual view distance). */
 	private static final int WIDE_SCAN_CHUNKS = 10;
 	private static final int MAX_TRAVEL_FAILURES = 4;
-	private static final double REACH_MARGIN = 0.3;
 
 	private enum Phase {
 		PREPARE, FIND, MAP, LOCATE, TRAVEL, APPROACH, MINE, FETCH, RETURN
@@ -106,120 +105,6 @@ public class GatherTask implements BotTask {
 	}
 	/** How many of the nearest targets are compared each time it picks the next one. */
 	private static final int TARGETS_COMPARED = 12;
-
-	/**
-	 * Rough ticks to go and mine {@code p}, or NaN if it can't: there must be a spot to stand (or
-	 * swim) within reach of it; under water each block must fit in one breath, and it pays for all
-	 * the blocks still wanted from such a spot, dives and breaths included (see Air#diving): what's
-	 * near but under water loses to dry land further off, unless it's only a block or two more.
-	 */
-	private double targetCost(BotPlayer bot, BlockPos p, Escape escape) {
-		ServerLevel level = bot.level();
-		double reach = bot.blockInteractionRange() - REACH_MARGIN;
-		Vec3 center = Vec3.atCenterOf(p);
-		BlockState state = level.getBlockState(p);
-		// With the tool it will really use for this block (not just the fastest in the bag).
-		int slot = toolFor.getOrDefault(state.getBlock(), MovementController.HAND);
-		ItemStack tool = slot >= 0 ? bot.getInventory().getItem(slot) : ItemStack.EMPTY;
-		int dig = BreakTimes.estimateTicksWith(tool, level, p, state);
-		if (dig == Integer.MAX_VALUE) {
-			return Double.NaN;
-		}
-		double waterFactor = Air.waterDigFactor(bot);
-		Air.Profile air = bot.movement().airProfile();
-		int blocks = (int) Math.ceil(Math.max(1, wanted - collected(bot)) / Math.max(0.01, DropAnalysis.rate(item, state.getBlock())));
-		double bestNeed = Double.NaN;
-		boolean anyStand = false;
-		boolean mustSee = exposed(level, p);
-		int r = (int) Math.ceil(reach);
-		search:
-		for (int dy = -r - 1; dy <= r; dy++) {
-			for (int dx = -r; dx <= r; dx++) {
-				for (int dz = -r; dz <= r; dz++) {
-					BlockPos q = p.offset(dx, dy, dz);
-					Vec3 eye = new Vec3(q.getX() + 0.5, q.getY() + bot.getEyeHeight(), q.getZ() + 0.5);
-					// A spot by the same test the walk there goes by (see reachGoal). Arm's reach alone
-					// counted a kelp in a crack as near: it dived for it again and again, breath after
-					// breath, with a planner that could find nowhere to mine it from.
-					if (q.equals(p) || eye.distanceTo(center) > reach || Double.isNaN(LocalPathfinder.floorHeight(level, q))
-							|| ProtectionZones.isProtected(level, q) || (mustSee && blockerOf(level, eye, p) != null)) {
-						continue;
-					}
-					anyStand = true;
-					double penalty = Air.digPenalty(level, q, waterFactor);
-					if (Air.breathable(level, q) && penalty == 1) {
-						bestNeed = 0; // on the ground, head out: nothing extra to pay
-						break search;
-					}
-					// Floating at the surface it needs no dives, but it does mine that much slower.
-					double work = Air.workUnderWater(dig, penalty);
-					double need = Air.breathable(level, q) ? blocks * work : Air.diving(air, blocks, work, escape.ticks(q));
-					if (Double.isInfinite(need)) {
-						continue; // not on one breath
-					}
-					if (Double.isNaN(bestNeed) || need < bestNeed) {
-						bestNeed = need;
-					}
-				}
-			}
-		}
-		if (!anyStand && !nearWater(level, p)) {
-			// Buried (ore in solid rock, stone under the dirt): nowhere to stand next to it yet, but
-			// digging a way there makes one, like a player would. Costed by what's in the way. (It used
-			// to count as unreachable, so with no stone in the open it never got any cobblestone.)
-			// Under water this isn't done: a dug tunnel floods, and air is a separate question.
-			bestNeed = tunnelCost(bot, p);
-		}
-		if (Double.isNaN(bestNeed)) {
-			return Double.NaN;
-		}
-		// Per item it gives, not per block: a dead bush (about a stick each) before leaves (1 in 50).
-		double perBlock = Math.max(0.01, Math.min(1.0, DropAnalysis.rate(item, state.getBlock())));
-		return (Math.sqrt(p.distSqr(bot.blockPosition())) * 5 + bestNeed) / perBlock;
-	}
-
-	/** In or under water (as opposed to on dry land, or at the water's edge from the shore). */
-	private static boolean inWater(ServerLevel level, BlockPos p) {
-		return LocalPathfinder.isWater(level, p) || LocalPathfinder.isWater(level, p.above());
-	}
-
-	/** Most cells looked at along a tunnel (beyond that it's too far to dig anyway). */
-	private static final int MAX_TUNNEL = 96;
-
-	/**
-	 * Rough ticks to dig straight from the bot to {@code p}: every solid block on the line, at the
-	 * speed of the best tool in the bag. NaN if something on the way can't be mined (bedrock).
-	 */
-	private static double tunnelCost(BotPlayer bot, BlockPos p) {
-		ServerLevel level = bot.level();
-		Vec3 from = bot.getEyePosition();
-		Vec3 to = Vec3.atCenterOf(p);
-		double length = from.distanceTo(to);
-		Set<BlockPos> seen = new HashSet<>();
-		double ticks = 0;
-		for (double d = 0; d < length && seen.size() < MAX_TUNNEL; d += 0.5) {
-			BlockPos c = BlockPos.containing(from.add(to.subtract(from).scale(d / length)));
-			if (c.equals(p) || !seen.add(c) || LocalPathfinder.isPassable(level, c)) {
-				continue;
-			}
-			BlockState s = level.getBlockState(c);
-			int t = BreakTimes.estimateTicks(bot.getInventory(), level, c, s);
-			if (t == Integer.MAX_VALUE || !Guard.canBreak(level, c, s)) {
-				return Double.NaN;
-			}
-			ticks += t;
-		}
-		return ticks;
-	}
-
-	private static boolean nearWater(ServerLevel level, BlockPos p) {
-		for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
-			if (LocalPathfinder.isWater(level, p.relative(d))) {
-				return true;
-			}
-		}
-		return false;
-	}
 
 	/** Blocks that drop the item with a tool we have, and the inventory slot (or HAND) to use. */
 	private final Map<Block, Integer> toolFor = new HashMap<>();
@@ -441,7 +326,7 @@ public class GatherTask implements BotTask {
 		for (java.util.Iterator<BlockPos> it = targets.iterator(); it.hasNext()
 				&& (checked < TARGETS_COMPARED || (sawWater && dryChecked < TARGETS_COMPARED)); ) {
 			BlockPos p = it.next();
-			boolean wet = inWater(level, p);
+			boolean wet = MineSpot.inWater(level, p);
 			if (checked >= TARGETS_COMPARED && wet) {
 				continue; // past the nearest few: only looking for dry ones now
 			}
@@ -450,7 +335,7 @@ public class GatherTask implements BotTask {
 			if (!wet) {
 				dryChecked++;
 			}
-			double cost = targetCost(bot, p, escape);
+			double cost = MineSpot.cost(bot, p, item, toolFor.getOrDefault(level.getBlockState(p).getBlock(), MovementController.HAND), wanted - collected(bot), escape);
 			if (Double.isNaN(cost)) {
 				it.remove();
 				unreachable.judged(p, Air.fullBudget(bot));
@@ -478,7 +363,7 @@ public class GatherTask implements BotTask {
 
 	/** Walk to any spot from which the block is within arm's reach. */
 	private void goNear(BotPlayer bot, BlockPos block) {
-		double reach = bot.blockInteractionRange() - REACH_MARGIN;
+		double reach = MineSpot.reach(bot);
 		// Not from inside a protected chunk: it can't do anything there (see ProtectionZones).
 		ServerLevel level = bot.level();
 		double eyeHeight = bot.getEyeHeight();
@@ -486,56 +371,14 @@ public class GatherTask implements BotTask {
 		// they mine: within reach isn't enough from the bottom of a hole, with the floor in between
 		// (it stopped there, set about mining the floor as "in the way", and gave the block up).
 		// Buried ones (ore in rock) have no such spot: getting close and digging through is the way.
-		bot.movement().goTo(reachGoal(block, reach, eyeHeight, exposed(level, block)), block, mode);
+		bot.movement().goTo(MineSpot.reachGoal(block, reach, eyeHeight, MineSpot.exposed(level, block)), block, mode);
 		// Under water the plan must leave air to mine it too, not just to get there and back.
 		BlockState state = level.getBlockState(block);
-		int dry = dryTicks(bot, block, state, behind != null ? MovementController.AUTO_TOOL
+		int dry = MineSpot.dryTicks(bot, block, state, behind != null ? MovementController.AUTO_TOOL
 				: toolFor.getOrDefault(state.getBlock(), MovementController.HAND));
 		if (dry != Integer.MAX_VALUE) {
 			bot.movement().workAtGoal(dry);
 		}
-	}
-
-	/** With a face open to air or water (not buried in rock). */
-	private static boolean exposed(ServerLevel level, BlockPos block) {
-		for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
-			BlockPos n = block.relative(d);
-			if (LocalPathfinder.isPassable(level, n) || LocalPathfinder.isWater(level, n)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/** A spot to mine {@code block} from: within reach, not in a protected chunk, and if {@code mustSee}, with it in sight. */
-	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee) {
-		Vec3 center = Vec3.atCenterOf(block);
-		return (w, p) -> {
-			if (p.equals(block) || ProtectionZones.isProtected(w, p)) {
-				return false;
-			}
-			Vec3 eye = new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5);
-			return eye.distanceTo(center) <= reach && (!mustSee || blockerOf(w, eye, block) == null);
-		};
-	}
-
-	/**
-	 * What's in the line of sight from {@code eye} to the block, or null if nothing: the one check
-	 * for both where to stand (goNear) and what to mine first (mine). They used to look differently
-	 * (one at the blocks' collision boxes from the middle of the cell, the other at their outlines from
-	 * the real eye), and it chose a spot to stand that the mining then found blocked.
-	 */
-	private static BlockPos blockerOf(net.minecraft.world.level.BlockGetter world, Vec3 eye, BlockPos block) {
-		BlockHitResult hit = world.clip(new ClipContext(eye, Vec3.atCenterOf(block), ClipContext.Block.OUTLINE,
-				ClipContext.Fluid.NONE, net.minecraft.world.phys.shapes.CollisionContext.empty()));
-		return hit.getType() == HitResult.Type.BLOCK && !hit.getBlockPos().equals(block) ? hit.getBlockPos() : null;
-	}
-
-	/** Ticks to mine it on dry land with this tool (a slot, the hand, or the best there is), or MAX_VALUE if it can't be. */
-	private static int dryTicks(BotPlayer bot, BlockPos pos, BlockState state, int tool) {
-		return tool == MovementController.AUTO_TOOL
-				? BreakTimes.estimateTicks(bot.getInventory(), bot.level(), pos, state)
-				: BreakTimes.estimateTicksWith(tool >= 0 ? bot.getInventory().getItem(tool) : ItemStack.EMPTY, bot.level(), pos, state);
 	}
 
 	/** None around: on to the next place that may have it (see Explorer). */
@@ -714,42 +557,9 @@ public class GatherTask implements BotTask {
 			phase = Phase.APPROACH;
 			return Status.RUNNING;
 		}
-		// Like a player, the bot has to see the block: if something is in the way, that's the next job.
-		BlockPos blocker = blockerOf(level, eye, current);
+		BlockPos blocker = MineSpot.blockerOf(level, eye, current);
 		if (blocker != null) {
-			BlockState blockerState = level.getBlockState(blocker);
-			if (behind == null && toolFor.containsKey(blockerState.getBlock()) && DropAnalysis.dropsFrom(item, blockerState)
-					&& Guard.canHarvest(level, blocker, blockerState)) {
-				// The blocker is something we want too: take it first, and the one behind it next
-				// (back on the list: it was taken off when picked, and used to be forgotten, leaving
-				// part of an ore vein behind).
-				if (!targets.contains(current)) {
-					targets.add(current);
-				}
-				targets.remove(blocker);
-				current = blocker;
-				currentBlock = blockerState.getBlock();
-				return Status.RUNNING;
-			}
-			if (!Guard.canBreak(level, blocker, blockerState)) {
-				bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
-						+ realTarget().toShortString() + "，又不能挖，换下一个目标");
-				dropTarget(bot);
-				return nextTarget(bot);
-			}
-			// A job of its own (see behind): planned like any block (a spot to stand, a breath for
-			// it), with the target next.
-			if (behind == null) {
-				behind = current;
-				behindBlock = currentBlock;
-			}
-			bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
-					+ itemName().getString() + "，先挖它");
-			current = blocker;
-			currentBlock = blockerState.getBlock();
-			goNear(bot, current);
-			phase = Phase.APPROACH;
-			return Status.RUNNING;
+			return clearTheView(bot, blocker);
 		}
 		// Mining what was only in the way: the best tool for it, nothing to check about its drops.
 		boolean obstacle = behind != null;
@@ -758,15 +568,7 @@ public class GatherTask implements BotTask {
 		int tool = obstacle ? MovementController.AUTO_TOOL : toolFor.getOrDefault(currentBlock, MovementController.HAND);
 		// The slot was worked out earlier; the player may have rearranged the bag since.
 		if (tool >= 0 && bot.getInventory().getItem(tool).getItem() != toolItems.get(currentBlock)) {
-			bot.log("工具位置变了，重新确认工具");
-			if (!refreshTools(bot, new HashSet<>(toolFor.keySet()))) {
-				return toolsGone(bot);
-			}
-			if (!toolFor.containsKey(currentBlock)) {
-				reject(bot, current);
-				return nextTarget(bot); // no tool left for this kind of block, but for others
-			}
-			return Status.RUNNING;
+			return toolMoved(bot);
 		}
 		if (!bot.movement().isBreaking(aim)) {
 			Status air = airCheck(bot, aim, aimBlock, tool);
@@ -782,6 +584,63 @@ public class GatherTask implements BotTask {
 		int plannedTool = tool;
 		java.util.function.Predicate<ItemStack> handOk = obstacle ? null : held -> handFits(bot, targetState, held, plannedTool);
 		MovementController.MineResult result = bot.movement().mineTarget(aim, aimBlock, tool, obstacle, handOk);
+		return afterHit(bot, result, aim, aimBlock, tool, obstacle, targetState);
+	}
+
+	/** Like a player, the bot has to see the block: what's in the way is the next job. */
+	private Status clearTheView(BotPlayer bot, BlockPos blocker) {
+		ServerLevel level = bot.level();
+		BlockState blockerState = level.getBlockState(blocker);
+		if (behind == null && toolFor.containsKey(blockerState.getBlock()) && DropAnalysis.dropsFrom(item, blockerState)
+				&& Guard.canHarvest(level, blocker, blockerState)) {
+			// The blocker is something we want too: take it first, and the one behind it next
+			// (back on the list: it was taken off when picked, and used to be forgotten, leaving
+			// part of an ore vein behind).
+			if (!targets.contains(current)) {
+				targets.add(current);
+			}
+			targets.remove(blocker);
+			current = blocker;
+			currentBlock = blockerState.getBlock();
+			return Status.RUNNING;
+		}
+		if (!Guard.canBreak(level, blocker, blockerState)) {
+			bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
+					+ realTarget().toShortString() + "，又不能挖，换下一个目标");
+			dropTarget(bot);
+			return nextTarget(bot);
+		}
+		// A job of its own (see behind): planned like any block (a spot to stand, a breath for
+		// it), with the target next.
+		if (behind == null) {
+			behind = current;
+			behindBlock = currentBlock;
+		}
+		bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
+				+ itemName().getString() + "，先挖它");
+		current = blocker;
+		currentBlock = blockerState.getBlock();
+		goNear(bot, current);
+		phase = Phase.APPROACH;
+		return Status.RUNNING;
+	}
+
+	/** The tool isn't where it was (the player rearranged the bag): work it out again. */
+	private Status toolMoved(BotPlayer bot) {
+		bot.log("工具位置变了，重新确认工具");
+		if (!refreshTools(bot, new HashSet<>(toolFor.keySet()))) {
+			return toolsGone(bot);
+		}
+		if (!toolFor.containsKey(currentBlock)) {
+			reject(bot, current);
+			return nextTarget(bot); // no tool left for this kind of block, but for others
+		}
+		return Status.RUNNING;
+	}
+
+	/** What came of this tick's mining. */
+	private Status afterHit(BotPlayer bot, MovementController.MineResult result, BlockPos aim, Block aimBlock, int tool,
+							boolean obstacle, BlockState targetState) {
 		if (result == MovementController.MineResult.WRONG_HAND) {
 			ItemStack held = bot.getMainHandItem();
 			bot.log("手里的东西挖不出" + itemName().getString() + "：计划用 " + toolName(bot, tool) + "，手里是 "
@@ -847,7 +706,7 @@ public class GatherTask implements BotTask {
 			// its place (hardness 100: "3750 seconds") and skip a perfectly good target.
 			return null;
 		}
-		int dig = dryTicks(bot, aim, state, tool);
+		int dig = MineSpot.dryTicks(bot, aim, state, tool);
 		if (dig == Integer.MAX_VALUE) {
 			return null; // can't be mined at all: the mining step says so
 		}

@@ -541,7 +541,7 @@ public final class MovementController {
 			// Not where the next step starts (fell into a hole someone dug, got pushed...): the rest
 			// of this path no longer applies.
 			if (path != null && index < path.size() && !feet().equals(path.get(index).from())) {
-				replan("不在这一步的起点（被推开或掉下去了）");
+				replan("不在这一步的起点（被推开或掉下去了）：在 " + feet().toShortString() + "，应该在 " + path.get(index).from().toShortString());
 			}
 			// Under water: re-plan every second from what's there now (quietly, it's routine).
 			if (path != null && headUnderwater() && bot.tickCount - plannedAt > WATER_REPLAN_TICKS) {
