@@ -173,7 +173,7 @@ final class Station {
 					}
 					for (int i = 0; i < 16; i++) {
 						for (int j = 0; j < 16; j++) {
-							BlockPos q = new BlockPos(x * 16 + i, chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, i, j) + 1, z * 16 + j);
+							BlockPos q = new BlockPos(x * 16 + i, chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, i, j) + 1, z * 16 + j);
 							double d = q.distSqr(feet);
 							if (d < bestDist && roomBeside(level, q) && !unreachable.covers(q, breath, feet)) {
 								best = q;

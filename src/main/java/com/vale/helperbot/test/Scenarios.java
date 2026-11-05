@@ -31,27 +31,38 @@ public final class Scenarios {
 
 	public static List<Scenario> all() {
 		return List.of(
-				// First in the list: after other scenes, in a sped-up run, a new chunk's entity data may never
-				// turn up, and a furnace won't run without it. Not seen in the game: furnaces work there.
-				new Scenario("W48", "在 30 格宽的水底要烧东西（玩家报告）：游到岸上再放熔炉", 5 * MINUTE, (a, bot, me) -> {
+				new Scenario("W50", "水底要放工作台，最近的“干地”是够不着的高柱顶（玩家报告）：不左右徘徊，走到岸上", 5 * MINUTE, (a, bot, me) -> {
+					// The top of the pillar says which way, but the search that can see the shore finds the
+					// way there: re-planning from the small window every second, it went back and forth.
+					a.fill(-30, 30, -30, 30, 40, 30, Blocks.WATER);
+					a.fill(4, 30, -8, 5, 62, -7, Blocks.STONE);
+					teleport(bot, a, 0, 30, -8);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.OAK_PLANKS, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.WOODEN_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.WOODEN_PICKAXE, 1, c -> c.logCount("该换气了") <= 2, "来回徘徊，一直换气")),
+
+				new Scenario("W48", "在 30 格宽的水底要合成（玩家报告）：游到岸上再放工作台", 5 * MINUTE, (a, bot, me) -> {
 					a.fill(-30, 30, -30, 30, 40, 30, Blocks.WATER);
 					teleport(bot, a, 0, 30, 0);
-					give(bot, Items.FURNACE, 1);
-					give(bot, Items.RAW_IRON, 1);
-					give(bot, Items.COAL, 1);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.OAK_PLANKS, 3);
+					give(bot, Items.STICK, 2);
 					give(bot, Items.BREAD, 16);
-					return new AcquireTask(me, Items.IRON_INGOT, 1, Mode.AGGRESSIVE);
-				}, Scenario.has(Items.IRON_INGOT, 1, c -> !c.logHas("干地方"), "说找不到干地方了")),
+					return new AcquireTask(me, Items.WOODEN_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.WOODEN_PICKAXE, 1, c -> !c.logHas("干地方"), "说找不到干地方了")),
 
-				new Scenario("W49", "加载范围内全是水（超过视距）：先往有陆地的地方走，再放熔炉", 6 * MINUTE, (a, bot, me) -> {
+				new Scenario("W49", "加载范围内全是水（超过视距）：先往有陆地的地方走，再放工作台", 6 * MINUTE, (a, bot, me) -> {
 					a.fill(-130, 40, -130, 130, 40, 130, Blocks.WATER);
 					teleport(bot, a, 0, 40, 0);
-					give(bot, Items.FURNACE, 1);
-					give(bot, Items.RAW_IRON, 1);
-					give(bot, Items.COAL, 1);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.OAK_PLANKS, 3);
+					give(bot, Items.STICK, 2);
 					give(bot, Items.BREAD, 16);
-					return new AcquireTask(me, Items.IRON_INGOT, 1, Mode.AGGRESSIVE);
-				}, Scenario.has(Items.IRON_INGOT, 1)),
+					return new AcquireTask(me, Items.WOODEN_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.WOODEN_PICKAXE, 1)),
 
 				new Scenario("S1", "跨过沟走到你身边", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(10, 20, -6, 13, 40, 6, Blocks.AIR); // a ravine 4 wide, 20 deep
@@ -774,6 +785,9 @@ public final class Scenarios {
 				new Scenario("Z12", "大保护区中间打水，水在区外：走出去打", 5 * MINUTE, (a, bot, me) -> {
 					zoneWithDeadEnds(a);
 					a.fill(-120, 40, -3, -115, 40, 3, Blocks.WATER);
+					a.fill(115, 40, -3, 120, 40, 3, Blocks.WATER);
+					a.fill(-3, 40, 115, 3, 40, 120, Blocks.WATER);
+					a.fill(-3, 40, -120, 3, 40, -115, Blocks.WATER);
 					teleport(bot, a, 3, 41, 0);
 					give(bot, Items.BUCKET, 1);
 					give(bot, Items.BREAD, 16);

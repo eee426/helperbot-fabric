@@ -823,6 +823,13 @@ public final class MovementController {
 		adopt(result);
 		zoneRoute = wasZone;
 		emptyPlans = 0;
+		if (!wasZone && result.reachesGoal() && searchLevel > minLevel) {
+			// The way there takes a window this wide: plan again from it, not from the small one, which
+			// can't see the goal and heads off the way the target lies. Under water, where it plans
+			// every second, the two took turns: a step along the route, a step back.
+			minLevel = searchLevel;
+			escalatedAtDistance = remaining(bot.blockPosition());
+		}
 	}
 
 	/**
