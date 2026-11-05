@@ -780,6 +780,29 @@ public final class Scenarios {
 					return null;
 				}, Scenarios::decideAgainAndAgain),
 
+				new Scenario("E1", "脚下的群系就长树，树在 250 格外：走出去找，不说“这里已经是这个群系”就放弃", 6 * MINUTE, (a, bot, me) -> {
+					a.tree(250, 0, 5);
+					a.tree(-250, 0, 5);
+					a.tree(0, 250, 5);
+					a.tree(0, -250, 5);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.OAK_LOG, 1, Mode.NORMAL);
+				}, Scenario.has(Items.OAK_LOG, 1)),
+
+				new Scenario("E2", "牛在 300 格外：探索找到，一圈圈往外扩", 9 * MINUTE, (a, bot, me) -> {
+					for (int i = 0; i < 2; i++) {
+						a.spawn(EntityType.COW, 300, 41, i);
+						a.spawn(EntityType.COW, -300, 41, i);
+						a.spawn(EntityType.COW, i, 41, 300);
+						a.spawn(EntityType.COW, i, 41, -300);
+					}
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.BEEF, 1, Mode.NORMAL);
+				}, Scenario.has(Items.BEEF, 1)),
+
 				new Scenario("W43", "要 4 块黏土：3 格深的水底有（浮在水面够得着），25 格外的岸上也有：去岸上", 4 * MINUTE, (a, bot, me) -> {
 					// Reachable from the surface, head out: no dives, but floating it mines 5x slower.
 					a.fill(6, 38, -3, 12, 40, 3, Blocks.WATER);
@@ -827,7 +850,7 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.CLAY_BALL, 4, Mode.NORMAL);
 				}, Scenario.has(Items.CLAY_BALL, 4)),
 
-				new Scenario("W40", "同上但饿着（不能疾跑）：一口气不够，不下去", 3 * MINUTE, (a, bot, me) -> {
+				new Scenario("W40", "同上但饿着（不能疾跑）：一口气不够，不下去（去别处找）", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(6, 30, -2, 10, 40, 2, Blocks.WATER);
 					a.set(8, 29, 0, Blocks.CLAY);
 					teleport(bot, a, 3, 41, 0);
@@ -835,7 +858,7 @@ public final class Scenarios {
 					bot.getFoodData().setSaturation(0);
 					return new AcquireTask(me, Items.CLAY_BALL, 4, Mode.NORMAL);
 				}, c -> c.bot().getY() < 34 ? Scenario.Outcome.fail("下去了")
-						: c.ended() ? Scenario.Outcome.pass("没下去") : null),
+						: c.ended() || c.ticks() > MINUTE ? Scenario.Outcome.pass("没下去") : null),
 
 				new Scenario("W41", "站在结冰的池塘上，黏土在 4 格深的水底：凿开脚下的冰下去挖，从洞口上来", 4 * MINUTE, (a, bot, me) -> {
 					// Nothing tells it to come back by the hole: the hole is simply the cheapest way up.

@@ -42,6 +42,7 @@ public class AcquireTask implements BotTask {
 	private final Set<Item> noGather = new HashSet<>();
 	private final Set<Item> planItems = new HashSet<>();
 	private final OutOfReach outOfReach = new OutOfReach();
+	private final Map<Item, Explorer> explorers = new java.util.HashMap<>();
 	private Phase phase = Phase.PLAN;
 	private int startCount = -1;
 	private boolean announced;
@@ -298,12 +299,12 @@ public class AcquireTask implements BotTask {
 		switch (next) {
 			case CraftPlanner.Gather g -> {
 				gatherItem = g.item();
-				gather = new GatherTask(requester, g.item(), g.count(), mode, true, outOfReach);
+				gather = new GatherTask(requester, g.item(), g.count(), mode, true, outOfReach, explorers);
 				phase = Phase.GATHER;
 			}
 			case CraftPlanner.Hunt h -> {
 				huntItem = h.item();
-				hunt = new HuntTask(requester, h.item(), h.count(), mode, h.sources());
+				hunt = new HuntTask(requester, h.item(), h.count(), mode, h.sources(), explorers);
 				phase = Phase.HUNT;
 			}
 			case CraftPlanner.Fill f -> {

@@ -64,7 +64,7 @@ public class GatherTask implements BotTask {
 	private static final double REACH_MARGIN = 0.3;
 
 	private enum Phase {
-		PREPARE, FIND, LOCATE, TRAVEL, APPROACH, MINE, FETCH, RETURN
+		PREPARE, FIND, MAP, LOCATE, TRAVEL, APPROACH, MINE, FETCH, RETURN
 	}
 
 	private final ServerPlayer requester;
@@ -100,6 +100,8 @@ public class GatherTask implements BotTask {
 	 * spending some health under water, every deep block was out of reach for the rest of the task.
 	 */
 	private final OutOfReach unreachable;
+	/** For this item, the whole order long (see Explorer). */
+	private final Map<Item, Explorer> explorers;
 
 	private boolean outOfReach(BotPlayer bot, BlockPos pos) {
 		return unreachable.covers(pos, Air.fullBudget(bot), bot.blockPosition());
@@ -248,11 +250,12 @@ public class GatherTask implements BotTask {
 	private final boolean asStep;
 
 	public GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode) {
-		this(requester, item, wanted, mode, false, new OutOfReach());
+		this(requester, item, wanted, mode, false, new OutOfReach(), new HashMap<>());
 	}
 
-	GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode, boolean asStep, OutOfReach unreachable) {
+	GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode, boolean asStep, OutOfReach unreachable, Map<Item, Explorer> explorers) {
 		this.unreachable = unreachable;
+		this.explorers = explorers;
 		this.requester = requester;
 		this.item = item;
 		this.wanted = wanted;
@@ -306,6 +309,7 @@ public class GatherTask implements BotTask {
 		return switch (phase) {
 			case PREPARE -> prepare(bot);
 			case FIND -> find(bot);
+			case MAP -> lookFurther(bot);
 			case LOCATE -> locate(bot);
 			case TRAVEL -> travel(bot);
 			case APPROACH -> approach(bot);
@@ -382,13 +386,7 @@ public class GatherTask implements BotTask {
 		if (!targets.isEmpty()) {
 			return nextTarget(bot);
 		}
-		if (!triedBiome) {
-			triedBiome = true;
-			return startLocate(bot);
-		}
-		return giveUp(bot, travelTarget != null
-				? "到了会生成它的群系，但已加载的区域里没找到"
-				: "附近已加载的区域里没有");
+		return lookFurther(bot);
 	}
 
 	private List<BlockPos> scan(BotPlayer bot, int chunkRadius) {
@@ -547,7 +545,8 @@ public class GatherTask implements BotTask {
 				: BreakTimes.estimateTicksWith(tool >= 0 ? bot.getInventory().getItem(tool) : ItemStack.EMPTY, bot.level(), pos, state);
 	}
 
-	private Status startLocate(BotPlayer bot) {
+	/** None around: on to the next place that may have it (see Explorer). */
+	private Status lookFurther(BotPlayer bot) {
 		ServerLevel level = bot.level();
 		if (biomes == null) {
 			biomes = BiomeHints.biomesFor(level, toolFor.keySet());
@@ -557,6 +556,44 @@ public class GatherTask implements BotTask {
 			// around at random almost never finds such things, so say so instead of pretending.
 			return giveUp(bot, "附近已加载的区域里没有，也不知道该去哪找（它可能只出现在村庄等结构里）");
 		}
+		Explorer explorer = explorers.computeIfAbsent(item, i -> {
+			Map<Holder<Biome>, Double> worth = new HashMap<>();
+			biomes.forEach(b -> worth.put(b, 1.0));
+			return new Explorer(level, bot.blockPosition(), worth, BiomeHints.layerFor(level, toolFor.keySet()) != com.vale.helperbot.knowledge.Habitat.Layer.SURFACE, SCAN_CHUNKS * 16, mode.speed());
+		});
+		if (!explorer.ready()) {
+			phase = Phase.MAP;
+			return Status.RUNNING;
+		}
+		var owner = bot.current(requester);
+		BlockPos next = explorer.timeUp() ? null : explorer.next(level, bot.blockPosition(),
+				owner != null && owner.level() == level ? owner.blockPosition() : null, Math.max(1, wanted - collected(bot)));
+		if (next != null) {
+			if (!announcedExplore) {
+				announcedExplore = true;
+				bot.log("探索地图算好了，用了 " + explorer.tookMillis() + " 毫秒");
+				bot.say(requester, Component.literal("附近没有，到方圆 " + Explorer.RADIUS + " 格内会生成它的地方找……"));
+			}
+			bot.log("去 " + next.getX() + ", " + next.getZ() + " 找");
+			exploring = explorer;
+			startTravel(bot, next);
+			return Status.RUNNING;
+		}
+		if (explorer.nowhereInRange() && !triedBiome) {
+			triedBiome = true;
+			return startLocate(bot);
+		}
+		return giveUp(bot, explorer.timeUp() ? "找了 " + explorer.seconds() / 60 + " 分钟，没找到"
+				: "方圆 " + Explorer.RADIUS + " 格内能去的地方都找过了，没找到");
+	}
+
+	private boolean announcedExplore;
+	/** Set while on the way to one of the explorer's places (not the one trip further off). */
+	private Explorer exploring;
+
+	/** Nowhere in range: the nearest biome that makes it, wherever it is. */
+	private Status startLocate(BotPlayer bot) {
+		ServerLevel level = bot.level();
 		bot.say(requester, Component.literal("附近没有，去找会生成它的群系……"));
 		BlockPos origin = bot.blockPosition();
 		Set<Holder<Biome>> wantedBiomes = biomes;
@@ -614,11 +651,30 @@ public class GatherTask implements BotTask {
 			if (!found.isEmpty()) {
 				targets = found;
 				bot.movement().stop();
+				exploring = null;
 				return nextTarget(bot);
 			}
 		}
+		if (exploring != null) {
+			exploring.tick();
+			if (travelTicks % TRAVEL_SCAN_INTERVAL == 0) {
+				exploring.look(bot.blockPosition());
+			}
+		}
 		MovementController.Status status = bot.movement().status();
-		if (status == MovementController.Status.ARRIVED) {
+		if (status == MovementController.Status.ARRIVED || (exploring != null && exploring.timeUp())) {
+			if (exploring != null) {
+				exploring.leavePlace();
+				exploring = null;
+			} else {
+				explorers.remove(item); // the trip further off: from here it looks around anew
+			}
+			bot.movement().stop();
+			phase = Phase.FIND;
+		} else if (exploring != null && (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE)) {
+			bot.log("去不了那里（" + bot.movement().failReason() + "），换一处");
+			exploring.leavePlace();
+			exploring = null;
 			phase = Phase.FIND;
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
 			if (++travelFailures > MAX_TRAVEL_FAILURES) {
@@ -1032,6 +1088,7 @@ public class GatherTask implements BotTask {
 		return switch (phase) {
 			case PREPARE -> "采集 " + what + "：分析中";
 			case FIND -> "采集 " + what + "：在附近找";
+			case MAP -> "采集 " + what + "：看哪里有";
 			case LOCATE -> "采集 " + what + "：搜索远处的群系";
 			case TRAVEL -> "采集 " + what + "：前往 " + travelTarget.getX() + ", " + travelTarget.getZ();
 			case APPROACH -> "采集 " + what + "：走向 " + current.toShortString();
