@@ -76,8 +76,14 @@ final class Station {
 			if (place(bot)) {
 				return BotTask.Status.DONE;
 			}
-			BlockPos near = findDryGround(bot);
-			dryGround = near != null ? near : nearestShore(bot);
+			// In the water, the shore first: the nearest dry cell may well be a cave shut in under the
+			// bed, right there on the map and no way to it but through the rock, a breath at a time.
+			boolean inWater = LocalPathfinder.isWater(bot.level(), bot.movement().feet());
+			BlockPos shore = inWater ? nearestShore(bot) : null;
+			dryGround = shore != null ? shore : findDryGround(bot);
+			if (dryGround == null) {
+				dryGround = nearestShore(bot);
+			}
 			if (dryGround == null) {
 				return lookForLand(bot);
 			}

@@ -56,8 +56,6 @@ public class GatherTask implements BotTask {
 	private static final int TRAVEL_SCAN_CHUNKS = 3;
 	private static final int TRAVEL_SCAN_INTERVAL = 100;
 	private static final int MAX_DISTANCE = FetchWaterTask.MAX_DISTANCE;
-	/** Give up after this many targets in a row turned out unreachable (any success resets it). */
-	private static final int MAX_UNREACHABLE_IN_ROW = 15;
 	/** Looked through when already standing in the right biome (about the usual view distance). */
 	private static final int WIDE_SCAN_CHUNKS = 10;
 	private static final int MAX_TRAVEL_FAILURES = 4;
@@ -227,7 +225,6 @@ public class GatherTask implements BotTask {
 	private final Map<Block, Integer> toolFor = new HashMap<>();
 	/** The item that was in each tool slot when it was chosen, to notice the player moving it. */
 	private final Map<Block, Item> toolItems = new HashMap<>();
-	private final Set<BlockPos> rejected = new HashSet<>();
 	private List<BlockPos> targets = new ArrayList<>();
 	private BlockPos current;
 	private Block currentBlock;
@@ -378,11 +375,7 @@ public class GatherTask implements BotTask {
 
 	private Status find(BotPlayer bot) {
 		targets = scan(bot, SCAN_CHUNKS);
-		if (targets.isEmpty() && unreachable.forgetOnce()) {
-			bot.log("别的都没有了，把判断为够不着的再看一遍");
-			targets = scan(bot, SCAN_CHUNKS);
-		}
-		bot.log("附近扫描到 " + targets.size() + " 处" + itemName().getString() + "（不算已放弃的 " + rejected.size() + " 处、暂时够不着的 " + unreachable.size() + " 处）");
+		bot.log("附近扫描到 " + targets.size() + " 处" + itemName().getString() + "（不算记下到不了的 " + unreachable.size() + " 处）");
 		if (!targets.isEmpty()) {
 			return nextTarget(bot);
 		}
@@ -393,7 +386,7 @@ public class GatherTask implements BotTask {
 		ServerLevel level = bot.level();
 		return BlockScanner.find(level, bot.blockPosition(), chunkRadius,
 				state -> toolFor.containsKey(state.getBlock()) && DropAnalysis.dropsFrom(item, state),
-				pos -> !rejected.contains(pos) && !outOfReach(bot, pos) && Guard.canHarvest(level, pos, level.getBlockState(pos)),
+				pos -> !outOfReach(bot, pos) && Guard.canHarvest(level, pos, level.getBlockState(pos)),
 				64);
 	}
 
@@ -424,7 +417,7 @@ public class GatherTask implements BotTask {
 			return fetch(bot, bestItem);
 		}
 		// Also drops ones that changed since the scan (berries picked, crop trampled).
-		targets.removeIf(p -> rejected.contains(p) || outOfReach(bot, p) || !toolFor.containsKey(level.getBlockState(p).getBlock())
+		targets.removeIf(p -> outOfReach(bot, p) || !toolFor.containsKey(level.getBlockState(p).getBlock())
 				|| !DropAnalysis.dropsFrom(item, level.getBlockState(p)));
 		if (targets.isEmpty()) {
 			if (bestItem != null) {
@@ -706,10 +699,7 @@ public class GatherTask implements BotTask {
 			phase = Phase.MINE;
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
 			bot.log("走不到 " + current.toShortString() + "（" + bot.movement().failReason() + "），换下一个目标");
-			dropTarget();
-			if (++unreachableInRow >= MAX_UNREACHABLE_IN_ROW) {
-				return giveUp(bot, "连续 " + unreachableInRow + " 处都走不到（最后一次：" + bot.movement().failReason() + "）");
-			}
+			dropTarget(bot);
 			return nextTarget(bot);
 		}
 		return Status.RUNNING;
@@ -744,7 +734,7 @@ public class GatherTask implements BotTask {
 			if (!Guard.canBreak(level, blocker, blockerState)) {
 				bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
 						+ realTarget().toShortString() + "，又不能挖，换下一个目标");
-				dropTarget();
+				dropTarget(bot);
 				return nextTarget(bot);
 			}
 			// A job of its own (see behind): planned like any block (a spot to stand, a breath for
@@ -773,7 +763,7 @@ public class GatherTask implements BotTask {
 				return toolsGone(bot);
 			}
 			if (!toolFor.containsKey(currentBlock)) {
-				reject(current);
+				reject(bot, current);
 				return nextTarget(bot); // no tool left for this kind of block, but for others
 			}
 			return Status.RUNNING;
@@ -800,7 +790,7 @@ public class GatherTask implements BotTask {
 			if (!toolFor.containsKey(currentBlock) || ++handFixes > 2) {
 				bot.log("还是不行，跳过这一块（这是个 bug，请把这段日志发给开发者）");
 				handFixes = 0;
-				dropTarget();
+				dropTarget(bot);
 				return nextTarget(bot);
 			}
 			return Status.RUNNING;
@@ -810,7 +800,7 @@ public class GatherTask implements BotTask {
 		}
 		if (result == MovementController.MineResult.FAILED) {
 			bot.log("挖不了 " + aim.toShortString() + "（" + aimBlock.getName().getString() + "），换下一个目标");
-			dropTarget();
+			dropTarget(bot);
 			return nextTarget(bot);
 		}
 		if (obstacle && (result == MovementController.MineResult.DONE || result == MovementController.MineResult.GONE)) {
@@ -824,7 +814,6 @@ public class GatherTask implements BotTask {
 		}
 		if (result == MovementController.MineResult.DONE) {
 			blocksMined++;
-			unreachableInRow = 0;
 			// Noted to check it dropped what it should (see checkDrop); what came out is a source
 			// like any other now, and the nearest, so usually picked up next.
 			int brokeAt = bot.movement().lastBreakTick();
@@ -874,7 +863,7 @@ public class GatherTask implements BotTask {
 			bot.log(aim.toShortString() + " 的" + state.getBlock().getName().getString() + " 在水下要挖 " + (int) mining / 20
 					+ " 秒（" + toolName(bot, tool) + "，岸上 " + dig + " 刻，站在 " + bot.blockPosition().toShortString()
 					+ (LocalPathfinder.isSupport(level, bot.blockPosition().below()) ? "，站着" : "，浮着") + "），一口气挖不完再游上去，跳过");
-			dropTarget();
+			dropTarget(bot);
 			return nextTarget(bot);
 		}
 		bot.log("剩下的气不够挖完 " + aim.toShortString() + "（要 " + (int) mining / 20 + " 秒），先去换气再挖");
@@ -964,9 +953,9 @@ public class GatherTask implements BotTask {
 		return nextTarget(bot);
 	}
 
-	private void reject(BlockPos pos) {
+	private void reject(BotPlayer bot, BlockPos pos) {
 		if (pos != null) {
-			rejected.add(pos);
+			unreachable.failed(pos, Air.fullBudget(bot), bot.movement().feet());
 		}
 	}
 
@@ -974,7 +963,6 @@ public class GatherTask implements BotTask {
 
 	/** True once it stopped because no tool it has can mine any source any more (worn out, taken). */
 	private boolean toolsGone;
-	private int unreachableInRow;
 	/**
 	 * The target waiting behind the block it's on now, when that block is only in the way (dirt
 	 * over clay): what's in the way is a job like any other, planned and mined on its own (a breath
@@ -991,8 +979,8 @@ public class GatherTask implements BotTask {
 	}
 
 	/** Can't do this target now (and whatever was in its way goes with it). */
-	private void dropTarget() {
-		reject(realTarget());
+	private void dropTarget(BotPlayer bot) {
+		reject(bot, realTarget());
 		behind = null;
 	}
 

@@ -10,34 +10,41 @@ import java.util.List;
  * clock: each entry says what the finding rested on, and holds until that changes, whether that
  * takes a second or an hour. Being wrong costs little either way (a block skipped, or one more
  * short dive that finds the same), so it needn't be right for ever, and it ends with the order.
+ * There's no wiping it to look again when nothing else is left: having gone looking elsewhere,
+ * past {@link #SEARCHED} it no longer holds anyway (it used to, and went straight back to what had
+ * just failed before going anywhere else).
  */
 public final class OutOfReach {
-	/** A search that went through everything also rules out what's around the block. */
+	/** What a thorough finding rules out around the block: the rest of that pocket, or it dives once for each. */
 	private static final int PATCH = 4;
 	/** Past this from where it found out, it may come at it some way it never saw; and that's past what it scans for targets. */
 	private static final int SEARCHED = 100;
 
 	/** {@code from} null: judged by estimate, for that block alone, wherever it stands. */
-	private record Entry(BlockPos pos, int breath, BlockPos from) {
+	private record Entry(BlockPos pos, int breath, BlockPos from, int patch) {
 	}
 
 	private final List<Entry> entries = new ArrayList<>();
-	private boolean forgotten;
 
 	/** An estimate says this block can't be done on a breath of {@code breath}. */
 	public void judged(BlockPos pos, int breath) {
-		entries.add(new Entry(pos, breath, null));
+		entries.add(new Entry(pos, breath, null, 0));
 	}
 
-	/** A search from {@code from} went through all it could reach, breaths included, and this wasn't there. */
+	/** Found out at {@code from}, for this block and what's around it: a search went through everything, or a whole breath wasn't enough. */
 	public void proven(BlockPos pos, int breath, BlockPos from) {
-		entries.add(new Entry(pos, breath, from));
+		entries.add(new Entry(pos, breath, from, PATCH));
+	}
+
+	/** Went wrong at {@code from}, for this block alone: the way was blocked, it couldn't be mined. */
+	public void failed(BlockPos pos, int breath, BlockPos from) {
+		entries.add(new Entry(pos, breath, from, 0));
 	}
 
 	/** Does anything found still hold for this block, with this full breath, standing here? */
 	public boolean covers(BlockPos pos, int breath, BlockPos here) {
 		for (Entry e : entries) {
-			if (breath <= e.breath && (e.from == null ? pos.equals(e.pos) : holds(e, pos, here))) {
+			if (breath <= e.breath && holds(e, pos, here)) {
 				return true;
 			}
 		}
@@ -45,25 +52,13 @@ public final class OutOfReach {
 	}
 
 	private static boolean holds(Entry e, BlockPos pos, BlockPos here) {
-		return Math.abs(pos.getX() - e.pos.getX()) <= PATCH && Math.abs(pos.getY() - e.pos.getY()) <= PATCH
-				&& Math.abs(pos.getZ() - e.pos.getZ()) <= PATCH
-				&& Math.abs(here.getX() - e.from.getX()) <= SEARCHED && Math.abs(here.getZ() - e.from.getZ()) <= SEARCHED;
+		return Math.abs(pos.getX() - e.pos.getX()) <= e.patch && Math.abs(pos.getY() - e.pos.getY()) <= e.patch
+				&& Math.abs(pos.getZ() - e.pos.getZ()) <= e.patch
+				&& (e.from == null || (Math.abs(here.getX() - e.from.getX()) <= SEARCHED && Math.abs(here.getZ() - e.from.getZ()) <= SEARCHED));
 	}
 
 	public int size() {
 		return entries.size();
 	}
 
-	/**
-	 * Nothing else is left: drop it all and look again before giving up, in case something has
-	 * changed that it can't see from here (someone dug a way in). Once an order. True if it did.
-	 */
-	public boolean forgetOnce() {
-		if (forgotten || entries.isEmpty()) {
-			return false;
-		}
-		forgotten = true;
-		entries.clear();
-		return true;
-	}
 }

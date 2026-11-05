@@ -185,17 +185,14 @@ public final class MovementController {
 	private double goalWork;
 
 	/**
-	 * Can the work it came for be done from here on the breath it has (see {@link #workAtGoal})?
-	 * The plan's own goal test (LocalPathfinder#airForWork), on arrival: a route down to a
-	 * standing spot passes cells already within reach on the way, and stopping at the first, afloat,
-	 * mining went 25 times slower than planned and the air ran out.
+	 * With work to do under water, it's there when the plan says so, at the end of a route to the
+	 * goal: only the plan knows where the work fits the breath (LocalPathfinder#airForWork). A route
+	 * down to a standing spot passes cells already within reach on the way, and stopping at the
+	 * first, afloat, mining went 25 times slower than planned and the air ran out.
 	 */
-	private boolean workFitsHere() {
-		if (goalWork <= 0 || engaged || ignoreAir || !headUnderwater()) {
-			return true;
-		}
-		BlockPos f = feet();
-		return Air.enough(Air.budget(bot), escapeTicks(), Air.workUnderWater(goalWork, Air.digPenalty(bot.level(), f, Air.waterDigFactor(bot))));
+	private boolean planDecidesArrival() {
+		return goalWork > 0 && !engaged && !ignoreAir && headUnderwater()
+				&& !(path != null && index >= path.size() && pathReachesGoal);
 	}
 
 	/** Changes the destination; the current step finishes, then a new plan is made. */
@@ -530,7 +527,7 @@ public final class MovementController {
 		}
 		boolean atStepBoundary = !stepStarted && breakIndex == 0 && breakingPos == null;
 		if (atStepBoundary) {
-			if (goal.test(bot.level(), feet()) && workFitsHere()) {
+			if (goal.test(bot.level(), feet()) && !planDecidesArrival()) {
 				// Arrived means at the middle of the cell, which is where plans and goals take it to
 				// stand (what it sees and reaches from there). Pushed or shuffled off it (after picking
 				// something up, say), it saw a block from the middle that was hidden from where it was.
@@ -792,6 +789,11 @@ public final class MovementController {
 		PathJob finished = search;
 		search = null;
 		resetStep();
+		if (result.reachesGoal() && result.steps().isEmpty()) {
+			status = Status.ARRIVED; // it's already where the plan would have it
+			path = null;
+			return;
+		}
 		if (result.steps().isEmpty()) {
 			bot.log("在 ±" + radius + " 格内找不到路：" + finished.diagnose());
 			noPathForAir = finished.airRejected() > 0;
