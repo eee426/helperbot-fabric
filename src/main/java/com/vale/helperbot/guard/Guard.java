@@ -116,24 +116,6 @@ public final class Guard {
 		return cost;
 	}
 
-	/**
-	 * May the bot put down its own crafting table or furnace here for a moment? Allowed under
-	 * strict rules too, since it takes the station back right after using it.
-	 */
-	public static boolean canPlaceStation(BlockGetter level, BlockPos pos) {
-		return !ProtectionZones.isProtected(level, pos)
-				&& level.getBlockState(pos).canBeReplaced()
-				&& level.getFluidState(pos).isEmpty();
-	}
-
-	/** May the bot put a block here? */
-	public static boolean canPlace(BlockGetter level, BlockPos pos) {
-		return Rules.open()
-				&& !ProtectionZones.isProtected(level, pos)
-				&& level.getBlockState(pos).canBeReplaced()
-				&& !level.getFluidState(pos).is(FluidTags.LAVA);
-	}
-
 	/** Lava (lavaOnly) or any liquid next to this block. */
 	private static boolean isNextTo(BlockGetter level, BlockPos pos, boolean lavaOnly) {
 		for (Direction dir : Direction.values()) {

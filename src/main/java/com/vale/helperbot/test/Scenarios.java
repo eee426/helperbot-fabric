@@ -802,7 +802,7 @@ public final class Scenarios {
 					return null;
 				}, Scenarios::decideAgainAndAgain),
 
-				new Scenario("E1", "脚下的群系就长树，树在 250 格外：走出去找，不说“这里已经是这个群系”就放弃", 6 * MINUTE, (a, bot, me) -> {
+				new Scenario("E1", "脚下的群系就长树，树在 250 格外：走出去找，不说“这里已经是这个群系”就放弃", 12 * MINUTE, (a, bot, me) -> {
 					a.tree(250, 0, 5);
 					a.tree(-250, 0, 5);
 					a.tree(0, 250, 5);
@@ -834,6 +834,25 @@ public final class Scenarios {
 					me.setPos(a.origin.getX() + 3.5, Arena.SURFACE, a.origin.getZ() + 12.5); // not a teleport: no client to answer it
 					return new ComeTask(me, Mode.NORMAL);
 				}, c -> c.ended() ? (c.logHas("找不到路") ? Scenario.Outcome.fail("卡住了") : Scenario.Outcome.pass("走下来了")) : null),
+
+				new Scenario("B5", "沟 10 格宽，只有 4 块方块：不走到半路搭不完，换别的路过去", 4 * MINUTE, (a, bot, me) -> {
+					// It used to plan the whole bridge on any block at all, and stood out over the drop with none left.
+					a.fill(8, 20, -40, 17, 40, 40, Blocks.AIR);
+					teleport(bot, a, 3, 41, 0);
+					me.setPos(a.origin.getX() + 25.5, Arena.SURFACE, a.origin.getZ() + 0.5); // not a teleport: no client to answer it
+					give(bot, Items.COBBLESTONE, 4);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.AGGRESSIVE);
+				}, c -> c.ended() ? (c.bot().getX() - c.arena().origin.getX() > 18 ? Scenario.Outcome.pass("过去了") : Scenario.Outcome.fail("没过去"))
+						: null),
+
+				new Scenario("B6", "放方块的每种拒绝原因（不走路）", MINUTE, (a, bot, me) -> {
+					protect(a, 32, 0);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.COBBLESTONE, 8);
+					return null;
+				}, Scenarios::placementReasons),
 
 				new Scenario("W43", "要 4 块黏土：3 格深的水底有（浮在水面够得着），25 格外的岸上也有：去岸上", 4 * MINUTE, (a, bot, me) -> {
 					// Reachable from the surface, head out: no dives, but floating it mines 5x slower.
@@ -1134,6 +1153,28 @@ public final class Scenarios {
 		boolean farOff = !memory.covers(crack, 360, a.at(200, 41, 0));
 		return bigger && farOff ? Scenario.Outcome.pass(rounds.length + " 轮只判断 1 次；气变多或走远才重判")
 				: Scenario.Outcome.fail("气变多：" + bigger + "，走远：" + farOff);
+	}
+
+	/** Each way a block can be refused, and that a free spot isn't. */
+	private static Scenario.Outcome placementReasons(Scenario.Context c) {
+		Arena a = c.arena();
+		var m = c.bot().movement();
+		int slot = com.vale.helperbot.path.BuildingBlocks.bestSlot(c.bot().getInventory());
+		var kind = com.vale.helperbot.guard.Placement.Kind.BUILD;
+		Object[][] cases = {
+				{m.place(c.bot().blockPosition(), slot), com.vale.helperbot.guard.Placement.Refusal.IN_THE_WAY},
+				{m.place(a.at(5, 70, 0), slot), com.vale.helperbot.guard.Placement.Refusal.NOTHING_BESIDE},
+				{m.place(a.at(2, 41, 0), -1), com.vale.helperbot.guard.Placement.Refusal.NO_BLOCKS},
+				{com.vale.helperbot.guard.Placement.check(a.level, a.at(2, 40, 0), kind), com.vale.helperbot.guard.Placement.Refusal.TAKEN},
+				{com.vale.helperbot.guard.Placement.check(a.level, a.at(32, 41, 0), kind), com.vale.helperbot.guard.Placement.Refusal.PROTECTED},
+				{m.place(a.at(2, 41, 0), slot), null},
+		};
+		for (Object[] e : cases) {
+			if (e[0] != e[1]) {
+				return Scenario.Outcome.fail("应该是 " + e[1] + "，实际是 " + e[0]);
+			}
+		}
+		return Scenario.Outcome.pass("原因都对");
 	}
 
 	/** Is there really nowhere to mine it from? Null if so, otherwise where. */

@@ -1,6 +1,7 @@
 package com.vale.helperbot.bot;
 
 import com.vale.helperbot.guard.Guard;
+import com.vale.helperbot.guard.Placement;
 import com.vale.helperbot.guard.ProtectionZones;
 import com.vale.helperbot.guard.Rules;
 import com.vale.helperbot.guard.ZoneExit;
@@ -426,7 +427,7 @@ public final class MovementController {
 	public boolean canSeal() {
 		ServerLevel level = bot.level();
 		BlockPos f = feet(), head = f.above(), top = head.above();
-		if (!headUnderwater() || !LocalPathfinder.isWater(level, top) || !Guard.canPlace(level, top)
+		if (!headUnderwater() || !LocalPathfinder.isWater(level, top) || !Placement.allowed(level, top, Placement.Kind.BUILD)
 				|| BuildingBlocks.bestSlot(bot.getInventory()) < 0) {
 			return false;
 		}
@@ -454,11 +455,13 @@ public final class MovementController {
 	/** Put the block over its head (see {@link #canSeal}). */
 	public boolean seal() {
 		BlockPos top = feet().above(2);
-		boolean ok = placeItem(top, BuildingBlocks.bestSlot(bot.getInventory()));
-		if (ok) {
-			replan("堵住了头顶的井口");
+		Placement.Refusal refused = place(top, BuildingBlocks.bestSlot(bot.getInventory()));
+		if (refused != null) {
+			bot.log("堵井口失败：" + refused.why);
+			return false;
 		}
-		return ok;
+		replan("堵住了头顶的井口");
+		return true;
 	}
 
 	/** Back to what the task was doing before the chase (re-planning from here if it was walking). */
@@ -775,7 +778,8 @@ public final class MovementController {
 		// Not when it's known to lead nowhere: under water that would use up the breath getting
 		// nearer, come up, and start over from the same answer.
 		boolean proven = !wasZone && search.provenUnreachable();
-		String ended = search.hitNodeLimit() ? "，节点到上限，没搜完" : proven ? "，搜完了" : "";
+		String ended = (search.hitNodeLimit() ? "，节点到上限，没搜完" : proven ? "，搜完了" : "")
+				+ (search.blocksShort() > 0 ? "，方块不够" : "");
 		boolean useful = result.reachesGoal() || (wasZone && !result.steps().isEmpty())
 				|| (!proven && !result.steps().isEmpty() && search.progressBlocks() >= MIN_USEFUL_PROGRESS);
 		if (!useful && !wasZone && searchLevel < levels.length - 1) {
@@ -1251,8 +1255,9 @@ public final class MovementController {
 			return;
 		}
 		if (step.place() != null && !step.type().placesWhileMoving && !placed) {
-			if (!placeBlock(step.place())) {
-				replan("搭桥放方块失败");
+			Placement.Refusal refused = placeBlock(step.place());
+			if (refused != null) {
+				replan("搭桥放方块失败：" + refused.why);
 				return;
 			}
 			placed = true;
@@ -1473,29 +1478,36 @@ public final class MovementController {
 	}
 
 	/** Places a building block at {@code pos} through the normal survival "use item on block" flow. */
-	boolean placeBlock(BlockPos pos) {
+	Placement.Refusal placeBlock(BlockPos pos) {
 		ServerLevel level = bot.level();
 		if (!level.getBlockState(pos).getCollisionShape(level, pos).isEmpty()) {
-			return true;
+			return null; // something solid is there already: what the step wanted
 		}
-		if (!Guard.canPlace(level, pos)) {
-			return false;
-		}
-		int slot = BuildingBlocks.bestSlot(bot.getInventory());
-		if (slot < 0) {
-			return false;
-		}
-		return placeItem(pos, slot);
+		Placement.Refusal refused = Placement.check(level, pos, Placement.Kind.BUILD);
+		return refused != null ? refused : place(pos, BuildingBlocks.bestSlot(bot.getInventory()));
 	}
 
 	/**
 	 * Places the block item in inventory {@code slot} at {@code pos}, against any solid neighbour,
-	 * through the normal survival "use item on block" flow. The caller checks the rules.
+	 * through the normal survival "use item on block" flow: every block it ever puts down comes
+	 * through here. The caller has asked {@link Placement#check}; this adds what only the live world
+	 * can tell. Null if it's there now, otherwise why not.
 	 */
-	public boolean placeItem(BlockPos pos, int slot) {
+	public Placement.Refusal place(BlockPos pos, int slot) {
 		ServerLevel level = bot.level();
-		if (bot.isGhost() || com.vale.helperbot.guard.Restrictions.isBlocked(bot.getInventory().getItem(slot).getItem())) {
-			return false;
+		if (slot < 0) {
+			return Placement.Refusal.NO_BLOCKS;
+		}
+		if (bot.isGhost()) {
+			return Placement.Refusal.GHOST;
+		}
+		ItemStack stack = bot.getInventory().getItem(slot);
+		if (com.vale.helperbot.guard.Restrictions.isBlocked(stack.getItem())) {
+			return Placement.Refusal.BANNED_ITEM;
+		}
+		if (stack.getItem() instanceof net.minecraft.world.item.BlockItem item
+				&& !level.isUnobstructed(item.getBlock().defaultBlockState(), pos, net.minecraft.world.phys.shapes.CollisionContext.empty())) {
+			return Placement.Refusal.IN_THE_WAY;
 		}
 		Direction[] order = {Direction.DOWN, Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP};
 		for (Direction dir : order) {
@@ -1513,9 +1525,9 @@ public final class MovementController {
 					new BlockHitResult(hit, face, against, false));
 			bot.setShiftKeyDown(false);
 			bot.swing(InteractionHand.MAIN_HAND);
-			return !level.getBlockState(pos).getCollisionShape(level, pos).isEmpty();
+			return level.getBlockState(pos).getCollisionShape(level, pos).isEmpty() ? Placement.Refusal.NOT_PLACED : null;
 		}
-		return false;
+		return Placement.Refusal.NOTHING_BESIDE;
 	}
 
 	private void selectTool(BlockState state) {

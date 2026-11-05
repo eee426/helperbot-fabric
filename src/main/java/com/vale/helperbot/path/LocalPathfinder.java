@@ -2,6 +2,7 @@ package com.vale.helperbot.path;
 
 import net.minecraft.world.level.BlockGetter;
 import com.vale.helperbot.guard.Guard;
+import com.vale.helperbot.guard.Placement;
 import com.vale.helperbot.guard.ProtectionZones;
 import com.vale.helperbot.path.moves.Move;
 import com.vale.helperbot.path.moves.Moves;
@@ -133,6 +134,8 @@ public final class LocalPathfinder implements Planner {
 		int heapIndex = -1;
 		/** The floor this route dug through into water, if it did (see {@link #wayUp}). */
 		BlockPos hole;
+		/** Building blocks left when it gets here: a route can't lay more than it has. */
+		int blocks;
 
 		Node(BlockPos pos, double floor, double g, double h, Node parent, PathStep step, int air) {
 			this.pos = pos;
@@ -207,6 +210,7 @@ public final class LocalPathfinder implements Planner {
 	private final LongPredicate favored;
 	private double progress;
 	private int expanded;
+	private int blocksShort;
 	private Result result;
 
 	/**
@@ -255,6 +259,7 @@ public final class LocalPathfinder implements Planner {
 		// The breath it really has: where it needs more before going under, the plan says so (see breathe).
 		int startAir = air.now();
 		startNode = new Node(start, startFloor, 0, heuristic(start) * heuristicWeight, null, null, startAir);
+		startNode.blocks = BuildingBlocks.count(inventory);
 		open.add(startNode);
 		cell(start)[bucket(startAir)] = startNode;
 		closest = startNode;
@@ -309,6 +314,11 @@ public final class LocalPathfinder implements Planner {
 				if (airLeft < 0) {
 					continue; // couldn't get back up from there in time
 				}
+				int blocks = node.blocks - (c.step().place() != null ? 1 : 0);
+				if (blocks < 0) {
+					blocksShort++; // none left to lay
+					continue;
+				}
 				long key = c.step().to().asLong();
 				double g = node.g + c.cost() * (favored.test(key) ? FAVOR_PREVIOUS : 1);
 				int b = bucket(airLeft);
@@ -319,10 +329,12 @@ public final class LocalPathfinder implements Planner {
 					if (next != null && next.heapIndex >= 0) {
 						next.set(c.floor(), g, toGoal, node, c.step(), airLeft); // still waiting: just cheaper now
 						next.ticks = c.ticks();
+						next.blocks = blocks;
 						open.decreased(next);
 					} else {
 						next = new Node(c.step().to(), c.floor(), g, toGoal, node, c.step(), airLeft);
 						next.ticks = c.ticks();
+						next.blocks = blocks;
 						nodes[b] = next;
 						open.add(next);
 					}
@@ -330,7 +342,7 @@ public final class LocalPathfinder implements Planner {
 			}
 		}
 		Node end = partialEnd();
-		result = end == startNode ? Result.EMPTY : reconstruct(end, false);
+		result = end == startNode ? Result.EMPTY : beforeBuilding(reconstruct(end, false));
 		progress = (heuristic(origin) - heuristic(end.pos)) / walkCost;
 		return true;
 	}
@@ -359,6 +371,11 @@ public final class LocalPathfinder implements Planner {
 	 */
 	public boolean provenUnreachable() {
 		return result != null && !result.reachesGoal() && !partial && open.isEmpty();
+	}
+
+	/** Routes it turned down for want of blocks to lay. */
+	public int blocksShort() {
+		return blocksShort;
 	}
 
 	/** It stopped for its node limit, with cells still to look at. */
@@ -412,6 +429,7 @@ public final class LocalPathfinder implements Planner {
 		}
 		sb.append("；起点的下一步 ").append(first.size()).append(" 个，因为气不够排除 ").append(noAir).append(" 个");
 		sb.append(String.format(java.util.Locale.ROOT, "（气 %d/%d%s）", air.now(), air.full(), air.limited() ? "" : "，不限"));
+		sb.append("；方块 ").append(startNode.blocks).append(" 个，因为不够排除过 ").append(blocksShort).append(" 次");
 		sb.append("；周围：");
 		String[] names = {"上", "下", "北", "南", "西", "东"};
 		Direction[] dirs = {Direction.UP, Direction.DOWN, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST};
@@ -698,6 +716,23 @@ public final class LocalPathfinder implements Planner {
 		return ahead != null ? ahead.applyAsDouble(pos) : partial ? travel.ticks(pos) : travel.straight(pos);
 	}
 
+	/**
+	 * Out of blocks on the way, a path that doesn't get there stops short of the first one laid: out
+	 * on a bridge it can't finish, it would stand over the drop with nothing left to go on with.
+	 */
+	private Result beforeBuilding(Result partial) {
+		if (blocksShort == 0) {
+			return partial;
+		}
+		for (int i = 0; i < partial.steps().size(); i++) {
+			if (partial.steps().get(i).place() != null) {
+				return i == 0 ? Result.EMPTY : new Result(new ArrayList<>(partial.steps().subList(0, i)), false,
+						new ArrayList<>(partial.ticks().subList(0, i)), new ArrayList<>(partial.air().subList(0, i)));
+			}
+		}
+		return partial;
+	}
+
 	private static Result reconstruct(Node node, boolean reachesGoal) {
 		List<PathStep> steps = new ArrayList<>();
 		List<Double> ticks = new ArrayList<>();
@@ -764,7 +799,7 @@ public final class LocalPathfinder implements Planner {
 
 	@Override
 	public boolean canPlace(BlockPos pos) {
-		return Guard.canPlace(level, pos);
+		return Placement.allowed(level, pos, Placement.Kind.BUILD);
 	}
 
 	@Override

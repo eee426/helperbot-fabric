@@ -2,7 +2,7 @@ package com.vale.helperbot.task;
 
 import com.vale.helperbot.bot.BotPlayer;
 import com.vale.helperbot.bot.MovementController;
-import com.vale.helperbot.guard.Guard;
+import com.vale.helperbot.guard.Placement;
 import com.vale.helperbot.knowledge.Habitat;
 import com.vale.helperbot.path.LocalPathfinder;
 import net.minecraft.core.BlockPos;
@@ -189,7 +189,7 @@ final class Station {
 		}
 		for (Direction dir : Direction.Plane.HORIZONTAL) {
 			BlockPos spot = q.relative(dir);
-			if (Guard.canPlaceStation(level, spot) && LocalPathfinder.isSupport(level, spot.below())) {
+			if (Placement.allowed(level, spot, Placement.Kind.STATION) && LocalPathfinder.isSupport(level, spot.below())) {
 				return true;
 			}
 		}
@@ -230,7 +230,7 @@ final class Station {
 		for (int dy = 0; dy <= 1; dy++) {
 			for (Direction d : Direction.Plane.HORIZONTAL) {
 				BlockPos spot = feet.relative(d).above(dy);
-				if (Guard.canPlaceStation(level, spot)
+				if (Placement.allowed(level, spot, Placement.Kind.STATION)
 						&& (dy == 1 || LocalPathfinder.isSupport(level, spot.below()))
 						&& tryPlace(bot, spot, slot)) {
 					return true;
@@ -239,7 +239,7 @@ final class Station {
 		}
 		// Walled in on all sides (e.g. at the bottom of a 1x1 shaft): above our head is in reach.
 		BlockPos overhead = feet.above(2);
-		if (Guard.canPlaceStation(level, overhead) && tryPlace(bot, overhead, slot)) {
+		if (Placement.allowed(level, overhead, Placement.Kind.STATION) && tryPlace(bot, overhead, slot)) {
 			return true;
 		}
 		failure = "身边找不到能放" + new ItemStack(item).getHoverName().getString() + "的地方";
@@ -247,10 +247,13 @@ final class Station {
 	}
 
 	private boolean tryPlace(BotPlayer bot, BlockPos spot, int slot) {
-		if (bot.movement().placeItem(spot, slot) && bot.level().getBlockState(spot).is(block)) {
+		Placement.Refusal refused = bot.movement().place(spot, slot);
+		if (refused == null && bot.level().getBlockState(spot).is(block)) {
 			pos = spot;
 			return true;
 		}
+		bot.log(spot.toShortString() + " 放不下" + new ItemStack(item).getHoverName().getString() + "："
+				+ (refused != null ? refused.why : Placement.Refusal.NOT_PLACED.why));
 		return false;
 	}
 

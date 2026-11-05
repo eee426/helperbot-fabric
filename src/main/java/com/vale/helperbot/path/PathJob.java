@@ -129,6 +129,11 @@ public final class PathJob {
 		return !failed && search.provenUnreachable();
 	}
 
+	/** See {@link LocalPathfinder#blocksShort()}. */
+	public int blocksShort() {
+		return search.blocksShort();
+	}
+
 	/** See {@link LocalPathfinder#hitNodeLimit()}. */
 	public boolean hitNodeLimit() {
 		return search.hitNodeLimit();

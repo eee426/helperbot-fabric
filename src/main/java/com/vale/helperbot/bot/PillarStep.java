@@ -46,8 +46,9 @@ final class PillarStep implements StepExecutor {
 				m.fall();
 			}
 			if (bot.getY() >= step.place().getY() + 1 + MovementController.PILLAR_CLEARANCE) {
-				if (!m.placeBlock(step.place())) {
-					m.replan("垫柱子放方块失败");
+				com.vale.helperbot.guard.Placement.Refusal refused = m.placeBlock(step.place());
+				if (refused != null) {
+					m.replan("垫柱子放方块失败：" + refused.why);
 					return;
 				}
 				m.placed = true;
