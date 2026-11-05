@@ -5,6 +5,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.QuartPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.BiomeTags;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeSource;
 import net.minecraft.world.level.biome.Climate;
@@ -53,10 +54,11 @@ final class Explorer {
 	/**
 	 * @param worth what's to be found per chunk of each biome (0: none); read off the server thread, so not changed after this
 	 * @param below it lives underground, or anywhere: look at cave biomes too, not just the surface
+	 * @param landOnly it's not after what's under water: oceans and rivers are out, and so is what lies below them
 	 * @param sight how far around itself it finds what it's after
 	 * @param speed blocks a tick, as it really goes
 	 */
-	Explorer(ServerLevel level, BlockPos origin, Map<Holder<Biome>, Double> worth, boolean below, int sight, double speed) {
+	Explorer(ServerLevel level, BlockPos origin, Map<Holder<Biome>, Double> worth, boolean below, boolean landOnly, int sight, double speed) {
 		this.origin = origin;
 		this.sight = sight;
 		this.speed = speed;
@@ -74,6 +76,9 @@ final class Explorer {
 					}
 					int x = QuartPos.fromBlock(origin.getX() + gx * GRID), z = QuartPos.fromBlock(origin.getZ() + gz * GRID);
 					Holder<Biome> best = biomes.getNoiseBiome(x, QuartPos.fromBlock(sea), z, sampler);
+					if (landOnly && water(best)) {
+						continue;
+					}
 					double top = worth.getOrDefault(best, 0.0);
 					if (below) {
 						for (int y : BELOW) {
@@ -93,6 +98,10 @@ final class Explorer {
 			tookNanos = System.nanoTime() - started;
 			return spots;
 		});
+	}
+
+	static boolean water(Holder<Biome> biome) {
+		return biome.is(BiomeTags.IS_OCEAN) || biome.is(BiomeTags.IS_RIVER);
 	}
 
 	boolean ready() {

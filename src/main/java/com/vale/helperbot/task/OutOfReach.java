@@ -3,7 +3,9 @@ package com.vale.helperbot.task;
 import net.minecraft.core.BlockPos;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * What one order found it can't get to, so it doesn't go back and find out again. It keeps no
@@ -20,15 +22,16 @@ public final class OutOfReach {
 	/** Past this from where it found out, it may come at it some way it never saw; and that's past what it scans for targets. */
 	private static final int SEARCHED = 100;
 
-	/** {@code from} null: judged by estimate, for that block alone, wherever it stands. */
 	private record Entry(BlockPos pos, int breath, BlockPos from, int patch) {
 	}
 
 	private final List<Entry> entries = new ArrayList<>();
+	/** Judged by estimate, for that block alone, wherever it stands; with the breath it had. Thousands under a sea: looked up, not gone through. */
+	private final Map<BlockPos, Integer> judged = new HashMap<>();
 
 	/** An estimate says this block can't be done on a breath of {@code breath}. */
 	public void judged(BlockPos pos, int breath) {
-		entries.add(new Entry(pos, breath, null, 0));
+		judged.merge(pos, breath, Math::max);
 	}
 
 	/** Found out at {@code from}, for this block and what's around it: a search went through everything, or a whole breath wasn't enough. */
@@ -43,6 +46,10 @@ public final class OutOfReach {
 
 	/** Does anything found still hold for this block, with this full breath, standing here? */
 	public boolean covers(BlockPos pos, int breath, BlockPos here) {
+		Integer estimate = judged.get(pos);
+		if (estimate != null && breath <= estimate) {
+			return true;
+		}
 		for (Entry e : entries) {
 			if (breath <= e.breath && holds(e, pos, here)) {
 				return true;
@@ -54,11 +61,11 @@ public final class OutOfReach {
 	private static boolean holds(Entry e, BlockPos pos, BlockPos here) {
 		return Math.abs(pos.getX() - e.pos.getX()) <= e.patch && Math.abs(pos.getY() - e.pos.getY()) <= e.patch
 				&& Math.abs(pos.getZ() - e.pos.getZ()) <= e.patch
-				&& (e.from == null || (Math.abs(here.getX() - e.from.getX()) <= SEARCHED && Math.abs(here.getZ() - e.from.getZ()) <= SEARCHED));
+				&& Math.abs(here.getX() - e.from.getX()) <= SEARCHED && Math.abs(here.getZ() - e.from.getZ()) <= SEARCHED;
 	}
 
 	public int size() {
-		return entries.size();
+		return entries.size() + judged.size();
 	}
 
 }

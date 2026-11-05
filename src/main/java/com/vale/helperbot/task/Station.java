@@ -138,7 +138,7 @@ final class Station {
 					dry.put(b, 1.0);
 				}
 			}
-			land = new Explorer(level, bot.blockPosition(), dry, false, level.getServer().getPlayerList().getViewDistance() * 16,
+			land = new Explorer(level, bot.blockPosition(), dry, false, true, level.getServer().getPlayerList().getViewDistance() * 16,
 					com.vale.helperbot.path.Mode.DEFAULT.speed());
 		}
 		if (!land.ready()) {

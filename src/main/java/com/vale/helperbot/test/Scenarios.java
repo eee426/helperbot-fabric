@@ -529,21 +529,23 @@ public final class Scenarios {
 				}, Scenario.has(Items.WHITE_CARPET, 3, c -> !c.logHas("Blue Carpet") && !c.logHas("蓝色地毯")
 						&& !c.logHas("Blue Dye") && !c.logHas("蓝色染料"), "计划里出现了染色")),
 
-				new Scenario("W19", "水下沙砾拿燧石，工具不乱换", 10 * MINUTE, (a, bot, me) -> {
+				new Scenario("W19", "要燧石：近处水底的沙砾不下水挖，去岸上的沙砾，工具不乱换", 6 * MINUTE, (a, bot, me) -> {
 					a.fill(8, 34, -4, 16, 35, 4, Blocks.GRAVEL);
 					a.fill(8, 36, -4, 16, 40, 4, Blocks.WATER);
+					a.fill(24, 39, -3, 28, 40, 3, Blocks.GRAVEL);
 					give(bot, Items.IRON_SHOVEL, 1);
 					give(bot, Items.BREAD, 16);
+					WET[0] = false;
 					return new AcquireTask(me, Items.FLINT, 3, Mode.NORMAL);
-				}, Scenario.has(Items.FLINT, 3, c -> !c.logHas("重新选工具"), "挖的时候换了工具（手里的东西挖不出）")),
+				}, Scenario.has(Items.FLINT, 3, c -> !(WET[0] |= c.bot().movement().headUnderwater()) && !c.logHas("重新选工具"), "下水了，或者挖的时候换了工具")),
 
-				new Scenario("W20", "深水底挖黏土，不挖一半上去换气", 10 * MINUTE, (a, bot, me) -> {
+				new Scenario("W20", "只有深水底有黏土：不下水，去别处找", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(8, 31, -4, 16, 31, 4, Blocks.CLAY);
 					a.fill(8, 32, -4, 16, 40, 4, Blocks.WATER);
 					give(bot, Items.IRON_SHOVEL, 1);
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.CLAY_BALL, 16, Mode.NORMAL);
-				}, Scenario.has(Items.CLAY_BALL, 16, c -> c.logCount("该换气了") <= 8, "换气超过 8 次（挖一半上去又回来）")),
+				}, staysDry(40)),
 
 				new Scenario("W21", "钻石在瀑布底下（瀑布有岩石檐）", 10 * MINUTE, (a, bot, me) -> {
 					a.fill(18, 10, -2, 22, 40, 2, Blocks.AIR); // a shaft 5x5, 30 deep
@@ -907,13 +909,13 @@ public final class Scenarios {
 				}, c -> c.bot().isInWater() ? Scenario.Outcome.fail("下水了")
 						: c.ended() ? Scenario.Outcome.pass("绕过去了") : null),
 
-				new Scenario("W39", "吃饱的时候 11 格深的水底空手挖黏土：疾跑游上来够快，一口气够", 4 * MINUTE, (a, bot, me) -> {
+				new Scenario("W39", "吃饱的时候 11 格深的水底拿海带：疾跑游上来够快，一口气够", 4 * MINUTE, (a, bot, me) -> {
 					// At the plain swimming speed the way up alone would take too much of the breath.
 					a.fill(6, 30, -2, 10, 40, 2, Blocks.WATER);
-					a.set(8, 29, 0, Blocks.CLAY);
+					a.set(8, 30, 0, Blocks.KELP);
 					teleport(bot, a, 3, 41, 0);
-					return new AcquireTask(me, Items.CLAY_BALL, 4, Mode.NORMAL);
-				}, Scenario.has(Items.CLAY_BALL, 4)),
+					return new AcquireTask(me, Items.KELP, 1, Mode.NORMAL);
+				}, Scenario.has(Items.KELP, 1)),
 
 				new Scenario("W40", "同上但饿着（不能疾跑）：一口气不够，不下去（去别处找）", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(6, 30, -2, 10, 40, 2, Blocks.WATER);
@@ -925,74 +927,83 @@ public final class Scenarios {
 				}, c -> c.bot().getY() < 34 ? Scenario.Outcome.fail("下去了")
 						: c.ended() || c.ticks() > MINUTE ? Scenario.Outcome.pass("没下去") : null),
 
-				new Scenario("W41", "站在结冰的池塘上，黏土在 4 格深的水底：凿开脚下的冰下去挖，从洞口上来", 4 * MINUTE, (a, bot, me) -> {
+				new Scenario("W41", "站在结冰的池塘上，海带在 4 格深的水底：凿开脚下的冰下去拿，从洞口上来", 4 * MINUTE, (a, bot, me) -> {
 					// Nothing tells it to come back by the hole: the hole is simply the cheapest way up.
 					a.fill(4, 36, -6, 14, 39, 6, Blocks.WATER);
 					a.fill(4, 40, -6, 14, 40, 6, Blocks.ICE);
-					a.set(9, 35, 0, Blocks.CLAY);
+					a.set(9, 36, 0, Blocks.KELP);
 					teleport(bot, a, 9, Arena.SURFACE, 0);
 					give(bot, Items.BREAD, 16);
-					return new AcquireTask(me, Items.CLAY_BALL, 4, Mode.NORMAL);
-				}, Scenario.has(Items.CLAY_BALL, 4, c -> c.bot().getHealth() > 12, "淹着了")),
+					return new AcquireTask(me, Items.KELP, 1, Mode.NORMAL);
+				}, Scenario.has(Items.KELP, 1, c -> c.bot().getHealth() > 12, "淹着了")),
 
 				new Scenario("W42", "同上但是浮冰（挖开不变水，留个洞）", 4 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 36, -6, 14, 39, 6, Blocks.WATER);
 					a.fill(4, 40, -6, 14, 40, 6, Blocks.PACKED_ICE);
-					a.set(9, 35, 0, Blocks.CLAY);
+					a.set(9, 36, 0, Blocks.KELP);
 					teleport(bot, a, 9, Arena.SURFACE, 0);
 					give(bot, Items.IRON_PICKAXE, 1);
 					give(bot, Items.BREAD, 16);
-					return new AcquireTask(me, Items.CLAY_BALL, 4, Mode.NORMAL);
-				}, Scenario.has(Items.CLAY_BALL, 4, c -> c.bot().getHealth() > 12, "淹着了")),
+					return new AcquireTask(me, Items.KELP, 1, Mode.NORMAL);
+				}, Scenario.has(Items.KELP, 1, c -> c.bot().getHealth() > 12, "淹着了")),
 
-				new Scenario("W30", "6 格深的池底挖一块沙子（空手）：一口气下去站着挖完、捡起来，不来回换气", 3 * MINUTE, (a, bot, me) -> {
-					// Floating where it's nearest, mining by hand takes 25x as long: too long for one
-					// breath. Standing on the bottom it's 5x, and there's air for that and the pickup.
+				new Scenario("W30", "6 格深的池底一只海泡菜（空手）：一口气下去拿到、捡起来，不来回换气", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(6, 35, -2, 10, 40, 2, Blocks.WATER);
-					a.set(8, 34, 0, Blocks.SAND);
+					a.set(8, 35, 0, Blocks.SEA_PICKLE);
 					teleport(bot, a, 3, 41, 0);
 					give(bot, Items.BREAD, 16);
-					return new AcquireTask(me, Items.SAND, 1, Mode.NORMAL);
-				}, Scenario.has(Items.SAND, 1, c -> c.logCount("该换气了") == 0 && !c.logHas("剩下的气不够"),
+					return new AcquireTask(me, Items.SEA_PICKLE, 1, Mode.NORMAL);
+				}, Scenario.has(Items.SEA_PICKLE, 1, c -> c.logCount("该换气了") == 0 && !c.logHas("剩下的气不够"),
 						"去换了气（说明规划没把挖的时间算进去，或者游的时间算少了）")),
 
-				new Scenario("W31", "6 格深的池底挖沙砾拿燧石（时运 III 铲子，必掉燧石）：挖完把燧石捡起来", 4 * MINUTE, (a, bot, me) -> {
-					// Fortune III makes gravel always drop flint: every break leaves a flint to collect
-					// under water (a player saw it swim almost up to one, turn back, and never go for it again).
+				new Scenario("W31", "6 格深的池底 3 根海带：挖完把掉的捡起来", 4 * MINUTE, (a, bot, me) -> {
+					// (A player saw it swim almost up to a drop, turn back, and never go for it again.)
 					a.fill(6, 35, -3, 12, 40, 3, Blocks.WATER);
-					a.set(7, 34, -2, Blocks.GRAVEL);
-					a.set(9, 34, 1, Blocks.GRAVEL);
-					a.set(11, 34, -1, Blocks.GRAVEL);
+					a.set(7, 35, -2, Blocks.KELP);
+					a.set(9, 35, 1, Blocks.KELP);
+					a.set(11, 35, -1, Blocks.KELP);
 					teleport(bot, a, 3, 41, 0);
-					ItemStack shovel = new ItemStack(Items.IRON_SHOVEL);
-					shovel.enchant(a.level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT)
-							.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.FORTUNE), 3);
-					bot.getInventory().add(shovel);
 					give(bot, Items.BREAD, 16);
-					return new AcquireTask(me, Items.FLINT, 3, Mode.NORMAL);
-				}, Scenario.has(Items.FLINT, 3, c -> !c.logHas("不要了"), "放弃了一个燧石（没捡到）")),
+					return new AcquireTask(me, Items.KELP, 3, Mode.NORMAL);
+				}, Scenario.has(Items.KELP, 3, c -> !c.logHas("不要了"), "放弃了一个掉落物（没捡到）")),
 
-				new Scenario("W32", "水底黏土上盖着一层泥土（玩家报告）：站到泥土上挖开，再挖黏土", 4 * MINUTE, (a, bot, me) -> {
-					// 4 deep water (as the player had it) over a strip of clay, each covered by dirt: from
-					// afloat, the dirt in the way and then the clay are too slow to mine on the air left;
-					// standing on them, they aren't.
-					a.fill(6, 37, -3, 12, 40, 3, Blocks.WATER);
-					a.fill(7, 35, -1, 11, 35, 1, Blocks.CLAY);
-					a.fill(7, 36, -1, 11, 36, 1, Blocks.DIRT);
-					teleport(bot, a, 3, 41, 0);
+				new Scenario("W32", "矿在湖底下的矿洞里：头在空气里，照常挖", 4 * MINUTE, (a, bot, me) -> {
+					// What counts is where the head is when mining, not what's over it.
+					a.fill(6, 36, -5, 16, 40, 5, Blocks.WATER);
+					a.fill(2, 31, -1, 14, 33, 1, Blocks.AIR);
+					a.fill(2, 34, 0, 2, 40, 0, Blocks.AIR);
+					a.set(15, 32, 0, Blocks.COAL_ORE);
+					teleport(bot, a, 2, 33, 0);
+					give(bot, Items.WOODEN_PICKAXE, 1);
 					give(bot, Items.BREAD, 16);
-					return new AcquireTask(me, Items.CLAY_BALL, 8, Mode.NORMAL);
-				}, Scenario.has(Items.CLAY_BALL, 8)),
+					WET[0] = false;
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, Scenario.has(Items.COAL, 1, c -> !(WET[0] |= c.bot().movement().headUnderwater()), "下水了")),
 
-				new Scenario("W33", "同上但水深 7 格：一口气干不完\"挖泥土 + 挖黏土\"，分两趟下水", 5 * MINUTE, (a, bot, me) -> {
-					// What's in the way is a job of its own: one dive for the dirt, the next for the clay.
-					a.fill(6, 34, -3, 12, 40, 3, Blocks.WATER);
-					a.fill(7, 32, -1, 11, 32, 1, Blocks.CLAY);
-					a.fill(7, 33, -1, 11, 33, 1, Blocks.DIRT);
+				new Scenario("W33", "海底埋着煤（玩家报告：9 分钟下潜 21 次一块没挖到）：不下水，去岸上的煤", 4 * MINUTE, (a, bot, me) -> {
+					a.fill(6, 30, -8, 26, 40, 8, Blocks.WATER);
+					for (int x = 7; x < 26; x += 3) {
+						a.set(x, 27, 0, Blocks.COAL_ORE);
+						a.set(x, 28, 3, Blocks.COAL_ORE);
+					}
+					a.set(-30, 40, 0, Blocks.COAL_ORE);
 					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.WOODEN_PICKAXE, 1);
 					give(bot, Items.BREAD, 16);
-					return new AcquireTask(me, Items.CLAY_BALL, 8, Mode.NORMAL);
-				}, Scenario.has(Items.CLAY_BALL, 8)),
+					WET[0] = false;
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, Scenario.has(Items.COAL, 1, c -> !(WET[0] |= c.bot().movement().headUnderwater()), "下水了")),
+
+				new Scenario("W51", "人浮在大水面中央，只有水底的矿：不潜下去，往外走", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(-40, 30, -40, 40, 40, 40, Blocks.WATER);
+					for (int x = -30; x < 30; x += 4) {
+						a.set(x, 28, 2, Blocks.COAL_ORE);
+					}
+					teleport(bot, a, 0, 40, 0);
+					give(bot, Items.WOODEN_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, staysDry(50)),
 
 				new Scenario("W34", "发光墨鱼在水下 20 格（玩家报告）：一口气潜不到，直接说明，不来回白跑", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 16, -6, 14, 40, 6, Blocks.WATER);
@@ -1016,17 +1027,16 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.INK_SAC, 1, Mode.NORMAL);
 				}, Scenario.has(Items.INK_SAC, 1)),
 
-				new Scenario("W36", "9 格深的水底挖一块沙子（铁锹）：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
+				new Scenario("W36", "9 格深的水底拿海带：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 32, -4, 12, 40, 4, Blocks.WATER);
-					a.set(8, 31, 0, Blocks.SAND);
+					a.set(8, 32, 0, Blocks.KELP);
 					teleport(bot, a, 2, 41, 0);
-					give(bot, Items.IRON_SHOVEL, 1);
 					give(bot, Items.BREAD, 16);
 					SWAM[0] = false;
-					return new AcquireTask(me, Items.SAND, 1, Mode.NORMAL);
+					return new AcquireTask(me, Items.KELP, 1, Mode.NORMAL);
 				}, c -> {
 					SWAM[0] |= c.bot().isSwimming();
-					return c.bot().getInventory().countItem(Items.SAND) >= 1
+					return c.bot().getInventory().countItem(Items.KELP) >= 1
 							? (SWAM[0] ? Scenario.Outcome.pass("拿到了，用了游泳姿态") : Scenario.Outcome.fail("拿到了，但一直没用游泳姿态"))
 							: c.ended() ? Scenario.Outcome.fail("没拿到") : null;
 				}),
@@ -1123,6 +1133,20 @@ public final class Scenarios {
 	}
 
 	/** Water 19 deep with a kelp in a crack in a shelf: in arm's reach from on top, but not in sight from anywhere. */
+	/** Has its head been under water in this scene (see the scenes that check on it)? */
+	private static final boolean[] WET = new boolean[1];
+
+	/** It never puts its head under, and goes off to look elsewhere: this far from the start is enough to tell. */
+	private static Scenario.Check staysDry(int blocks) {
+		return c -> {
+			if (c.bot().getY() < Arena.SURFACE - 3) { // (swimming along the top dips the head: that's not going down)
+				return Scenario.Outcome.fail("潜下去了");
+			}
+			return c.ended() || c.bot().distanceToSqr(c.arena().origin.getCenter()) > blocks * blocks
+					? Scenario.Outcome.pass("没下水，走开了") : null;
+		};
+	}
+
 	private static void kelpInACrack(Arena a) {
 		a.fill(4, 22, -8, 24, 40, 8, Blocks.WATER);
 		a.fill(10, 22, -3, 15, 25, 3, Blocks.STONE);
@@ -1193,7 +1217,7 @@ public final class Scenarios {
 
 	/** Is there really nowhere to mine it from? Null if so, otherwise where. */
 	private static String verdictOn(Arena a, BotPlayer bot, BlockPos block, BlockPos from, int air, int full) {
-		var goal = com.vale.helperbot.task.MineSpot.reachGoal(block, bot.blockInteractionRange() - 0.3, bot.getEyeHeight(), true);
+		var goal = com.vale.helperbot.task.MineSpot.reachGoal(block, bot.blockInteractionRange() - 0.3, bot.getEyeHeight(), true, false);
 		for (BlockPos p : BlockPos.betweenClosed(block.offset(-5, -5, -5), block.offset(5, 5, 5))) {
 			if (!Double.isNaN(com.vale.helperbot.path.LocalPathfinder.floorHeight(a.level, p)) && goal.test(a.level, p)) {
 				return "能站在 " + p.toShortString() + " 挖到";

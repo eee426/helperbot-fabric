@@ -290,7 +290,7 @@ final class HuntTask {
 	private BotTask.Status lookFurther(BotPlayer bot) {
 		ServerLevel level = bot.level();
 		if (explorer == null) {
-			explorer = explorers.computeIfAbsent(item, i -> new Explorer(level, bot.blockPosition(), worth(level), layer(level) != Habitat.Layer.SURFACE, SCAN_RADIUS, mode.speed()));
+			explorer = explorers.computeIfAbsent(item, i -> new Explorer(level, bot.blockPosition(), worth(level), layer(level) != Habitat.Layer.SURFACE, false, SCAN_RADIUS, mode.speed()));
 		}
 		if (!explorer.ready()) {
 			setPhase(Phase.LOCATE);

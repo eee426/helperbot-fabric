@@ -323,6 +323,7 @@ public class GatherTask implements BotTask {
 		int checked = 0;
 		int dryChecked = 0;
 		boolean sawWater = false;
+		int skipped = 0;
 		for (java.util.Iterator<BlockPos> it = targets.iterator(); it.hasNext()
 				&& (checked < TARGETS_COMPARED || (sawWater && dryChecked < TARGETS_COMPARED)); ) {
 			BlockPos p = it.next();
@@ -339,13 +340,16 @@ public class GatherTask implements BotTask {
 			if (Double.isNaN(cost)) {
 				it.remove();
 				unreachable.judged(p, Air.fullBudget(bot));
-				bot.log(p.toShortString() + " 判断为够不着（附近没有能站着伸手够到它的位置，或者一口气不够），跳过");
+				skipped++;
 				continue;
 			}
 			if (cost < bestCost) {
 				bestCost = cost;
 				best = p;
 			}
+		}
+		if (skipped > 0) {
+			bot.log(skipped + " 处判断为不去（附近没有能站着伸手够到的位置，或者挖的时候头在水下，或者一口气不够），跳过");
 		}
 		if (best == null) {
 			return nextTarget(bot); // all of those were out of reach: look at the next few
@@ -371,9 +375,9 @@ public class GatherTask implements BotTask {
 		// they mine: within reach isn't enough from the bottom of a hole, with the floor in between
 		// (it stopped there, set about mining the floor as "in the way", and gave the block up).
 		// Buried ones (ore in rock) have no such spot: getting close and digging through is the way.
-		bot.movement().goTo(MineSpot.reachGoal(block, reach, eyeHeight, MineSpot.exposed(level, block)), block, mode);
-		// Under water the plan must leave air to mine it too, not just to get there and back.
 		BlockState state = level.getBlockState(block);
+		bot.movement().goTo(MineSpot.reachGoal(block, reach, eyeHeight, MineSpot.exposed(level, block), !MineSpot.ofTheSea(state)), block, mode);
+		// Under water the plan must leave air to mine it too, not just to get there and back.
 		int dry = MineSpot.dryTicks(bot, block, state, behind != null ? MovementController.AUTO_TOOL
 				: toolFor.getOrDefault(state.getBlock(), MovementController.HAND));
 		if (dry != Integer.MAX_VALUE) {
@@ -395,7 +399,7 @@ public class GatherTask implements BotTask {
 		Explorer explorer = explorers.computeIfAbsent(item, i -> {
 			Map<Holder<Biome>, Double> worth = new HashMap<>();
 			biomes.forEach(b -> worth.put(b, 1.0));
-			return new Explorer(level, bot.blockPosition(), worth, BiomeHints.layerFor(level, toolFor.keySet()) != com.vale.helperbot.knowledge.Habitat.Layer.SURFACE, SCAN_CHUNKS * 16, mode.speed());
+			return new Explorer(level, bot.blockPosition(), worth, BiomeHints.layerFor(level, toolFor.keySet()) != com.vale.helperbot.knowledge.Habitat.Layer.SURFACE, !seaOnly(), SCAN_CHUNKS * 16, mode.speed());
 		});
 		if (!explorer.ready()) {
 			phase = Phase.MAP;
@@ -423,6 +427,11 @@ public class GatherTask implements BotTask {
 				: "方圆 " + Explorer.RADIUS + " 格内能去的地方都找过了，没找到");
 	}
 
+	/** All it comes from is what the sea alone has (see MineSpot#ofTheSea): the one thing to go to the sea for. */
+	private boolean seaOnly() {
+		return toolFor.keySet().stream().allMatch(b -> MineSpot.ofTheSea(b.defaultBlockState()));
+	}
+
 	private boolean announcedExplore;
 	/** Set while on the way to one of the explorer's places (not the one trip further off). */
 	private Explorer exploring;
@@ -432,7 +441,10 @@ public class GatherTask implements BotTask {
 		ServerLevel level = bot.level();
 		bot.say(requester, Component.literal("附近没有，去找会生成它的群系……"));
 		BlockPos origin = bot.blockPosition();
-		Set<Holder<Biome>> wantedBiomes = biomes;
+		Set<Holder<Biome>> wantedBiomes = new HashSet<>(biomes);
+		if (!seaOnly()) {
+			wantedBiomes.removeIf(Explorer::water);
+		}
 		// Samples world-gen noise only (no chunk loading), so it can run off-thread.
 		locating = CompletableFuture.supplyAsync(() -> level.findClosestBiome3d(wantedBiomes::contains,
 				origin, MAX_DISTANCE, 64, 64));
@@ -484,6 +496,7 @@ public class GatherTask implements BotTask {
 	private Status travel(BotPlayer bot) {
 		if (++travelTicks % TRAVEL_SCAN_INTERVAL == 0) {
 			List<BlockPos> found = scan(bot, TRAVEL_SCAN_CHUNKS);
+			found.removeIf(p -> !MineSpot.workable(bot, p)); // swimming over coal in the sea bed: not a reason to stop
 			if (!found.isEmpty()) {
 				targets = found;
 				bot.movement().stop();
@@ -571,6 +584,12 @@ public class GatherTask implements BotTask {
 			return toolMoved(bot);
 		}
 		if (!bot.movement().isBreaking(aim)) {
+			if (bot.movement().headUnderwater() && !MineSpot.ofTheSea(level.getBlockState(aim))) {
+				// Water came in on the way here (a dug tunnel floods): it isn't mined under water.
+				bot.log(aim.toShortString() + " 挖的时候头在水下，不挖，换下一个目标");
+				dropTarget(bot);
+				return nextTarget(bot);
+			}
 			Status air = airCheck(bot, aim, aimBlock, tool);
 			if (air != null) {
 				return air;
@@ -607,6 +626,12 @@ public class GatherTask implements BotTask {
 		if (!Guard.canBreak(level, blocker, blockerState)) {
 			bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
 					+ realTarget().toShortString() + "，又不能挖，换下一个目标");
+			dropTarget(bot);
+			return nextTarget(bot);
+		}
+		if (bot.movement().headUnderwater() && !MineSpot.ofTheSea(blockerState)) {
+			bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
+					+ realTarget().toShortString() + "，水下不挖它，换下一个目标");
 			dropTarget(bot);
 			return nextTarget(bot);
 		}

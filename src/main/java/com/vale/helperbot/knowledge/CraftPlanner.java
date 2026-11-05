@@ -1,6 +1,7 @@
 package com.vale.helperbot.knowledge;
 
 import net.minecraft.core.BlockPos;
+import com.vale.helperbot.task.MineSpot;
 import com.vale.helperbot.path.Air;
 import com.vale.helperbot.path.BreakTimes;
 import com.vale.helperbot.path.Escape;
@@ -631,6 +632,10 @@ public final class CraftPlanner {
 
 	/** Ticks to mine one source, once there; under water its share of all {@code blocks} (see Air#diving). */
 	private double mineCost(Item item, BlockPos p, int blocks, Air.Profile air, Escape escape) {
+		if (!MineSpot.ofTheSea(level.getBlockState(p)) && breaker instanceof Player player
+				&& !MineSpot.headOut(level, p, player.getEyePosition(), MineSpot.reach(player), player.getEyeHeight())) {
+			return Double.POSITIVE_INFINITY; // it won't do that (see MineSpot#ofTheSea)
+		}
 		double dry = buried(p, sourceBlocks.get(item)) * DIG_PER_BLOCK + MINE_PER_BLOCK;
 		BlockPos feet = LocalPathfinder.isWater(level, p) ? p : p.above();
 		if (!LocalPathfinder.isWater(level, feet) || Air.breathable(level, feet)) {

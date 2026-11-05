@@ -12,8 +12,11 @@ import com.vale.helperbot.path.LocalPathfinder;
 import com.vale.helperbot.path.PathGoal;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.FluidTags;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -36,8 +39,69 @@ public final class MineSpot {
 	}
 
 	/** How far it may stand from what it mines. */
-	static double reach(BotPlayer bot) {
-		return bot.blockInteractionRange() - REACH_MARGIN;
+	public static double reach(Player player) {
+		return player.blockInteractionRange() - REACH_MARGIN;
+	}
+
+	/**
+	 * Only the sea has it: a block that comes with water in it (kelp, sea grass, sea pickles, coral).
+	 * These are all it mines with its head under water. Anything else is had on land too, for a
+	 * fraction of the risk: it went 21 dives in 9 minutes for coal in the sea bed, and mined none.
+	 */
+	public static boolean ofTheSea(BlockState state) {
+		return state.getBlock().defaultBlockState().getFluidState().is(FluidTags.WATER);
+	}
+
+	/** Is this for the taking from where the bot is: from the sea, or to be mined with the head out of the water? */
+	static boolean workable(BotPlayer bot, BlockPos p) {
+		return ofTheSea(bot.level().getBlockState(p)) || headOut(bot.level(), p, bot.getEyePosition(), reach(bot), bot.getEyeHeight());
+	}
+
+	/**
+	 * Mining it, is the head out of the water? Going by where it would stand; with nowhere to stand
+	 * near it (buried), by where the digging would start: the first open cell from the block towards
+	 * {@code from}. Coal in the sea bed has water there, a seam under a cave has air.
+	 */
+	public static boolean headOut(BlockGetter level, BlockPos p, Vec3 from, double reach, double eyeHeight) {
+		boolean mustSee = exposed(level, p);
+		Vec3 center = Vec3.atCenterOf(p);
+		int r = (int) Math.ceil(reach);
+		boolean anySpot = false;
+		for (int dy = -r - 1; dy <= r; dy++) {
+			for (int dx = -r; dx <= r; dx++) {
+				for (int dz = -r; dz <= r; dz++) {
+					BlockPos q = p.offset(dx, dy, dz);
+					if (isSpot(level, q, p, center, reach, eyeHeight, mustSee)) {
+						if (Air.breathable(level, q)) {
+							return true;
+						}
+						anySpot = true;
+					}
+				}
+			}
+		}
+		if (anySpot) {
+			return false;
+		}
+		double length = center.distanceTo(from);
+		for (double d = 0.5; d < length; d += 0.5) {
+			BlockPos c = BlockPos.containing(center.add(from.subtract(center).scale(d / length)));
+			if (!c.equals(p) && (LocalPathfinder.isWater(level, c) || LocalPathfinder.isPassable(level, c))) {
+				return !LocalPathfinder.isWater(level, c);
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Can it mine {@code p} with its feet in {@code q}? By the same test the walk there goes by (see
+	 * reachGoal). Arm's reach alone counted a kelp in a crack as near: it dived for it again and
+	 * again, breath after breath, with a planner that could find nowhere to mine it from.
+	 */
+	private static boolean isSpot(BlockGetter level, BlockPos q, BlockPos p, Vec3 center, double reach, double eyeHeight, boolean mustSee) {
+		Vec3 eye = new Vec3(q.getX() + 0.5, q.getY() + eyeHeight, q.getZ() + 0.5);
+		return !q.equals(p) && eye.distanceTo(center) <= reach && !Double.isNaN(LocalPathfinder.floorHeight(level, q))
+				&& !ProtectionZones.isProtected(level, q) && (!mustSee || blockerOf(level, eye, p) == null);
 	}
 
 	/**
@@ -45,6 +109,8 @@ public final class MineSpot {
 	 * swim) within reach of it; under water each block must fit in one breath, and it pays for all
 	 * the blocks still wanted from such a spot, dives and breaths included (see Air#diving): what's
 	 * near but under water loses to dry land further off, unless it's only a block or two more.
+	 * Under water that's only for what the sea alone has (see {@link #ofTheSea}): anything else needs
+	 * a spot with the head out, or it's NaN.
 	 */
 	static double cost(BotPlayer bot, BlockPos p, Item item, int slot, int left, Escape escape) {
 		ServerLevel level = bot.level();
@@ -63,21 +129,20 @@ public final class MineSpot {
 		double bestNeed = Double.NaN;
 		boolean anyStand = false;
 		boolean mustSee = exposed(level, p);
+		boolean sea = ofTheSea(state);
 		int r = (int) Math.ceil(reach);
 		search:
 		for (int dy = -r - 1; dy <= r; dy++) {
 			for (int dx = -r; dx <= r; dx++) {
 				for (int dz = -r; dz <= r; dz++) {
 					BlockPos q = p.offset(dx, dy, dz);
-					Vec3 eye = new Vec3(q.getX() + 0.5, q.getY() + bot.getEyeHeight(), q.getZ() + 0.5);
-					// A spot by the same test the walk there goes by (see reachGoal). Arm's reach alone
-					// counted a kelp in a crack as near: it dived for it again and again, breath after
-					// breath, with a planner that could find nowhere to mine it from.
-					if (q.equals(p) || eye.distanceTo(center) > reach || Double.isNaN(LocalPathfinder.floorHeight(level, q))
-							|| ProtectionZones.isProtected(level, q) || (mustSee && blockerOf(level, eye, p) != null)) {
+					if (!isSpot(level, q, p, center, reach, bot.getEyeHeight(), mustSee)) {
 						continue;
 					}
 					anyStand = true;
+					if (!sea && !Air.breathable(level, q)) {
+						continue;
+					}
 					double penalty = Air.digPenalty(level, q, waterFactor);
 					if (Air.breathable(level, q) && penalty == 1) {
 						bestNeed = 0; // on the ground, head out: nothing extra to pay
@@ -95,7 +160,7 @@ public final class MineSpot {
 				}
 			}
 		}
-		if (!anyStand && !nearWater(level, p)) {
+		if (!anyStand && !nearWater(level, p) && (sea || headOut(level, p, bot.getEyePosition(), reach, bot.getEyeHeight()))) {
 			// Buried (ore in solid rock, stone under the dirt): nowhere to stand next to it yet, but
 			// digging a way there makes one, like a player would. Costed by what's in the way. (It used
 			// to count as unreachable, so with no stone in the open it never got any cobblestone.)
@@ -154,7 +219,7 @@ public final class MineSpot {
 	}
 
 	/** With a face open to air or water (not buried in rock). */
-	static boolean exposed(ServerLevel level, BlockPos block) {
+	static boolean exposed(BlockGetter level, BlockPos block) {
 		for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
 			BlockPos n = block.relative(d);
 			if (LocalPathfinder.isPassable(level, n) || LocalPathfinder.isWater(level, n)) {
@@ -164,15 +229,19 @@ public final class MineSpot {
 		return false;
 	}
 
-	/** A spot to mine {@code block} from: within reach, not in a protected chunk, and if {@code mustSee}, with it in sight. */
-	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee) {
+	/**
+	 * A spot to mine {@code block} from: within reach, not in a protected chunk, if {@code mustSee}
+	 * with it in sight, and if {@code headOut} with the head out of the water.
+	 */
+	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee, boolean headOut) {
 		Vec3 center = Vec3.atCenterOf(block);
 		return (w, p) -> {
 			if (p.equals(block) || ProtectionZones.isProtected(w, p)) {
 				return false;
 			}
 			Vec3 eye = new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5);
-			return eye.distanceTo(center) <= reach && (!mustSee || blockerOf(w, eye, block) == null);
+			return eye.distanceTo(center) <= reach && (!mustSee || blockerOf(w, eye, block) == null)
+					&& (!headOut || Air.breathable(w, p));
 		};
 	}
 
