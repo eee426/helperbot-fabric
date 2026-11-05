@@ -17,6 +17,7 @@ import com.vale.helperbot.knowledge.DropAnalysis;
 import com.vale.helperbot.knowledge.Obtainability;
 import com.vale.helperbot.path.LocalPathfinder;
 import com.vale.helperbot.path.Mode;
+import com.vale.helperbot.path.PathGoal;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.network.chat.Component;
@@ -93,15 +94,15 @@ public class GatherTask implements BotTask {
 	private static final int DROP_CHECK_TICKS = 7;
 	/** Targets it can't get to (no spot within reach, or not on one breath): skipped for this task. */
 	/**
-	 * Judged out of reach, with the breath it had then (full, health it may spend included): under
-	 * water a bigger breath (health back) may bring them in reach again. It used to be for good:
-	 * after spending some health under water, every deep block was out of reach for the rest of the task.
+	 * What's out of reach, for the whole order: a new gathering step starting over would only find
+	 * it out again. With the breath it had then (full, health it may spend included): under water
+	 * a bigger breath (health back) may bring them in reach again. It used to be for good: after
+	 * spending some health under water, every deep block was out of reach for the rest of the task.
 	 */
-	private final java.util.Map<BlockPos, Integer> unreachable = new java.util.HashMap<>();
+	private final OutOfReach unreachable;
 
 	private boolean outOfReach(BotPlayer bot, BlockPos pos) {
-		Integer breath = unreachable.get(pos);
-		return breath != null && breath >= Air.fullBudget(bot);
+		return unreachable.covers(pos, Air.fullBudget(bot), bot.blockPosition());
 	}
 	/** How many of the nearest targets are compared each time it picks the next one. */
 	private static final int TARGETS_COMPARED = 12;
@@ -129,14 +130,19 @@ public class GatherTask implements BotTask {
 		int blocks = (int) Math.ceil(Math.max(1, wanted - collected(bot)) / Math.max(0.01, DropAnalysis.rate(item, state.getBlock())));
 		double bestNeed = Double.NaN;
 		boolean anyStand = false;
+		boolean mustSee = exposed(level, p);
 		int r = (int) Math.ceil(reach);
 		search:
 		for (int dy = -r - 1; dy <= r; dy++) {
 			for (int dx = -r; dx <= r; dx++) {
 				for (int dz = -r; dz <= r; dz++) {
 					BlockPos q = p.offset(dx, dy, dz);
-					if (q.equals(p) || new Vec3(q.getX() + 0.5, q.getY() + bot.getEyeHeight(), q.getZ() + 0.5).distanceTo(center) > reach
-							|| Double.isNaN(LocalPathfinder.floorHeight(level, q)) || ProtectionZones.isProtected(level, q)) {
+					Vec3 eye = new Vec3(q.getX() + 0.5, q.getY() + bot.getEyeHeight(), q.getZ() + 0.5);
+					// A spot by the same test the walk there goes by (see reachGoal). Arm's reach alone
+					// counted a kelp in a crack as near: it dived for it again and again, breath after
+					// breath, with a planner that could find nowhere to mine it from.
+					if (q.equals(p) || eye.distanceTo(center) > reach || Double.isNaN(LocalPathfinder.floorHeight(level, q))
+							|| ProtectionZones.isProtected(level, q) || (mustSee && blockerOf(level, eye, p) != null)) {
 						continue;
 					}
 					anyStand = true;
@@ -242,10 +248,11 @@ public class GatherTask implements BotTask {
 	private final boolean asStep;
 
 	public GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode) {
-		this(requester, item, wanted, mode, false);
+		this(requester, item, wanted, mode, false, new OutOfReach());
 	}
 
-	GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode, boolean asStep) {
+	GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode, boolean asStep, OutOfReach unreachable) {
+		this.unreachable = unreachable;
 		this.requester = requester;
 		this.item = item;
 		this.wanted = wanted;
@@ -367,6 +374,10 @@ public class GatherTask implements BotTask {
 
 	private Status find(BotPlayer bot) {
 		targets = scan(bot, SCAN_CHUNKS);
+		if (targets.isEmpty() && unreachable.forgetOnce()) {
+			bot.log("别的都没有了，把判断为够不着的再看一遍");
+			targets = scan(bot, SCAN_CHUNKS);
+		}
 		bot.log("附近扫描到 " + targets.size() + " 处" + itemName().getString() + "（不算已放弃的 " + rejected.size() + " 处、暂时够不着的 " + unreachable.size() + " 处）");
 		if (!targets.isEmpty()) {
 			return nextTarget(bot);
@@ -415,7 +426,7 @@ public class GatherTask implements BotTask {
 			return fetch(bot, bestItem);
 		}
 		// Also drops ones that changed since the scan (berries picked, crop trampled).
-		targets.removeIf(p -> rejected.contains(p) || !toolFor.containsKey(level.getBlockState(p).getBlock())
+		targets.removeIf(p -> rejected.contains(p) || outOfReach(bot, p) || !toolFor.containsKey(level.getBlockState(p).getBlock())
 				|| !DropAnalysis.dropsFrom(item, level.getBlockState(p)));
 		if (targets.isEmpty()) {
 			if (bestItem != null) {
@@ -451,7 +462,7 @@ public class GatherTask implements BotTask {
 			double cost = targetCost(bot, p, escape);
 			if (Double.isNaN(cost)) {
 				it.remove();
-				unreachable.put(p, Air.fullBudget(bot));
+				unreachable.judged(p, Air.fullBudget(bot));
 				bot.log(p.toShortString() + " 判断为够不着（附近没有能站着伸手够到它的位置，或者一口气不够），跳过");
 				continue;
 			}
@@ -477,7 +488,6 @@ public class GatherTask implements BotTask {
 	/** Walk to any spot from which the block is within arm's reach. */
 	private void goNear(BotPlayer bot, BlockPos block) {
 		double reach = bot.blockInteractionRange() - REACH_MARGIN;
-		Vec3 center = Vec3.atCenterOf(block);
 		// Not from inside a protected chunk: it can't do anything there (see ProtectionZones).
 		ServerLevel level = bot.level();
 		double eyeHeight = bot.getEyeHeight();
@@ -485,25 +495,7 @@ public class GatherTask implements BotTask {
 		// they mine: within reach isn't enough from the bottom of a hole, with the floor in between
 		// (it stopped there, set about mining the floor as "in the way", and gave the block up).
 		// Buried ones (ore in rock) have no such spot: getting close and digging through is the way.
-		boolean exposed = false;
-		for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
-			BlockPos n = block.relative(d);
-			exposed |= LocalPathfinder.isPassable(level, n) || LocalPathfinder.isWater(level, n);
-		}
-		boolean mustSee = exposed;
-		bot.movement().goTo((w, p) -> {
-			if (p.equals(block) || ProtectionZones.isProtected(w, p)) {
-				return false;
-			}
-			Vec3 eye = new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5);
-			if (eye.distanceTo(center) > reach) {
-				return false;
-			}
-			if (!mustSee) {
-				return true;
-			}
-			return blockerOf(w, eye, block) == null;
-		}, block, mode);
+		bot.movement().goTo(reachGoal(block, reach, eyeHeight, exposed(level, block)), block, mode);
 		// Under water the plan must leave air to mine it too, not just to get there and back.
 		BlockState state = level.getBlockState(block);
 		int dry = dryTicks(bot, block, state, behind != null ? MovementController.AUTO_TOOL
@@ -511,6 +503,29 @@ public class GatherTask implements BotTask {
 		if (dry != Integer.MAX_VALUE) {
 			bot.movement().workAtGoal(dry);
 		}
+	}
+
+	/** With a face open to air or water (not buried in rock). */
+	private static boolean exposed(ServerLevel level, BlockPos block) {
+		for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
+			BlockPos n = block.relative(d);
+			if (LocalPathfinder.isPassable(level, n) || LocalPathfinder.isWater(level, n)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** A spot to mine {@code block} from: within reach, not in a protected chunk, and if {@code mustSee}, with it in sight. */
+	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee) {
+		Vec3 center = Vec3.atCenterOf(block);
+		return (w, p) -> {
+			if (p.equals(block) || ProtectionZones.isProtected(w, p)) {
+				return false;
+			}
+			Vec3 eye = new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5);
+			return eye.distanceTo(center) <= reach && (!mustSee || blockerOf(w, eye, block) == null);
+		};
 	}
 
 	/**
@@ -622,6 +637,15 @@ public class GatherTask implements BotTask {
 			return behind != null ? backToTarget(bot) : nextTarget(bot);
 		}
 		MovementController.Status status = bot.movement().status();
+		BlockPos from = bot.movement().provenFrom();
+		if (from != null) {
+			// Known, not a mishap on the way: nothing to count, and no going back for the same again.
+			bot.log(current.toShortString() + " 确定到不了（" + from.toShortString() + " 发现的），记下，换下一个目标");
+			unreachable.proven(realTarget(), Air.fullBudget(bot), from);
+			bot.movement().stop();
+			behind = null;
+			return nextTarget(bot);
+		}
 		if (status == MovementController.Status.ARRIVED) {
 			phase = Phase.MINE;
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {

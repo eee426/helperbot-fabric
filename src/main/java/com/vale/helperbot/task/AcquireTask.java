@@ -41,6 +41,7 @@ public class AcquireTask implements BotTask {
 	private final ComeTask returnLeg;
 	private final Set<Item> noGather = new HashSet<>();
 	private final Set<Item> planItems = new HashSet<>();
+	private final OutOfReach outOfReach = new OutOfReach();
 	private Phase phase = Phase.PLAN;
 	private int startCount = -1;
 	private boolean announced;
@@ -297,7 +298,7 @@ public class AcquireTask implements BotTask {
 		switch (next) {
 			case CraftPlanner.Gather g -> {
 				gatherItem = g.item();
-				gather = new GatherTask(requester, g.item(), g.count(), mode, true);
+				gather = new GatherTask(requester, g.item(), g.count(), mode, true, outOfReach);
 				phase = Phase.GATHER;
 			}
 			case CraftPlanner.Hunt h -> {

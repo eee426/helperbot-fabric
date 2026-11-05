@@ -124,6 +124,16 @@ public final class PathJob {
 		return failed ? 0 : search.progressBlocks();
 	}
 
+	/** See {@link LocalPathfinder#provenUnreachable()}. */
+	public boolean provenUnreachable() {
+		return !failed && search.provenUnreachable();
+	}
+
+	/** See {@link LocalPathfinder#hitNodeLimit()}. */
+	public boolean hitNodeLimit() {
+		return search.hitNodeLimit();
+	}
+
 	public LocalPathfinder.Limits limits() {
 		return search.limits();
 	}

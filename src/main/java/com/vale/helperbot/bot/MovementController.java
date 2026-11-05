@@ -143,6 +143,7 @@ public final class MovementController {
 	public void goTo(PathGoal goal, BlockPos target, Mode mode, boolean horizontalOnly) {
 		stop();
 		this.leaving = null;
+		this.provenFrom = null;
 		this.goal = goal;
 		this.target = target;
 		this.mode = mode;
@@ -155,6 +156,15 @@ public final class MovementController {
 		this.recoveries = 0;
 		this.frozenTicks = 0;
 		this.goalWork = 0;
+	}
+
+	/**
+	 * Where it stood when it found the target out of reach, null if it hasn't: a search went through
+	 * everything without coming to it, or it ran out of air on the way there and had to turn back.
+	 * That needs no search to have finished: it's what happened.
+	 */
+	public BlockPos provenFrom() {
+		return provenFrom;
 	}
 
 	/** Walk out of the protected area it's in, by the nearest way that leads out. */
@@ -396,6 +406,9 @@ public final class MovementController {
 		BlockPos f = feet();
 		ServerLevel level = bot.level();
 		ignoreAir = true; // read when it plans, next tick
+		if (status == Status.MOVING && !engaged) {
+			provenFrom = f;
+		}
 		// A cell whose head space is still a block to dig only counts if it won't be water once dug
 		// (the goal sees the world as it is now, not as the path will leave it).
 		engage((w, p) -> Air.breathable(w, p)
@@ -728,6 +741,7 @@ public final class MovementController {
 	private boolean zoneRoute;
 	/** Set while getting out of a protected area is the whole point (see leaveZone). */
 	private ZoneExit leaving;
+	private BlockPos provenFrom;
 	/** Most nodes of a search through a protected area: its window is many times the usual ones. */
 	private static final int ZONE_NODES = 400_000;
 	/** Under water, plan again this often: the world there changes fast (sand, flowing water, kelp). */
@@ -761,11 +775,15 @@ public final class MovementController {
 		if (!wasZone && !result.reachesGoal() && !headUnderwater() && startZoneSearch()) {
 			return;
 		}
+		// Not when it's known to lead nowhere: under water that would use up the breath getting
+		// nearer, come up, and start over from the same answer.
+		boolean proven = !wasZone && search.provenUnreachable();
+		String ended = search.hitNodeLimit() ? "，节点到上限，没搜完" : proven ? "，搜完了" : "";
 		boolean useful = result.reachesGoal() || (wasZone && !result.steps().isEmpty())
-				|| (!result.steps().isEmpty() && search.progressBlocks() >= MIN_USEFUL_PROGRESS);
+				|| (!proven && !result.steps().isEmpty() && search.progressBlocks() >= MIN_USEFUL_PROGRESS);
 		if (!useful && !wasZone && searchLevel < levels.length - 1) {
 			// The last line before a long think: if it never comes back, this says what it was doing.
-			bot.log("±" + search.limits().radiusXZ() + " 格内没有可用的路（用了 " + (bot.tickCount - plannedAt) / 20.0 + " 秒），扩大到 ±"
+			bot.log("±" + search.limits().radiusXZ() + " 格内没有可用的路（用了 " + (bot.tickCount - plannedAt) / 20.0 + " 秒" + ended + "），扩大到 ±"
 					+ levels[searchLevel + 1].radiusXZ() + " 格，目标 " + (target == null ? "（无）" : target.toShortString()));
 			startPlanning(searchLevel + 1);
 			return;
@@ -783,8 +801,14 @@ public final class MovementController {
 			onNoPath();
 			return;
 		}
+		if (proven) {
+			// Steps it could take, none of them to the goal, in the widest search there is.
+			provenFrom = feet();
+			fail("±" + radius + " 格内搜完了，确定到不了 " + target.toShortString());
+			return;
+		}
 		bot.log("规划出 " + result.steps().size() + " 步（±" + radius + " 格，"
-				+ (result.reachesGoal() ? "能到终点" : "先走一段") + "）");
+				+ (result.reachesGoal() ? "能到终点" : "先走一段") + ended + "）");
 		adopt(result);
 		zoneRoute = wasZone;
 		emptyPlans = 0;
@@ -842,7 +866,7 @@ public final class MovementController {
 		LocalPathfinder.Result result = next.result();
 		boolean useful = result.reachesGoal()
 				|| (!result.steps().isEmpty() && next.progressBlocks() >= MIN_USEFUL_PROGRESS);
-		if (!useful || (!result.reachesGoal() && ProtectionZones.isProtected(bot.level(), feet()))) {
+		if (!useful || next.provenUnreachable() || (!result.reachesGoal() && ProtectionZones.isProtected(bot.level(), feet()))) {
 			return false; // let the normal planner try (and widen the search if needed)
 		}
 		adopt(result);

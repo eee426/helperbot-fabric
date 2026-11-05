@@ -352,6 +352,20 @@ public final class LocalPathfinder implements Planner {
 		return result;
 	}
 
+	/**
+	 * The answer is no: the target was in the window, and it went through every cell it could get
+	 * to, breaths included, without coming to the goal. A partial path out of such a search leads
+	 * nowhere; one that stopped at {@link #hitNodeLimit} or at the window's edge doesn't know yet.
+	 */
+	public boolean provenUnreachable() {
+		return result != null && !result.reachesGoal() && !partial && open.isEmpty();
+	}
+
+	/** It stopped for its node limit, with cells still to look at. */
+	public boolean hitNodeLimit() {
+		return expanded >= limits.maxNodes();
+	}
+
 	private boolean atWindowEdge(BlockPos pos) {
 		int r = limits.radiusXZ() - 1;
 		if (Math.abs(pos.getX() - origin.getX()) >= r || Math.abs(pos.getZ() - origin.getZ()) >= r) {

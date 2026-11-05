@@ -758,6 +758,28 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.WATER_BUCKET, 1, Mode.NORMAL);
 				}, Scenario.has(Items.WATER_BUCKET, 1)),
 
+				new Scenario("W45", "海带在岩缝里（胳膊够得着，但看不到）：确定到不了就换旁边的，不来回下潜", 4 * MINUTE, (a, bot, me) -> {
+					kelpInACrack(a);
+					a.set(18, 22, 2, Blocks.KELP);
+					teleport(bot, a, 2, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.KELP, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.KELP, 1, c -> c.logCount("该换气了") <= 1, "来回下潜了")),
+
+				new Scenario("W46", "同上但只有岩缝里这一根：说明到不了，不无限循环", 4 * MINUTE, (a, bot, me) -> {
+					kelpInACrack(a);
+					teleport(bot, a, 2, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.KELP, 1, Mode.AGGRESSIVE);
+				}, c -> c.logCount("该换气了") > 2 ? Scenario.Outcome.fail("来回下潜了")
+						: c.ended() ? Scenario.Outcome.pass("结束了：" + c.bot().lastTaskStatus()) : null),
+
+				new Scenario("W47", "决策测试（不走路）：把 2026-11-04 海带日志的气量和位置灌进去，反复决策，不选同一根", MINUTE, (a, bot, me) -> {
+					kelpInACrack(a);
+					a.set(18, 22, 2, Blocks.KELP);
+					return null;
+				}, Scenarios::decideAgainAndAgain),
+
 				new Scenario("W43", "要 4 块黏土：3 格深的水底有（浮在水面够得着），25 格外的岸上也有：去岸上", 4 * MINUTE, (a, bot, me) -> {
 					// Reachable from the surface, head out: no dives, but floating it mines 5x slower.
 					a.fill(6, 38, -3, 12, 40, 3, Blocks.WATER);
@@ -1010,6 +1032,64 @@ public final class Scenarios {
 		a.fill(40, 41, -40, 40, 44, 40, Blocks.STONE);
 		a.fill(-20, 41, -40, 40, 44, -40, Blocks.STONE);
 		a.fill(-20, 41, 40, 40, 44, 40, Blocks.STONE);
+	}
+
+	/** Water 19 deep with a kelp in a crack in a shelf: in arm's reach from on top, but not in sight from anywhere. */
+	private static void kelpInACrack(Arena a) {
+		a.fill(4, 22, -8, 24, 40, 8, Blocks.WATER);
+		a.fill(10, 22, -3, 15, 25, 3, Blocks.STONE);
+		a.set(13, 23, 0, Blocks.WATER);
+		a.set(12, 23, 0, Blocks.KELP);
+	}
+
+	/**
+	 * The decision alone, with no walking: rounds of "pick the next target, go by what the planner
+	 * says", from the heights and breaths in the log of the player's kelp dives. The crack must come
+	 * up once and never again, its neighbour neither, until the breath really is bigger or it's far off.
+	 */
+	private static Scenario.Outcome decideAgainAndAgain(Scenario.Context c) {
+		Arena a = c.arena();
+		BotPlayer bot = c.bot();
+		BlockPos crack = a.at(12, 23, 0), near = a.at(12, 25, 0), open = a.at(18, 22, 2);
+		int[][] rounds = {{12, 41, 300, 360}, {12, 37, 290, 360}, {12, 31, 116, 360}, {10, 36, 75, 360}, {12, 34, 92, 340},
+				{13, 41, 350, 360}, {12, 41, 360, 360}, {8, 41, 300, 360}, {12, 41, 300, 360}, {12, 41, 300, 360}};
+		com.vale.helperbot.task.OutOfReach memory = new com.vale.helperbot.task.OutOfReach();
+		int searched = 0;
+		for (int[] r : rounds) {
+			BlockPos from = a.at(r[0], r[1], 0);
+			if (memory.covers(near, r[3], from) != memory.covers(crack, r[3], from)) {
+				return Scenario.Outcome.fail("旁边的方块和岩缝判断不一致");
+			}
+			if (!memory.covers(crack, r[3], from)) {
+				searched++;
+				String verdict = verdictOn(a, bot, crack, from, r[2], r[3]);
+				if (verdict != null) {
+					return Scenario.Outcome.fail("第 " + searched + " 次：" + verdict);
+				}
+				memory.proven(crack, r[3], from);
+			}
+			if (memory.covers(open, r[3], from)) {
+				return Scenario.Outcome.fail("开阔处的海带被连带排除了");
+			}
+		}
+		if (searched != 1) {
+			return Scenario.Outcome.fail(rounds.length + " 轮里下潜了 " + searched + " 次");
+		}
+		boolean bigger = !memory.covers(crack, 380, a.at(12, 41, 0));
+		boolean farOff = !memory.covers(crack, 360, a.at(200, 41, 0));
+		return bigger && farOff ? Scenario.Outcome.pass(rounds.length + " 轮只判断 1 次；气变多或走远才重判")
+				: Scenario.Outcome.fail("气变多：" + bigger + "，走远：" + farOff);
+	}
+
+	/** Is there really nowhere to mine it from? Null if so, otherwise where. */
+	private static String verdictOn(Arena a, BotPlayer bot, BlockPos block, BlockPos from, int air, int full) {
+		var goal = com.vale.helperbot.task.GatherTask.reachGoal(block, bot.blockInteractionRange() - 0.3, bot.getEyeHeight(), true);
+		for (BlockPos p : BlockPos.betweenClosed(block.offset(-5, -5, -5), block.offset(5, 5, 5))) {
+			if (!Double.isNaN(com.vale.helperbot.path.LocalPathfinder.floorHeight(a.level, p)) && goal.test(a.level, p)) {
+				return "能站在 " + p.toShortString() + " 挖到";
+			}
+		}
+		return null;
 	}
 
 	private static void protect(Arena a, int x, int z) {
