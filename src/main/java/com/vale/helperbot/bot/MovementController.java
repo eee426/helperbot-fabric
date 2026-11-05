@@ -479,6 +479,11 @@ public final class MovementController {
 		bestDistance = Double.MAX_VALUE;
 		ticksWithoutProgress = 0;
 		recoveries = 0;
+		if (provenFrom != null && status == Status.MOVING) {
+			// Back from turning round for air: the way there is out, whoever sent it (see provenFrom).
+			fail("一口气到不了");
+			return;
+		}
 		replan("战斗结束，回到原来的事");
 	}
 

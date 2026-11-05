@@ -316,12 +316,12 @@ public class AcquireTask implements BotTask {
 			}
 			case CraftPlanner.Craft c -> {
 				bot.movement().stop();
-				craft = new CraftStep(requester, c);
+				craft = new CraftStep(requester, c, outOfReach);
 				phase = Phase.CRAFT;
 			}
 			case CraftPlanner.Smelt s -> {
 				bot.movement().stop();
-				smelt = new SmeltStep(requester, s);
+				smelt = new SmeltStep(requester, s, outOfReach);
 				phase = Phase.SMELT;
 			}
 		}

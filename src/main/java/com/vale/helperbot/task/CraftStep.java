@@ -30,14 +30,15 @@ final class CraftStep {
 	private final ServerPlayer requester;
 	private final RecipeIndex.Craft recipe;
 	private final int times;
-	private final Station table = new Station(Items.CRAFTING_TABLE, Blocks.CRAFTING_TABLE);
+	private final Station table;
 	private Phase phase;
 	private AbstractCraftingMenu menu;
 	private int done;
 	private int cooldown;
 	private String failure;
 
-	CraftStep(ServerPlayer requester, CraftPlanner.Craft action) {
+	CraftStep(ServerPlayer requester, CraftPlanner.Craft action, OutOfReach unreachable) {
+		this.table = new Station(Items.CRAFTING_TABLE, Blocks.CRAFTING_TABLE, unreachable);
 		this.requester = requester;
 		this.recipe = action.recipe();
 		this.times = action.times();

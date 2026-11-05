@@ -32,7 +32,7 @@ final class SmeltStep {
 	private final ServerPlayer requester;
 	private final RecipeIndex.Smelt recipe;
 	private final int total;
-	private final Station furnace = new Station(Items.FURNACE, Blocks.FURNACE);
+	private final Station furnace;
 	private Phase phase = Phase.PLACE;
 	private int loaded;
 	private int collected;
@@ -40,7 +40,8 @@ final class SmeltStep {
 	private int lastInputCount = -1;
 	private String failure;
 
-	SmeltStep(ServerPlayer requester, CraftPlanner.Smelt action) {
+	SmeltStep(ServerPlayer requester, CraftPlanner.Smelt action, OutOfReach unreachable) {
+		this.furnace = new Station(Items.FURNACE, Blocks.FURNACE, unreachable);
 		this.requester = requester;
 		this.recipe = action.recipe();
 		this.total = action.count();

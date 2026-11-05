@@ -4,6 +4,7 @@ import com.vale.helperbot.bot.BotPlayer;
 import com.vale.helperbot.bot.MovementController;
 import com.vale.helperbot.guard.Placement;
 import com.vale.helperbot.knowledge.Habitat;
+import com.vale.helperbot.path.Air;
 import com.vale.helperbot.path.LocalPathfinder;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -15,6 +16,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -38,10 +40,13 @@ final class Station {
 	private BlockPos pos;
 	private int pickupTicks;
 	private String failure = "";
+	/** The order's record of what can't be got to (see OutOfReach). */
+	private final OutOfReach unreachable;
 
-	Station(Item item, Block block) {
+	Station(Item item, Block block, OutOfReach unreachable) {
 		this.item = item;
 		this.block = block;
+		this.unreachable = unreachable;
 	}
 
 	BlockPos pos() {
@@ -52,17 +57,23 @@ final class Station {
 		return failure;
 	}
 
-	/** Where it's walking to, to find room for the station (null: not walking). */
-	private BlockPos dryGround;
+	/** What it's walking towards, to find room for the station (null: not walking). */
+	private BlockPos heading;
+	/** {@link #heading} is only where land may be (see lookForLand). */
+	private boolean seeking;
+	/** Set once it has to go looking for land. */
+	private Explorer land;
 	private int walks;
-	private static final int MAX_WALKS = 2;
-	private static final int DRY_SEARCH_RADIUS = 16;
+	private static final int MAX_WALKS = 3;
 
 	/**
-	 * One tick of putting it down: next to the bot if there's room; if not (floating in water,
-	 * walled in), walk to the nearest dry ground first, like a player would, then try there. It
-	 * used to just try three times where it was, in the water, and give up. Out at sea that's the
-	 * nearest shore in what's loaded, or failing that, a place whose biome isn't water.
+	 * One tick of putting it down: next to the bot if there's room; if not (in the water, walled in,
+	 * in a protected chunk), walk to wherever there is, like a player would, then try there. The
+	 * search says where: any spot with room will do, and it takes the one that's the least trouble
+	 * to get to, so a cave shut in under the sea bed loses to the shore by what it costs, and
+	 * nothing here has to know about water. Spots picked off the map first, it used to go for
+	 * one like that a breath at a time, for ever. If the search can't see that far, the nearest dry
+	 * ground in what's loaded says which way; with none, wherever the biomes aren't water.
 	 */
 	BotTask.Status placeTick(BotPlayer bot) {
 		if (bot.getInventory().findSlotMatchingItem(new ItemStack(item)) < 0) {
@@ -72,49 +83,48 @@ final class Station {
 		if (land != null) {
 			land.tick();
 		}
-		if (dryGround == null) {
-			if (place(bot)) {
-				return BotTask.Status.DONE;
-			}
-			// In the water, the shore first: the nearest dry cell may well be a cave shut in under the
-			// bed, right there on the map and no way to it but through the rock, a breath at a time.
-			boolean inWater = LocalPathfinder.isWater(bot.level(), bot.movement().feet());
-			BlockPos shore = inWater ? nearestShore(bot) : null;
-			dryGround = shore != null ? shore : findDryGround(bot);
-			if (dryGround == null) {
-				dryGround = nearestShore(bot);
-			}
-			if (dryGround == null) {
-				return lookForLand(bot);
-			}
-			if (++walks > MAX_WALKS) {
-				dryGround = null;
-				failure = "附近找不到能放" + new ItemStack(item).getHoverName().getString() + "的干地方";
-				return BotTask.Status.FAILED;
-			}
-			bot.log("这里放不下" + new ItemStack(item).getHoverName().getString() + "，先去 " + dryGround.toShortString());
-			BlockPos t = dryGround;
-			bot.movement().goTo((w, p) -> p.equals(t), t, com.vale.helperbot.path.Mode.DEFAULT);
-			return BotTask.Status.RUNNING;
+		if (heading == null) {
+			return place(bot) ? BotTask.Status.DONE : setOff(bot);
 		}
 		MovementController.Status status = bot.movement().status();
 		if (status == MovementController.Status.ARRIVED) {
-			dryGround = null; // try again from here next tick
-			if (seeking) {
-				seeking = false;
-				land.leavePlace();
-			}
+			arrived();
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
-			if (seeking) {
-				bot.log("去不了那里（" + bot.movement().failReason() + "），换一处");
-				dryGround = null;
-				seeking = false;
-				land.leavePlace();
-				return BotTask.Status.RUNNING;
+			BlockPos from = bot.movement().provenFrom();
+			if (from != null) {
+				unreachable.proven(heading, Air.fullBudget(bot), from);
+			} else if (!seeking) {
+				failure = "去能放" + new ItemStack(item).getHoverName().getString() + "的地方，路走不通（" + bot.movement().failReason() + "）";
+				return BotTask.Status.FAILED;
 			}
-			failure = "去干地方的路走不通（" + bot.movement().failReason() + "）";
+			bot.log("去不了那里（" + bot.movement().failReason() + "），换一处");
+			arrived();
+		}
+		return BotTask.Status.RUNNING;
+	}
+
+	private void arrived() {
+		if (seeking) {
+			land.leavePlace();
+		}
+		heading = null; // try again from here next tick
+		seeking = false;
+	}
+
+	private BotTask.Status setOff(BotPlayer bot) {
+		BlockPos shore = nearestDryGround(bot);
+		if (shore == null) {
+			return lookForLand(bot);
+		}
+		String name = new ItemStack(item).getHoverName().getString();
+		if (++walks > MAX_WALKS) {
+			failure = "附近找不到能放" + name + "的干地方";
 			return BotTask.Status.FAILED;
 		}
+		bot.log("这里放不下" + name + "，去有地方的位置（大致朝 " + shore.toShortString() + "）");
+		heading = shore;
+		BlockPos here = bot.movement().feet();
+		bot.movement().goTo((w, p) -> !p.equals(here) && roomBeside(w, p), shore, com.vale.helperbot.path.Mode.DEFAULT);
 		return BotTask.Status.RUNNING;
 	}
 
@@ -140,21 +150,17 @@ final class Station {
 			return BotTask.Status.FAILED;
 		}
 		bot.log("这里全是水，放不下" + new ItemStack(item).getHoverName().getString() + "，先往 " + next.toShortString() + " 找陆地");
-		dryGround = next;
+		heading = next;
 		seeking = true;
 		bot.movement().goTo(Habitat.arrived(next, 16, Habitat.Layer.SURFACE), next, com.vale.helperbot.path.Mode.DEFAULT, true);
 		return BotTask.Status.RUNNING;
 	}
 
-	/** Set once it has to go looking for land. */
-	private Explorer land;
-	/** {@link #dryGround} is only where land may be, not a spot it knows. */
-	private boolean seeking;
-
 	/** The nearest spot of dry ground on top of what's loaded, ring by ring of chunks; null if it's all water. */
-	private static BlockPos nearestShore(BotPlayer bot) {
+	private BlockPos nearestDryGround(BotPlayer bot) {
 		ServerLevel level = bot.level();
 		BlockPos feet = bot.movement().feet();
+		int breath = Air.fullBudget(bot);
 		int cx = feet.getX() >> 4, cz = feet.getZ() >> 4;
 		BlockPos best = null;
 		double bestDist = Double.MAX_VALUE;
@@ -169,7 +175,7 @@ final class Station {
 						for (int j = 0; j < 16; j++) {
 							BlockPos q = new BlockPos(x * 16 + i, chunk.getHeight(Heightmap.Types.MOTION_BLOCKING, i, j) + 1, z * 16 + j);
 							double d = q.distSqr(feet);
-							if (d < bestDist && roomBeside(level, q)) {
+							if (d < bestDist && roomBeside(level, q) && !unreachable.covers(q, breath, feet)) {
 								best = q;
 								bestDist = d;
 							}
@@ -181,8 +187,8 @@ final class Station {
 		return best;
 	}
 
-	/** A dry spot to stand, with room next to it for the station. */
-	private static boolean roomBeside(ServerLevel level, BlockPos q) {
+	/** A dry spot to stand, with room next to it for the station. Asked by searches too, of their copy of the world. */
+	private static boolean roomBeside(BlockGetter level, BlockPos q) {
 		if (LocalPathfinder.isWater(level, q) || LocalPathfinder.isWater(level, q.above())
 				|| Double.isNaN(LocalPathfinder.floorHeight(level, q))) {
 			return false;
@@ -194,27 +200,6 @@ final class Station {
 			}
 		}
 		return false;
-	}
-
-	/** Nearest spot to stand, out of the water, with room next to it for the station. */
-	private BlockPos findDryGround(BotPlayer bot) {
-		ServerLevel level = bot.level();
-		BlockPos feet = bot.movement().feet();
-		BlockPos best = null;
-		double bestDist = Double.MAX_VALUE;
-		for (int dx = -DRY_SEARCH_RADIUS; dx <= DRY_SEARCH_RADIUS; dx++) {
-			for (int dz = -DRY_SEARCH_RADIUS; dz <= DRY_SEARCH_RADIUS; dz++) {
-				for (int dy = -6; dy <= 6; dy++) {
-					BlockPos q = feet.offset(dx, dy, dz);
-					double d = q.distSqr(feet);
-					if (d < bestDist && roomBeside(level, q)) {
-						best = q;
-						bestDist = d;
-					}
-				}
-			}
-		}
-		return best;
 	}
 
 	/** Put it down next to the bot, right now. False with {@link #failure()} set if it can't. */
