@@ -1027,6 +1027,57 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.INK_SAC, 1, Mode.NORMAL);
 				}, Scenario.has(Items.INK_SAC, 1)),
 
+				new Scenario("W52", "5 根海带都在封死的水洞里：一次搜完就知道，不下水，走开", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(8, 30, -3, 16, 36, 3, Blocks.WATER);
+					for (int x = 9; x < 16; x += 2) {
+						a.set(x, 30, 0, Blocks.KELP);
+					}
+					a.set(12, 30, 2, Blocks.KELP);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.KELP, 1, Mode.NORMAL);
+				}, c -> c.logCount("一次搜完") > 1 ? Scenario.Outcome.fail("搜了不止一次")
+						: c.bot().getY() < Arena.SURFACE - 3 ? Scenario.Outcome.fail("下去了")
+						: c.ended() || c.logHas("到不了，记下") ? Scenario.Outcome.pass("知道到不了了") : null),
+
+				new Scenario("W53", "岸上有条小河挡路：照常游过去", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(10, 36, -60, 15, 40, 60, Blocks.WATER);
+					a.set(18, 40, 0, Blocks.GRASS_BLOCK);
+					me.teleportTo(a.level, a.origin.getX() + 25.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.ended() ? Scenario.Outcome.pass("过去了") : null),
+
+				new Scenario("W54", "鳕鱼在封死的水洞里：判断到不了，不去", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(8, 34, -2, 12, 37, 2, Blocks.WATER);
+					a.spawn(EntityType.COD, 10, 35, 0);
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COD, 1, Mode.NORMAL);
+				}, c -> c.bot().getY() < Arena.SURFACE - 3 ? Scenario.Outcome.fail("挖下去了")
+						: c.logHas("到不了（") ? Scenario.Outcome.pass("判断到不了，没去") : c.ended() ? Scenario.Outcome.fail("结束了也没判断") : null),
+
+				new Scenario("W55", "一片 120 格见方、30 格深的海，海带都封在水下的石盒里：一次搜完要多久（看说明里的时间）", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(0, 11, -60, 119, 40, 59, Blocks.WATER);
+					for (int x = 10; x < 110; x += 20) {
+						for (int z = -50; z < 50; z += 20) {
+							a.fill(x - 1, 34, z - 1, x + 2, 37, z + 1, Blocks.STONE);
+							a.fill(x + 1, 35, z, x + 1, 36, z, Blocks.WATER);
+							a.set(x, 36, z, Blocks.WATER);
+							a.set(x, 35, z, Blocks.KELP);
+						}
+					}
+					teleport(bot, a, -3, 41, 0);
+					give(bot, Items.BREAD, 16);
+					give(bot, Items.IRON_PICKAXE, 1);
+					return new com.vale.helperbot.task.GatherTask(me, Items.KELP, 1, Mode.NORMAL);
+				}, c -> {
+					int at = c.log().indexOf("一次搜完");
+					return at >= 0 ? Scenario.Outcome.pass(c.log().substring(at, c.log().indexOf(10, at)))
+							: c.ended() ? Scenario.Outcome.fail("没搜") : null;
+				}),
+
 				new Scenario("W36", "9 格深的水底拿海带：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 32, -4, 12, 40, 4, Blocks.WATER);
 					a.set(8, 32, 0, Blocks.KELP);

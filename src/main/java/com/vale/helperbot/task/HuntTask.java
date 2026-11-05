@@ -65,7 +65,7 @@ final class HuntTask {
 	private static final int HEAL_MAX_TICKS = 600;
 
 	private enum Phase {
-		FIND, LOCATE, EXPLORE, WAIT, CHASE, FETCH, HEAL
+		FIND, LOCATE, EXPLORE, WAIT, WAY, CHASE, FETCH, HEAL
 	}
 
 	private final ServerPlayer requester;
@@ -143,6 +143,7 @@ final class HuntTask {
 			case LOCATE -> locate(bot);
 			case EXPLORE -> explore(bot);
 			case WAIT -> waitForSpawns(bot);
+			case WAY -> way(bot);
 			case CHASE -> chase(bot);
 			case FETCH -> {
 				if (drops.tick(bot, mode) != DropFetch.Result.RUNNING) {
@@ -265,10 +266,10 @@ final class HuntTask {
 					+ " 格），一口气潜不到、打完再回来。给我水下呼吸药水，或者戴一个有水下呼吸附魔的头盔，就能去");
 		}
 		if (target != null) {
-			bot.log("盯上了 " + target.getType().getDescription().getString() + " @" + target.blockPosition().toShortString());
-			bot.holdWeapon();
-			setPhase(Phase.CHASE);
-			return BotTask.Status.RUNNING;
+			if (target.isUnderWater()) {
+				return findWay(bot);
+			}
+			return lockOn(bot);
 		}
 		ServerLevel level = bot.level();
 		if (explorer != null) {
@@ -282,6 +283,65 @@ final class HuntTask {
 			return fail(bot, "等了很久也没刷出" + names().getString());
 		}
 		return lookFurther(bot);
+	}
+
+	private BotTask.Status lockOn(BotPlayer bot) {
+		bot.log("盯上了 " + target.getType().getDescription().getString() + " @" + target.blockPosition().toShortString());
+		bot.holdWeapon();
+		setPhase(Phase.CHASE);
+		return BotTask.Status.RUNNING;
+	}
+
+	/** The prey under water around here, each with where it can be hit from (see findWay). */
+	private final Map<Mob, com.vale.helperbot.path.PathGoal> wayTo = new HashMap<>();
+
+	/**
+	 * In a closed-off cave under water it can look near and be out of reach: before going in, one
+	 * search says if any of it can be got at, from where it is now (see MovementController#findWay).
+	 * It doesn't say it will catch what swims off; it only leaves out what's plainly not to be had.
+	 * Only for what's under water: on land, chasing it is how it finds out, at no risk.
+	 */
+	private BotTask.Status findWay(BotPlayer bot) {
+		ServerLevel level = bot.level();
+		wayTo.clear();
+		for (Mob m : level.getEntitiesOfClass(Mob.class, bot.getBoundingBox().inflate(SCAN_RADIUS),
+				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID()) && MobDrops.mayHunt(m)
+						&& !ProtectionZones.isProtected(level, m.blockPosition()) && m.isUnderWater() && withinBreath(bot, waterOver(level, m)))) {
+			wayTo.put(m, com.vale.helperbot.bot.Sight.attackSpot(bot, m));
+		}
+		List<com.vale.helperbot.path.PathGoal> goals = List.copyOf(wayTo.values());
+		bot.movement().findWay(wayTo.keySet().stream().map(Mob::blockPosition).toList(), (w, p) -> {
+			for (com.vale.helperbot.path.PathGoal g : goals) {
+				if (g.test(w, p)) {
+					return true;
+				}
+			}
+			return false;
+		}, mode, 0);
+		setPhase(Phase.WAY);
+		return BotTask.Status.RUNNING;
+	}
+
+	private BotTask.Status way(BotPlayer bot) {
+		if (bot.movement().findingWay()) {
+			return BotTask.Status.RUNNING;
+		}
+		BlockPos end = bot.movement().wayEnd();
+		bot.movement().stop();
+		target = null;
+		for (Map.Entry<Mob, com.vale.helperbot.path.PathGoal> e : wayTo.entrySet()) {
+			if (end != null && e.getKey().isAlive() && e.getValue().test(bot.level(), end)
+					&& (target == null || e.getKey().distanceToSqr(bot) < target.distanceToSqr(bot))) {
+				target = e.getKey();
+			}
+		}
+		if (target != null) {
+			return lockOn(bot);
+		}
+		bot.log("水下的" + names().getString() + "到不了（" + wayTo.size() + " 只），不去");
+		wayTo.keySet().forEach(m -> rejected.add(m.getUUID()));
+		setPhase(Phase.FIND);
+		return BotTask.Status.RUNNING;
 	}
 
 	// ---- looking further ------------------------------------------------------------------
@@ -630,6 +690,7 @@ final class HuntTask {
 			case EXPLORE -> "打猎（" + what + "）：去 " + (waypoint == null ? "?" : waypoint.getX() + ", " + waypoint.getZ())
 					+ " 找（已探索 " + (explorer == null ? 0 : explorer.seconds()) + " 秒）";
 			case WAIT -> "打猎（" + what + "）：等刷新（已等 " + waited / 20 + " 秒）";
+			case WAY -> "打猎（" + what + "）：算能不能到";
 			case CHASE -> "打猎（" + what + "）：追击 " + (target == null ? "?" : target.getType().getDescription().getString());
 			case FETCH -> "打猎（" + what + "）：捡地上的";
 			case HEAL -> "打猎（" + what + "）：血量低，回血中";

@@ -61,7 +61,7 @@ public class GatherTask implements BotTask {
 	private static final int MAX_TRAVEL_FAILURES = 4;
 
 	private enum Phase {
-		PREPARE, FIND, MAP, LOCATE, TRAVEL, APPROACH, MINE, FETCH, RETURN
+		PREPARE, FIND, MAP, LOCATE, TRAVEL, WAY, APPROACH, MINE, FETCH, RETURN
 	}
 
 	private final ServerPlayer requester;
@@ -194,6 +194,7 @@ public class GatherTask implements BotTask {
 			case MAP -> lookFurther(bot);
 			case LOCATE -> locate(bot);
 			case TRAVEL -> travel(bot);
+			case WAY -> way(bot);
 			case APPROACH -> approach(bot);
 			case MINE -> mine(bot);
 			case FETCH -> fetch(bot);
@@ -357,10 +358,73 @@ public class GatherTask implements BotTask {
 		if (bestItem != null && bestItemCost <= bestCost) {
 			return fetch(bot, bestItem);
 		}
+		if (MineSpot.ofTheSea(level.getBlockState(best))) {
+			return findWay(bot);
+		}
 		targets.remove(best);
 		current = best;
 		currentBlock = level.getBlockState(current).getBlock();
 		goNear(bot, current);
+		phase = Phase.APPROACH;
+		return Status.RUNNING;
+	}
+
+	/** What it's looking for a way to, each with where it's got at from (see findWay). */
+	private final Map<BlockPos, PathGoal> wayTo = new HashMap<>();
+
+	/**
+	 * What the sea has is in the water or nowhere, so whether it can be got at decides: before going
+	 * in, one search for all of it in sight (see MovementController#findWay).
+	 */
+	private Status findWay(BotPlayer bot) {
+		ServerLevel level = bot.level();
+		wayTo.clear();
+		double work = 0;
+		for (BlockPos p : targets) {
+			BlockState state = level.getBlockState(p);
+			if (MineSpot.ofTheSea(state)) {
+				wayTo.put(p, MineSpot.reachGoal(p, MineSpot.reach(bot), bot.getEyeHeight(), MineSpot.exposed(level, p), false));
+				int dry = MineSpot.dryTicks(bot, p, state, toolFor.getOrDefault(state.getBlock(), MovementController.HAND));
+				work = dry == Integer.MAX_VALUE ? work : Math.max(work, dry);
+			}
+		}
+		List<PathGoal> goals = List.copyOf(wayTo.values());
+		bot.movement().findWay(List.copyOf(wayTo.keySet()), (w, p) -> {
+			for (PathGoal g : goals) {
+				if (g.test(w, p)) {
+					return true;
+				}
+			}
+			return false;
+		}, mode, work);
+		phase = Phase.WAY;
+		return Status.RUNNING;
+	}
+
+	private Status way(BotPlayer bot) {
+		if (bot.movement().findingWay()) {
+			return Status.RUNNING;
+		}
+		ServerLevel level = bot.level();
+		BlockPos end = bot.movement().wayEnd();
+		BlockPos reached = null;
+		for (Map.Entry<BlockPos, PathGoal> e : wayTo.entrySet()) {
+			if (end != null && (reached == null || e.getKey().distSqr(end) < reached.distSqr(end)) && e.getValue().test(level, end)) {
+				reached = e.getKey();
+			}
+		}
+		if (reached == null) {
+			bot.log("这 " + wayTo.size() + " 处" + itemName().getString() + "都到不了，记下，去别处找");
+			BlockPos from = bot.movement().feet();
+			wayTo.keySet().forEach(p -> unreachable.proven(p, Air.fullBudget(bot), from));
+			targets.removeAll(wayTo.keySet());
+			bot.movement().stop();
+			return nextTarget(bot);
+		}
+		targets.remove(reached);
+		current = reached;
+		currentBlock = level.getBlockState(current).getBlock();
+		bot.movement().settle(wayTo.get(reached), reached);
 		phase = Phase.APPROACH;
 		return Status.RUNNING;
 	}
@@ -963,6 +1027,7 @@ public class GatherTask implements BotTask {
 			case MAP -> "采集 " + what + "：看哪里有";
 			case LOCATE -> "采集 " + what + "：搜索远处的群系";
 			case TRAVEL -> "采集 " + what + "：前往 " + travelTarget.getX() + ", " + travelTarget.getZ();
+			case WAY -> "采集 " + what + "：算能不能到";
 			case APPROACH -> "采集 " + what + "：走向 " + current.toShortString();
 			case MINE -> "采集 " + what + "：正在挖 " + current.toShortString();
 			case FETCH -> "采集 " + what + "：捡地上的";

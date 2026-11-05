@@ -134,6 +134,11 @@ public final class PathJob {
 		return search.blocksShort();
 	}
 
+	/** See {@link LocalPathfinder#nodes()}. */
+	public int nodes() {
+		return search.nodes();
+	}
+
 	/** See {@link LocalPathfinder#hitNodeLimit()}. */
 	public boolean hitNodeLimit() {
 		return search.hitNodeLimit();

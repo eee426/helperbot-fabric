@@ -77,6 +77,12 @@ public final class LocalPathfinder implements Planner {
 	public static final int MAX_DIVE_DEPTH = 10;
 	/** Air is tracked in steps of this many ticks: two routes to a cell differing by less are the same. */
 	private static final int AIR_BUCKET = 30;
+	/**
+	 * A {@link #reachOnly} search goes on from whatever has the most air left, a tick of air outweighing
+	 * any cost. So a cell first comes up with the best it will get, and is gone through once: going
+	 * by cost, a wide sea took seven goes at each cell, each with a little more air than the last.
+	 */
+	private static final double MOST_AIR_FIRST = 1e6;
 	/** Vanilla right-click interval (4 ticks), plus a small charge for using a block up. */
 	public static final double PLACE_COST = 4 + 2;
 
@@ -191,6 +197,12 @@ public final class LocalPathfinder implements Planner {
 	/** What's left to go from a cell, if the caller knows better than the distance to the target. */
 	private final ToDoubleFunction<BlockPos> ahead;
 	/**
+	 * Can it get there at all, with the way as it is: it digs and builds nothing (but for ice over
+	 * water, a lid and not the lie of the land), and of the routes to a cell only the one with the
+	 * most air goes on, whatever it cost. With nothing to dig the cells are few and it can finish.
+	 */
+	private final boolean reachOnly;
+	/**
 	 * What's left beyond the window. Only for partial searches: there it decides which edge of the
 	 * window to head for (up to the surface to run, or on through the rock). Searches that can see
 	 * the target keep plain running distance, which never overestimates.
@@ -224,15 +236,16 @@ public final class LocalPathfinder implements Planner {
 	public LocalPathfinder(BlockGetter level, Inventory inventory, Mode mode, int maxDrop, BlockPos start, double startFloor,
 						   PathGoal goal, BlockPos target, boolean horizontalOnly, Limits limits,
 						   LongPredicate avoid, Air.Profile air, LongPredicate favored) {
-		this(level, inventory, mode, maxDrop, start, startFloor, goal, target, horizontalOnly, limits, avoid, air, favored, false, null);
+		this(level, inventory, mode, maxDrop, start, startFloor, goal, target, horizontalOnly, limits, avoid, air, favored, false, null, false);
 	}
 
-	/** @param whole see {@link #whole}; @param ahead see {@link #ahead}, or null */
+	/** @param whole see {@link #whole}; @param ahead see {@link #ahead}, or null; @param reachOnly see {@link #reachOnly} */
 	public LocalPathfinder(BlockGetter level, Inventory inventory, Mode mode, int maxDrop, BlockPos start, double startFloor,
 						   PathGoal goal, BlockPos target, boolean horizontalOnly, Limits limits,
 						   LongPredicate avoid, Air.Profile air, LongPredicate favored,
-						   boolean whole, ToDoubleFunction<BlockPos> ahead) {
+						   boolean whole, ToDoubleFunction<BlockPos> ahead, boolean reachOnly) {
 		this.whole = whole;
+		this.reachOnly = reachOnly;
 		this.ahead = ahead;
 		this.avoid = avoid;
 		this.favored = favored;
@@ -249,7 +262,7 @@ public final class LocalPathfinder implements Planner {
 		this.limits = limits;
 		this.goal = goal;
 		this.walkCost = 1.0 / mode.speed();
-		this.canBuild = com.vale.helperbot.guard.Rules.open() && BuildingBlocks.count(inventory) > 0;
+		this.canBuild = !reachOnly && com.vale.helperbot.guard.Rules.open() && BuildingBlocks.count(inventory) > 0;
 		this.partial = !whole && (horizontalOnly
 				? Math.max(Math.abs(target.getX() - start.getX()), Math.abs(target.getZ() - start.getZ())) > limits.radiusXZ()
 				: !inWindow(target));
@@ -281,6 +294,9 @@ public final class LocalPathfinder implements Planner {
 				return false;
 			}
 			Node node = open.poll();
+			if (reachOnly && cell(node.pos)[bucket(node.air)] != node) {
+				continue; // a route with more air came along while this one waited
+			}
 			if (goal.test(level, node.pos) && airForWork(node)) {
 				result = reconstruct(node, true);
 				progress = (heuristic(origin) - heuristic(node.pos)) / walkCost;
@@ -323,10 +339,10 @@ public final class LocalPathfinder implements Planner {
 				double g = node.g + c.cost() * (favored.test(key) ? FAVOR_PREVIOUS : 1);
 				int b = bucket(airLeft);
 				Node[] nodes = cell(c.step().to());
-				if (!dominated(nodes, b, g)) {
+				if (reachOnly ? !lessAir(nodes, b, airLeft) : !dominated(nodes, b, g)) {
 					double toGoal = heuristic(c.step().to()) * heuristicWeight;
 					Node next = nodes[b];
-					if (next != null && next.heapIndex >= 0) {
+					if (next != null && next.heapIndex >= 0 && !reachOnly) {
 						next.set(c.floor(), g, toGoal, node, c.step(), airLeft); // still waiting: just cheaper now
 						next.ticks = c.ticks();
 						next.blocks = blocks;
@@ -335,6 +351,9 @@ public final class LocalPathfinder implements Planner {
 						next = new Node(c.step().to(), c.floor(), g, toGoal, node, c.step(), airLeft);
 						next.ticks = c.ticks();
 						next.blocks = blocks;
+						if (reachOnly) {
+							next.f += (air.full() - airLeft) * MOST_AIR_FIRST;
+						}
 						nodes[b] = next;
 						open.add(next);
 					}
@@ -376,6 +395,11 @@ public final class LocalPathfinder implements Planner {
 	/** Routes it turned down for want of blocks to lay. */
 	public int blocksShort() {
 		return blocksShort;
+	}
+
+	/** Cells it has been through. */
+	public int nodes() {
+		return expanded;
 	}
 
 	/** It stopped for its node limit, with cells still to look at. */
@@ -549,6 +573,19 @@ public final class LocalPathfinder implements Planner {
 	private static boolean dominated(Node[] nodes, int b, double g) {
 		for (int i = b; i < nodes.length; i++) {
 			if (nodes[i] != null && nodes[i].g <= g) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** For {@link #reachOnly}: some route already reached this cell with at least this much air, whatever it cost. */
+	private static boolean lessAir(Node[] nodes, int b, int air) {
+		if (nodes[b] != null && nodes[b].air >= air) {
+			return true;
+		}
+		for (int i = b + 1; i < nodes.length; i++) {
+			if (nodes[i] != null) {
 				return true;
 			}
 		}
@@ -1011,6 +1048,9 @@ public final class LocalPathfinder implements Planner {
 	public double clearCost(BlockPos pos, List<BlockPos> breaks, double penalty) {
 		if (passable(pos)) {
 			return 0;
+		}
+		if (reachOnly && !level.getBlockState(pos).is(net.minecraft.tags.BlockTags.ICE)) {
+			return -1e9;
 		}
 		Cells.Section s = cells.at(pos);
 		int cellIndex = Cells.index(pos);

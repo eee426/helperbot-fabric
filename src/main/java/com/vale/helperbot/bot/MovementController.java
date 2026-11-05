@@ -145,6 +145,7 @@ public final class MovementController {
 		stop();
 		this.leaving = null;
 		this.provenFrom = null;
+		this.asItIs = false;
 		this.goal = goal;
 		this.target = target;
 		this.mode = mode;
@@ -167,6 +168,53 @@ public final class MovementController {
 	public BlockPos provenFrom() {
 		return provenFrom;
 	}
+
+	/**
+	 * Is there a way to any of these, with the way as it is? One search through all of it, from the
+	 * bot's chunk to the targets' and everything between, top to bottom, breaths included, with
+	 * nothing dug on the way (see LocalPathfinder#reachOnly). It takes the first it comes to; if it
+	 * comes to none, that's known at once, for all of them: it's what diving to find out, a target
+	 * at a time, took minutes and most of its air to learn. Started with the head out of the water,
+	 * where thinking costs nothing. Its route is then the way, and is walked without thinking again
+	 * unless the world or its breath turn out otherwise; {@link #wayEnd} says where it comes out, and
+	 * {@link #provenFrom} is set if there's none.
+	 *
+	 * @param anyOf where each target can be got at from
+	 * @param work  what it will do on arrival (see {@link #workAtGoal})
+	 */
+	public void findWay(List<BlockPos> targets, PathGoal anyOf, Mode mode, double work) {
+		BlockPos from = feet();
+		goTo(anyOf, targets.stream().min(java.util.Comparator.comparingDouble(from::distSqr)).orElse(from), mode);
+		goalWork = work;
+		asItIs = true;
+		wayEnd = null;
+		wayTargets = targets;
+	}
+
+	public boolean findingWay() {
+		return wayTargets != null;
+	}
+
+	/** Where the route {@link #findWay} found comes out. */
+	public BlockPos wayEnd() {
+		return wayEnd;
+	}
+
+	/** Of what {@link #findWay} looked for, the one the route leads to: the rest is no longer the goal. */
+	public void settle(PathGoal goal, BlockPos target) {
+		this.goal = goal;
+		this.target = target;
+	}
+
+	/** Set while it's yet to know if there's a way to these (see {@link #findWay}). */
+	private List<BlockPos> wayTargets;
+	private BlockPos wayEnd;
+	/** It's on its way by {@link #findWay}: any search on the way goes by the same terms. */
+	private boolean asItIs;
+	/** Most cells of a search through everything: it's what a window of a hundred blocks of deep sea comes to. */
+	private static final int WAY_NODES = 2_000_000;
+	/** Around the targets: where they're reached from, and the way up from there. */
+	private static final int WAY_MARGIN = 8;
 
 	/** Walk out of the protected area it's in, by the nearest way that leads out. */
 	public void leaveZone(ZoneExit exit, Mode mode) {
@@ -216,6 +264,7 @@ public final class MovementController {
 		path = null;
 		cancelSearches();
 		replanRequested = false;
+		wayTargets = null;
 		goal = null;
 		target = null;
 		gathering = false;
@@ -404,7 +453,7 @@ public final class MovementController {
 		BlockPos f = feet();
 		ServerLevel level = bot.level();
 		ignoreAir = true; // read when it plans, next tick
-		if (status == Status.MOVING && !engaged) {
+		if (status == Status.MOVING && !engaged && wayTargets == null) {
 			provenFrom = f;
 		}
 		// A cell whose head space is still a block to dig only counts if it won't be water once dug
@@ -528,6 +577,14 @@ public final class MovementController {
 			gatherTick();
 			return;
 		}
+		if (wayTargets != null && search == null && !engaged) {
+			if (headUnderwater() && Air.budget(bot) < Air.UNLIMITED) {
+				airRequested = true; // up first (see findWay)
+			} else {
+				startWay();
+			}
+			return;
+		}
 		if (search != null) {
 			// Thinking: standing still while a (possibly large) search runs over several ticks.
 			continuePlanning();
@@ -551,8 +608,12 @@ public final class MovementController {
 			if (path != null && index < path.size() && !feet().equals(path.get(index).from())) {
 				replan("不在这一步的起点（被推开或掉下去了）：在 " + feet().toShortString() + "，应该在 " + path.get(index).from().toShortString());
 			}
-			// Under water: re-plan every second from what's there now (quietly, it's routine).
-			if (path != null && headUnderwater() && bot.tickCount - plannedAt > WATER_REPLAN_TICKS) {
+			// Under water a route that gets there is walked to the end: thinking again every second
+			// cost nearly half the breath, standing still. Only when its breath isn't what the plan
+			// said (what's ahead is checked by aheadChanged). The way up is different: the world
+			// there changes fast (sand, flowing water, kelp) and nothing matters more, so again and
+			// again from what's there now, quietly, it's routine.
+			if (path != null && headUnderwater() && (ignoreAir ? bot.tickCount - plannedAt > WATER_REPLAN_TICKS : shortOfBreath())) {
 				abortBreaking();
 				path = null;
 				cancelLookahead();
@@ -626,6 +687,69 @@ public final class MovementController {
 		return dx * dx + dz * dz;
 	}
 
+	/** See {@link #findWay}: the box is whole chunks, from the lowest target up over everything in it. */
+	private void startWay() {
+		ServerLevel level = bot.level();
+		BlockPos from = feet();
+		int minX = from.getX(), maxX = minX, minZ = from.getZ(), maxZ = minZ, lowest = from.getY();
+		for (BlockPos t : wayTargets) {
+			minX = Math.min(minX, t.getX());
+			maxX = Math.max(maxX, t.getX());
+			minZ = Math.min(minZ, t.getZ());
+			maxZ = Math.max(maxZ, t.getZ());
+			lowest = Math.min(lowest, t.getY());
+		}
+		minX -= WAY_MARGIN;
+		maxX += WAY_MARGIN;
+		minZ -= WAY_MARGIN;
+		maxZ += WAY_MARGIN;
+		int top = from.getY();
+		for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
+			for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
+				var chunk = level.getChunkSource().getChunkNow(cx, cz);
+				for (int i = 0; chunk != null && i < 16; i++) {
+					for (int j = 0; j < 16; j++) {
+						top = Math.max(top, chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, i, j));
+					}
+				}
+			}
+		}
+		top += WAY_MARGIN;
+		lowest -= WAY_MARGIN;
+		int side = 16 + Math.max(Math.max(from.getX() - minX, maxX - from.getX()), Math.max(from.getZ() - minZ, maxZ - from.getZ()));
+		LocalPathfinder.Limits limits = new LocalPathfinder.Limits(side, top - from.getY(), from.getY() - lowest, WAY_NODES);
+		search = startSearch(Snapshot.box(level, minX, lowest, minZ, maxX, top, maxZ), from, bot.getY(), limits, goal, null, true);
+		zoneSearch = false;
+		zoneRoute = false;
+		plannedAt = bot.tickCount;
+	}
+
+	/** What the search of {@link #findWay} came to. */
+	private void endWay() {
+		PathJob job = search;
+		search = null;
+		resetStep();
+		int targets = wayTargets.size();
+		wayTargets = null;
+		LocalPathfinder.Result result = job.result();
+		bot.log("一次搜完 " + targets + " 个目标：" + job.nodes() + " 格，用了 " + (bot.tickCount - plannedAt) / 20.0 + " 秒，"
+				+ (result.reachesGoal() ? result.steps().size() + " 步能到" : job.hitNodeLimit() ? "到上限也没搜到" : "都到不了"));
+		if (!result.reachesGoal()) {
+			bot.log(job.diagnose());
+			provenFrom = feet();
+			fail("一次搜完了，都到不了");
+			return;
+		}
+		wayEnd = result.steps().isEmpty() ? feet() : result.steps().get(result.steps().size() - 1).to();
+		if (result.steps().isEmpty()) {
+			status = Status.ARRIVED;
+			path = null;
+			return;
+		}
+		adopt(result);
+		emptyPlans = 0;
+	}
+
 	private void startPlanning(int levelIndex) {
 		zoneSearch = false;
 		zoneRoute = false;
@@ -660,9 +784,16 @@ public final class MovementController {
 
 	private PathJob startSearch(BlockPos start, double startFloor, LocalPathfinder.Limits limits, PathGoal goal,
 								java.util.function.ToDoubleFunction<BlockPos> ahead, boolean whole) {
+		return startSearch(Snapshot.around(bot.level(), start, limits, airProfile().limited()), start, startFloor, limits, goal, ahead, whole);
+	}
+
+	private PathJob startSearch(Snapshot world, BlockPos start, double startFloor, LocalPathfinder.Limits limits, PathGoal goal,
+								java.util.function.ToDoubleFunction<BlockPos> ahead, boolean whole) {
 		long started = System.nanoTime();
 		Air.Profile air = airProfile();
-		Snapshot world = Snapshot.around(bot.level(), start, limits, air.limited());
+		if (breathAtStart >= 0 && air.limited()) {
+			air = new Air.Profile(breathAtStart, air.full(), air.waterDigFactor(), true, air.workTicks(), air.refill(), air.sprintBlocks());
+		}
 		Inventory tools = new Inventory(bot, new net.minecraft.world.entity.EntityEquipment());
 		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
 			tools.setItem(slot, bot.getInventory().getItem(slot).copy());
@@ -670,10 +801,13 @@ public final class MovementController {
 		it.unimi.dsi.fastutil.longs.LongOpenHashSet avoided = avoidedNow();
 		it.unimi.dsi.fastutil.longs.LongOpenHashSet favored = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(lastPath);
 		PathJob job = new PathJob(new LocalPathfinder(world, tools, mode, mode.maxDropFor(bot.getHealth()), start, startFloor,
-				goal, target, horizontalOnly, limits, avoided::contains, air, favored::contains, whole, ahead));
+				goal, target, horizontalOnly, limits, avoided::contains, air, favored::contains, whole, ahead, asItIs && !engaged));
 		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
 		return job;
 	}
+
+	/** A search for further along: the breath the plan has for there, not what it has now. -1: now. */
+	private int breathAtStart = -1;
 
 	/** Cells it's steering around right now (see learnObstacle); expired ones are dropped. */
 	private it.unimi.dsi.fastutil.longs.LongOpenHashSet avoidedNow() {
@@ -749,7 +883,7 @@ public final class MovementController {
 	private BlockPos provenFrom;
 	/** Most nodes of a search through a protected area: its window is many times the usual ones. */
 	private static final int ZONE_NODES = 400_000;
-	/** Under water, plan again this often: the world there changes fast (sand, flowing water, kelp). */
+	/** On the way up for air, plan again this often. */
 	private static final int WATER_REPLAN_TICKS = 20;
 
 	public Air.Profile airProfile() {
@@ -772,6 +906,10 @@ public final class MovementController {
 	private void continuePlanning() {
 		bot.perf().testWait(search.paceForTests());
 		if (!finished(search)) {
+			return;
+		}
+		if (wayTargets != null && !engaged) {
+			endWay();
 			return;
 		}
 		LocalPathfinder.Result result = search.result();
@@ -858,7 +996,9 @@ public final class MovementController {
 		if (Double.isNaN(endFloor)) {
 			return;
 		}
+		breathAtStart = pathAir.isEmpty() ? -1 : pathAir.get(pathAir.size() - 1);
 		lookahead = startSearch(end, endFloor, levels[minLevel]);
+		breathAtStart = -1;
 	}
 
 	/**
@@ -946,6 +1086,11 @@ public final class MovementController {
 				fail("用最大搜索范围也没能靠近目标，可能在原地绕圈");
 			}
 		}
+	}
+
+	/** Less breath than the plan has for here (see LocalPathfinder.Result#air). */
+	private boolean shortOfBreath() {
+		return index > 0 && index <= pathAir.size() && Air.budget(bot) < pathAir.get(index - 1) - Air.PLAN_SLACK;
 	}
 
 	private TravelEstimate travel;

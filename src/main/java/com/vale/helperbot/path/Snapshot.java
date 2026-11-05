@@ -102,6 +102,11 @@ public final class Snapshot implements BlockGetter {
 				start.getX() + side, start.getY() + up, start.getZ() + side);
 	}
 
+	/** The chunks holding this box, these heights (see MovementController#findWay). */
+	public static Snapshot box(ServerLevel level, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+		return new Snapshot(level, minX, minY, minZ, maxX, maxY, maxZ);
+	}
+
 	/** For the log: how much of the copied box is there. */
 	public String describe() {
 		int loaded = 0;
