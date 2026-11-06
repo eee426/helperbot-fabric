@@ -170,27 +170,13 @@ final class HuntTask {
 
 	// ---- finding ------------------------------------------------------------------------
 
-	private static ServerLevel level(BotPlayer bot) {
-		return bot.level();
-	}
-
 	private Mob nearestPrey(BotPlayer bot, int radius) {
 		ServerLevel level = bot.level();
 		List<Mob> mobs = level.getEntitiesOfClass(Mob.class, bot.getBoundingBox().inflate(radius),
 				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID())
 						&& MobDrops.mayHunt(m) && !ProtectionZones.isProtected(level, m.blockPosition()));
-		shallowestTooDeep = Integer.MAX_VALUE;
-		nearestDeep = null;
 		Mob best = null;
 		for (Mob m : mobs) {
-			int depth = waterOver(level, m);
-			if (depth > 0 && !withinBreath(bot, depth)) {
-				shallowestTooDeep = Math.min(shallowestTooDeep, depth);
-				if (nearestDeep == null || bot.distanceToSqr(m) < bot.distanceToSqr(nearestDeep)) {
-					nearestDeep = m;
-				}
-				continue;
-			}
 			if (best == null || bot.distanceToSqr(m) < bot.distanceToSqr(best)) {
 				best = m;
 			}
@@ -198,43 +184,8 @@ final class HuntTask {
 		return best;
 	}
 
-	/** Of the prey around left out as too deep for one breath (see withinBreath), the least deep; MAX_VALUE if none. */
-	private int shallowestTooDeep = Integer.MAX_VALUE;
-	/** Of those, the nearest: from here there may be a way the depth over it knows nothing of. */
-	private Mob nearestDeep;
-	/** One whole search for {@link #nearestDeep} a place, and told once. */
-	private boolean triedDeep, toldDeep;
-
 	/** Ticks of fighting under water, besides getting there: a few hits on a swimming mob. */
 	private static final double FIGHT_UNDERWATER_TICKS = 80;
-
-	/**
-	 * Blocks of water above what the bot must get to (within its reach of the mob, about 2 blocks
-	 * above it): 0 if that's in the open air.
-	 */
-	private static int waterOver(ServerLevel level, Mob m) {
-		BlockPos p = BlockPos.containing(m.getEyePosition()).above(2);
-		int n = 0;
-		while (n < 64 && com.vale.helperbot.path.LocalPathfinder.isWater(level, p)) {
-			p = p.above();
-			n++;
-		}
-		return n;
-	}
-
-	/**
-	 * Down there, the fight, back up, on one breath (the planner's rule, see Air#enough). Deep-sea
-	 * mobs (a glow squid 20 blocks down) are out of reach without water breathing: it used to go
-	 * for them anyway, dive as far as its air allowed, come back up, and do it again, forever.
-	 */
-	private static boolean withinBreath(BotPlayer bot, int depth) {
-		int full = com.vale.helperbot.path.Air.fullBudget(bot);
-		if (full >= com.vale.helperbot.path.Air.UNLIMITED) {
-			return true;
-		}
-		double up = com.vale.helperbot.path.Air.ascentTicks(bot.movement().airProfile(), depth);
-		return com.vale.helperbot.path.Air.enough(full - up, up, FIGHT_UNDERWATER_TICKS + com.vale.helperbot.path.Air.PLAN_SLACK);
-	}
 
 	/** Spawns naturally somewhere in this dimension (it's in some biome's spawn list). */
 	private boolean natural(ServerLevel level, EntityType<?> type) {
@@ -258,7 +209,7 @@ final class HuntTask {
 		int lying = 0;
 		for (net.minecraft.world.entity.item.ItemEntity e : drops.nearby(bot, item, SCAN_RADIUS)) {
 			lying += e.getItem().getCount();
-			double c = DropFetch.cost(bot, e, needed, bot.movement().newEscape());
+			double c = DropFetch.cost(bot, e, needed);
 			if (c < bestItemCost) {
 				bestItemCost = c;
 				bestItem = e;
@@ -272,20 +223,6 @@ final class HuntTask {
 				drops.start(bot, bestItem, mode);
 				setPhase(Phase.FETCH);
 				return BotTask.Status.RUNNING;
-			}
-		}
-		if (target == null && nearestDeep != null) {
-			// With open sea between, the depth says it all. Through the rock it says nothing.
-			if (!triedDeep && !com.vale.helperbot.task.MineSpot.seaBetween(level(bot), nearestDeep.blockPosition(), bot.getEyePosition(),
-					com.vale.helperbot.task.MineSpot.reach(bot))) {
-				triedDeep = true;
-				target = nearestDeep;
-				return lockOn(bot);
-			}
-			if (!toldDeep) {
-				toldDeep = true;
-				bot.say(requester, Component.literal("附近的").append(names()).append("都到不了（最浅的也在水面下 " + shallowestTooDeep
-						+ " 格：太深，或者没有不用在水下挖的路），换地方找。有水下呼吸的话，深水也能去。"));
 			}
 		}
 		if (target != null) {
@@ -331,7 +268,7 @@ final class HuntTask {
 		wayTo.clear();
 		for (Mob m : level.getEntitiesOfClass(Mob.class, bot.getBoundingBox().inflate(SCAN_RADIUS),
 				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID()) && MobDrops.mayHunt(m)
-						&& !ProtectionZones.isProtected(level, m.blockPosition()) && m.isUnderWater() && withinBreath(bot, waterOver(level, m)))) {
+						&& !ProtectionZones.isProtected(level, m.blockPosition()) && m.isUnderWater())) {
 			wayTo.put(m, com.vale.helperbot.bot.Sight.attackSpot(bot, m));
 		}
 		List<com.vale.helperbot.path.PathGoal> goals = List.copyOf(wayTo.values());
@@ -343,6 +280,7 @@ final class HuntTask {
 			}
 			return false;
 		}, mode);
+		bot.movement().workAtGoal(FIGHT_UNDERWATER_TICKS);
 		setPhase(Phase.WAY);
 		return BotTask.Status.RUNNING;
 	}
@@ -364,6 +302,7 @@ final class HuntTask {
 			return lockOn(bot);
 		}
 		bot.log("水下的" + names().getString() + "到不了（" + wayTo.size() + " 只），不去");
+		bot.say(requester, Component.literal("附近水下的").append(names()).append("到不了（太深，一口气打不完，或者没有不用在水下挖的路），换地方找。有水下呼吸的话，深水也能去。"));
 		wayTo.keySet().forEach(m -> rejected.add(m.getUUID()));
 		setPhase(Phase.FIND);
 		return BotTask.Status.RUNNING;
@@ -477,8 +416,6 @@ final class HuntTask {
 			} else {
 				explorer.leavePlace();
 			}
-			triedDeep = false;
-			toldDeep = false;
 			bot.movement().stop();
 			setPhase(Phase.FIND);
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
@@ -667,6 +604,7 @@ final class HuntTask {
 			} else {
 				bot.movement().follow(inReach, at, mode);
 			}
+			bot.movement().workAtGoal(FIGHT_UNDERWATER_TICKS);
 			aimedAt = at;
 		} else if (near && (aimedAt == null || aimedAt.distSqr(at) > 4)) {
 			bot.movement().retarget(inReach, at);

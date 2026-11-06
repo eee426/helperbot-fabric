@@ -98,10 +98,11 @@ public final class Air {
 	 * @param now            budget right now
 	 * @param full           budget with a full breath (what it has after surfacing)
 	 * @param limited        false: ignore air (e.g. while heading for air: any way up will do)
+	 * @param workTicks      what it will do once there (a fight, say): the goal must leave air for that too
 	 * @param refill         budget won back per tick with the head out of the water (see {@link #REFILL})
 	 * @param sprintBlocks   blocks it can sprint-swim on the food it has (see {@link #sprintBlocks}); 0: not at all
 	 */
-	public record Profile(int now, int full, boolean limited, double refill, double sprintBlocks) {
+	public record Profile(int now, int full, boolean limited, double workTicks, double refill, double sprintBlocks) {
 	}
 
 	/** Vanilla: air comes back 4 points a tick with the head out of the water. */
@@ -110,8 +111,8 @@ public final class Air {
 	private Air() {
 	}
 
-	public static Profile profile(LivingEntity e, boolean limited, double sprintBlocks) {
-		return new Profile(budget(e), fullBudget(e), limited, REFILL * airStretch(e), sprintBlocks);
+	public static Profile profile(LivingEntity e, boolean limited, double workTicks, double sprintBlocks) {
+		return new Profile(budget(e), fullBudget(e), limited, workTicks, REFILL * airStretch(e), sprintBlocks);
 	}
 
 	/** Vanilla: swimming costs this much exhaustion a block, and 4 exhaustion cost a point of saturation, then of food. */

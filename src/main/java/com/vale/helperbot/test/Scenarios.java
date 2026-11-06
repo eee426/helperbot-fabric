@@ -1173,6 +1173,19 @@ public final class Scenarios {
 				}, c -> (WET[0] |= c.bot().movement().headUnderwater() && c.bot().getY() < 39) ? Scenario.Outcome.fail("潜下去了")
 						: c.ticks() > 800 && c.logHas("过不去") ? Scenario.Outcome.pass("说明了，在上面等") : c.ended() ? Scenario.Outcome.fail("任务结束了") : null),
 
+				new Scenario("W64", "干洞穴隔着石头，旁边封闭水洞里有几只鱿鱼（玩家报告）：挖进去一只只打完，掉的都捡", 6 * MINUTE, (a, bot, me) -> {
+					a.fill(8, 28, -3, 14, 35, 3, Blocks.WATER);
+					a.fill(2, 31, -1, 4, 33, 1, Blocks.AIR);
+					for (int i = 0; i < 5; i++) {
+						a.spawn(EntityType.GLOW_SQUID, 10 + i, 31, i - 2);
+					}
+					teleport(bot, a, 3, 31, 0);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.GLOW_INK_SAC, 3, Mode.NORMAL);
+				}, Scenario.has(Items.GLOW_INK_SAC, 3)),
+
 				new Scenario("W36", "9 格深的水底拿海带：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 32, -4, 12, 40, 4, Blocks.WATER);
 					a.set(8, 32, 0, Blocks.KELP);

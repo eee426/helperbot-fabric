@@ -294,7 +294,7 @@ public class GatherTask implements BotTask {
 		Escape escape = bot.movement().newEscape();
 		for (net.minecraft.world.entity.item.ItemEntity e : drops.nearby(bot, item, DROP_RANGE)) {
 			lying += e.getItem().getCount();
-			double c = DropFetch.cost(bot, e, needed, escape);
+			double c = DropFetch.cost(bot, e, needed);
 			if (c < bestItemCost) {
 				bestItemCost = c;
 				bestItem = e;

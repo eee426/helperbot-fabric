@@ -158,7 +158,15 @@ public final class MovementController {
 		this.emptyPlans = 0;
 		this.recoveries = 0;
 		this.frozenTicks = 0;
+		this.goalWork = 0;
 	}
+
+	/** What it will do on arrival, in ticks: set right after going there (see Air.Profile#workTicks). */
+	public void workAtGoal(double ticks) {
+		goalWork = ticks;
+	}
+
+	private double goalWork;
 
 	/**
 	 * Going to something it knows the place of, and can see all the way to: a block, an item, an
@@ -850,7 +858,7 @@ public final class MovementController {
 		long started = System.nanoTime();
 		Air.Profile air = airProfile();
 		if (breathAtStart >= 0 && air.limited()) {
-			air = new Air.Profile(breathAtStart, air.full(), true, air.refill(), air.sprintBlocks());
+			air = new Air.Profile(breathAtStart, air.full(), true, air.workTicks(), air.refill(), air.sprintBlocks());
 		}
 		Inventory tools = new Inventory(bot, new net.minecraft.world.entity.EntityEquipment());
 		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
@@ -946,7 +954,7 @@ public final class MovementController {
 	private static final int WATER_REPLAN_TICKS = 20;
 
 	public Air.Profile airProfile() {
-		return Air.profile(bot, !ignoreAir, mode.sprint && !bot.isUsingItem() ? Air.sprintBlocks(bot) : 0);
+		return Air.profile(bot, !ignoreAir, engaged ? 0 : goalWork, mode.sprint && !bot.isUsingItem() ? Air.sprintBlocks(bot) : 0);
 	}
 
 	/** Sprinting is allowed (vanilla: more than 6 food, not eating) and this mode sprints. */

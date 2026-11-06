@@ -295,7 +295,7 @@ public final class LocalPathfinder implements Planner {
 			if (reachOnly && cell(node.pos)[bucket(node.air)] != node) {
 				continue; // a route with more air came along while this one waited
 			}
-			if (goal.test(level, node.pos)) {
+			if (goal.test(level, node.pos) && airForWork(node)) {
 				result = reconstruct(node, true);
 				progress = (heuristic(origin) - heuristic(node.pos)) / walkCost;
 				return true;
@@ -552,6 +552,16 @@ public final class LocalPathfinder implements Planner {
 		}
 		double ticks = Math.ceil((air.full() - node.air) / air.refill());
 		return new Candidate(new PathStep(PathStep.Type.WAIT, node.pos, node.pos, List.of()), node.floor, ticks);
+	}
+
+	/**
+	 * What it does on arrival takes breath too (see {@link Air.Profile#workTicks}): a goal that
+	 * doesn't leave that isn't one, and the search goes on. This is what says if prey is too deep:
+	 * how deep it lies says nothing of how long the way is from where the bot is.
+	 */
+	private boolean airForWork(Node node) {
+		return !air.limited() || air.workTicks() <= 0 || Air.breathable(level, node.pos)
+				|| Air.enough(node.air, wayUp(node.pos, node.hole), air.workTicks() + Air.PLAN_SLACK);
 	}
 
 	private int bucket(int airLeft) {
