@@ -1,7 +1,6 @@
 package com.vale.helperbot.task;
 
 import com.vale.helperbot.bot.BotPlayer;
-import com.vale.helperbot.bot.MovementController;
 import com.vale.helperbot.guard.Guard;
 import com.vale.helperbot.guard.ProtectionZones;
 import com.vale.helperbot.knowledge.DropAnalysis;
@@ -19,6 +18,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -43,26 +43,21 @@ public final class MineSpot {
 		return player.blockInteractionRange() - REACH_MARGIN;
 	}
 
-	/**
-	 * Only the sea has it: a block that comes with water in it (kelp, sea grass, sea pickles, coral).
-	 * These are all it mines with its head under water. Anything else is had on land too, for a
-	 * fraction of the risk: it went 21 dives in 9 minutes for coal in the sea bed, and mined none.
-	 */
-	public static boolean ofTheSea(BlockState state) {
-		return state.getBlock().defaultBlockState().getFluidState().is(FluidTags.WATER);
-	}
-
 	/** Is this for the taking from where the bot is: from the sea, or to be mined with the head out of the water? */
 	static boolean workable(BotPlayer bot, BlockPos p) {
-		return ofTheSea(bot.level().getBlockState(p)) || headOut(bot.level(), p, bot.getEyePosition(), reach(bot), bot.getEyeHeight());
+		return Guard.ofTheSea(bot.level().getBlockState(p)) || headOut(bot.level(), p, bot.getEyePosition(), reach(bot), bot.getEyeHeight());
 	}
 
 	/**
-	 * Mining it, is the head out of the water? Going by where it would stand; with nowhere to stand
-	 * near it (buried), by where the digging would start: the first open cell from the block towards
-	 * {@code from}. Coal in the sea bed has water there, a seam under a cave has air.
+	 * Mining it, is the head out of the water? Going by where it would stand, if there's anywhere
+	 * near; buried, with nowhere to stand yet, digging a way there is the plan's business. Not for
+	 * what's under the sea from where the bot is (see {@link #seaBetween}): a pocket of air under the
+	 * sea bed is no spot to stand, however near.
 	 */
-	public static boolean headOut(BlockGetter level, BlockPos p, Vec3 from, double reach, double eyeHeight) {
+	public static boolean headOut(ServerLevel level, BlockPos p, Vec3 from, double reach, double eyeHeight) {
+		if (seaBetween(level, p, from, reach)) {
+			return false;
+		}
 		boolean mustSee = exposed(level, p);
 		Vec3 center = Vec3.atCenterOf(p);
 		int r = (int) Math.ceil(reach);
@@ -75,22 +70,35 @@ public final class MineSpot {
 						if (Air.breathable(level, q)) {
 							return true;
 						}
-						anySpot = true;
+						anySpot |= stillWater(level, q);
 					}
 				}
 			}
 		}
-		if (anySpot) {
+		return !anySpot;
+	}
+
+	/**
+	 * Is the sea in the way of this block, for someone at {@code from}? It lies under open water,
+	 * too deep to reach from the surface, and the straight line to it goes through that water. A
+	 * look at the column first, so it costs next to nothing for all of a sea bed, which is what it's
+	 * for: asked of each block in turn, it went through 18,000 and never moved off. Source water only:
+	 * a waterfall isn't in the way. From the shore or a mine a dry way under there still counts.
+	 */
+	public static boolean seaBetween(ServerLevel level, BlockPos p, Vec3 from, double reach) {
+		int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING, p.getX(), p.getZ());
+		if (level.getHeight(Heightmap.Types.OCEAN_FLOOR, p.getX(), p.getZ()) >= top || p.getY() >= top - Math.ceil(reach)) {
 			return false;
 		}
-		double length = center.distanceTo(from);
-		for (double d = 0.5; d < length; d += 0.5) {
-			BlockPos c = BlockPos.containing(center.add(from.subtract(center).scale(d / length)));
-			if (!c.equals(p) && (LocalPathfinder.isWater(level, c) || LocalPathfinder.isPassable(level, c))) {
-				return !LocalPathfinder.isWater(level, c);
+		Vec3 to = Vec3.atCenterOf(p);
+		double length = from.distanceTo(to);
+		for (double d = 0; d < length; d += 0.5) {
+			var fluid = level.getFluidState(BlockPos.containing(from.add(to.subtract(from).scale(d / length))));
+			if (fluid.is(FluidTags.WATER) && fluid.isSource()) {
+				return true;
 			}
 		}
-		return true;
+		return false;
 	}
 
 	/**
@@ -109,7 +117,7 @@ public final class MineSpot {
 	 * swim) within reach of it; under water each block must fit in one breath, and it pays for all
 	 * the blocks still wanted from such a spot, dives and breaths included (see Air#diving): what's
 	 * near but under water loses to dry land further off, unless it's only a block or two more.
-	 * Under water that's only for what the sea alone has (see {@link #ofTheSea}): anything else needs
+	 * Under water that's only for what the sea alone has (see Guard#ofTheSea): anything else needs
 	 * a spot with the head out, or it's NaN.
 	 */
 	static double cost(BotPlayer bot, BlockPos p, Item item, int slot, int left, Escape escape) {
@@ -123,13 +131,12 @@ public final class MineSpot {
 		if (dig == Integer.MAX_VALUE) {
 			return Double.NaN;
 		}
-		double waterFactor = Air.waterDigFactor(bot);
 		Air.Profile air = bot.movement().airProfile();
 		int blocks = (int) Math.ceil(Math.max(1, left) / Math.max(0.01, DropAnalysis.rate(item, state.getBlock())));
 		double bestNeed = Double.NaN;
 		boolean anyStand = false;
 		boolean mustSee = exposed(level, p);
-		boolean sea = ofTheSea(state);
+		boolean sea = Guard.ofTheSea(state);
 		int r = (int) Math.ceil(reach);
 		search:
 		for (int dy = -r - 1; dy <= r; dy++) {
@@ -139,18 +146,20 @@ public final class MineSpot {
 					if (!isSpot(level, q, p, center, reach, bot.getEyeHeight(), mustSee)) {
 						continue;
 					}
-					anyStand = true;
+					anyStand |= Air.breathable(level, q) || stillWater(level, q);
 					if (!sea && !Air.breathable(level, q)) {
 						continue;
 					}
-					double penalty = Air.digPenalty(level, q, waterFactor);
+					double penalty = Air.digPenalty(level, q);
 					if (Air.breathable(level, q) && penalty == 1) {
 						bestNeed = 0; // on the ground, head out: nothing extra to pay
 						break search;
 					}
 					// Floating at the surface it needs no dives, but it does mine that much slower.
 					double work = Air.workUnderWater(dig, penalty);
-					double need = Air.breathable(level, q) ? blocks * work : Air.diving(air, blocks, work, escape.ticks(q));
+					// (Out of reach, by the estimate? A way round it is the flood's to find: see GatherTask#findWay.)
+					double up = escape.ticks(q);
+					double need = Air.breathable(level, q) ? blocks * work : Air.diving(air, blocks, work, Double.isInfinite(up) ? 0 : up);
 					if (Double.isInfinite(need)) {
 						continue; // not on one breath
 					}
@@ -211,11 +220,25 @@ public final class MineSpot {
 
 	private static boolean nearWater(ServerLevel level, BlockPos p) {
 		for (net.minecraft.core.Direction d : net.minecraft.core.Direction.values()) {
-			if (LocalPathfinder.isWater(level, p.relative(d))) {
+			if (still(level, p.relative(d))) {
 				return true;
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * With feet in {@code q}, the head would be in water that stays. Falling water isn't that: a
+	 * cell in a waterfall is no place to mine from, but what's behind it counts as buried, to be got
+	 * at through the rock with the head dry.
+	 */
+	private static boolean stillWater(BlockGetter level, BlockPos q) {
+		return still(level, q) || still(level, q.above());
+	}
+
+	private static boolean still(BlockGetter level, BlockPos p) {
+		var fluid = level.getFluidState(p);
+		return fluid.is(FluidTags.WATER) && fluid.isSource();
 	}
 
 	/** With a face open to air or water (not buried in rock). */
@@ -257,10 +280,4 @@ public final class MineSpot {
 		return hit.getType() == HitResult.Type.BLOCK && !hit.getBlockPos().equals(block) ? hit.getBlockPos() : null;
 	}
 
-	/** Ticks to mine it on dry land with this tool (a slot, the hand, or the best there is), or MAX_VALUE if it can't be. */
-	static int dryTicks(BotPlayer bot, BlockPos pos, BlockState state, int tool) {
-		return tool == MovementController.AUTO_TOOL
-				? BreakTimes.estimateTicks(bot.getInventory(), bot.level(), pos, state)
-				: BreakTimes.estimateTicksWith(tool >= 0 ? bot.getInventory().getItem(tool) : ItemStack.EMPTY, bot.level(), pos, state);
-	}
 }

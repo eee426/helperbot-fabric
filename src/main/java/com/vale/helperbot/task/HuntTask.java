@@ -266,7 +266,7 @@ final class HuntTask {
 					+ " 格），一口气潜不到、打完再回来。给我水下呼吸药水，或者戴一个有水下呼吸附魔的头盔，就能去");
 		}
 		if (target != null) {
-			if (target.isUnderWater()) {
+			if (target.isUnderWater() && !bot.movement().headUnderwater()) {
 				return findWay(bot);
 			}
 			return lockOn(bot);
@@ -317,7 +317,7 @@ final class HuntTask {
 				}
 			}
 			return false;
-		}, mode, 0);
+		}, mode);
 		setPhase(Phase.WAY);
 		return BotTask.Status.RUNNING;
 	}

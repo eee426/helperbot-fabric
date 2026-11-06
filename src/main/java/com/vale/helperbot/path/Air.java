@@ -4,7 +4,6 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.effect.MobEffectUtil;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodData;
 import net.minecraft.world.level.Level;
@@ -98,15 +97,11 @@ public final class Air {
 	 *
 	 * @param now            budget right now
 	 * @param full           budget with a full breath (what it has after surfacing)
-	 * @param waterDigFactor how much slower mining is with the head under water (5 without aqua affinity)
 	 * @param limited        false: ignore air (e.g. while heading for air: any way up will do)
-	 * @param workTicks      what it will do once there (mining a block, say), in ticks on dry land:
-	 *                       the goal must leave air for that too, at the speed it works there
 	 * @param refill         budget won back per tick with the head out of the water (see {@link #REFILL})
 	 * @param sprintBlocks   blocks it can sprint-swim on the food it has (see {@link #sprintBlocks}); 0: not at all
 	 */
-	public record Profile(int now, int full, double waterDigFactor, boolean limited, double workTicks, double refill,
-						  double sprintBlocks) {
+	public record Profile(int now, int full, boolean limited, double refill, double sprintBlocks) {
 	}
 
 	/** Vanilla: air comes back 4 points a tick with the head out of the water. */
@@ -115,8 +110,8 @@ public final class Air {
 	private Air() {
 	}
 
-	public static Profile profile(LivingEntity e, boolean limited, double workTicks, double sprintBlocks) {
-		return new Profile(budget(e), fullBudget(e), waterDigFactor(e), limited, workTicks, REFILL * airStretch(e), sprintBlocks);
+	public static Profile profile(LivingEntity e, boolean limited, double sprintBlocks) {
+		return new Profile(budget(e), fullBudget(e), limited, REFILL * airStretch(e), sprintBlocks);
 	}
 
 	/** Vanilla: swimming costs this much exhaustion a block, and 4 exhaustion cost a point of saturation, then of food. */
@@ -194,22 +189,13 @@ public final class Air {
 		return Math.max(0, hits) * TICKS_PER_HIT;
 	}
 
-	/** Vanilla: mining with the head under water is this much slower (aqua affinity removes it). */
-	public static double waterDigFactor(LivingEntity e) {
-		return 1.0 / Math.max(0.01, e.getAttributeValue(Attributes.SUBMERGED_MINING_SPEED));
-	}
-
 	/**
-	 * Mining slowdown with feet in {@code feet}: head under water, and (vanilla) 5x again when not
-	 * standing on anything, i.e. floating. That goes for floating at the surface too, head out: it
-	 * used to count as dry land, so a block under 3 of water looked as cheap as one on the shore.
+	 * Mining slowdown with feet in {@code feet}: vanilla's 5x for not standing on anything. That goes
+	 * for floating at the surface too, head out: it used to count as dry land, so a block under 3 of
+	 * water looked as cheap as one on the shore. (With the head under, it doesn't mine: see Guard#ofTheSea.)
 	 */
-	public static double digPenalty(BlockGetter level, BlockPos feet, double waterDigFactor) {
-		boolean standing = LocalPathfinder.isSupport(level, feet.below());
-		if (breathable(level, feet)) {
-			return LocalPathfinder.isWater(level, feet) && !standing ? 5 : 1;
-		}
-		return waterDigFactor * (standing ? 1 : 5);
+	public static double digPenalty(BlockGetter level, BlockPos feet) {
+		return LocalPathfinder.isWater(level, feet) && !LocalPathfinder.isSupport(level, feet.below()) ? 5 : 1;
 	}
 
 	/** With feet in this cell (standing, or floating at the surface), is the head out of the water? */

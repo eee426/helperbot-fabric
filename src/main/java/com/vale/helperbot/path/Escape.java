@@ -7,18 +7,16 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.Arrays;
 import java.util.PriorityQueue;
 
 /**
- * How long from a spot under water until the head is out: swim sideways (to a column with a
- * better way up: open water, the hole it came down through) and then straight up, digging through
- * whatever is overhead at the real under-water mining speed. A block dug under water lets the
- * water in, so the way up stays wet until it reaches air; a column of sand or gravel counts block
- * by block (each falls into the gap).
+ * How long from a spot under water until the head is out, swimming: sideways (to a column with a
+ * better way up: open water, the hole it came down through) and then straight up. With nothing but
+ * a ceiling there is no way up, and that's what the planner goes by: it doesn't go where only
+ * digging would get it out. (That's the breathing layer's last resort, for what plans can't foresee.)
  *
  * <p>The sideways part is a shortest-path field per layer, built for a tile of columns at a time
  * (plus a margin, so ways up just across the tile's edge count too): under ice or a cave ceiling
@@ -37,7 +35,6 @@ public final class Escape {
 
 	private final BlockGetter level;
 	private final Inventory inventory;
-	private final double waterDigFactor;
 	/** How far up it can sprint-swim on its food: the first so many blocks are the fast ones. */
 	private final double sprintBlocks;
 	/** A block sideways. Only sprinting if the food lasts for any way across a field. */
@@ -53,7 +50,6 @@ public final class Escape {
 	public Escape(BlockGetter level, Inventory inventory, Air.Profile air) {
 		this.level = level;
 		this.inventory = inventory;
-		this.waterDigFactor = air.waterDigFactor();
 		this.sprintBlocks = air.sprintBlocks();
 		this.sideTicks = 1 / (sprintBlocks >= SIZE * 2 ? Air.SPRINT_SWIM_SPEED : LocalPathfinder.SWIM_SPEED);
 		upMemo.defaultReturnValue(Double.NaN);
@@ -78,9 +74,9 @@ public final class Escape {
 		}
 		double best = 0;
 		if (wet(feet.above())) {
-			// Straight up from here (maybe standing on something while digging the first block),
-			// or sideways first: from here, or from a neighbour (here may be too tight to swim in).
-			best = Math.min(up(feet, true), field(feet));
+			// Straight up from here, or sideways first: from here, or from a neighbour (here may be too
+			// tight to swim in).
+			best = Math.min(up(feet), field(feet));
 			for (Direction dir : Direction.Plane.HORIZONTAL) {
 				best = Math.min(best, sideTicks + field(feet.relative(dir)));
 			}
@@ -117,7 +113,7 @@ public final class Escape {
 				}
 				int idx = i * SIZE + j;
 				swim[idx] = true;
-				f[idx] = up(c.immutable(), false);
+				f[idx] = up(c.immutable());
 				if (f[idx] < Double.POSITIVE_INFINITY) {
 					queue.add(new double[]{f[idx], idx});
 				}
@@ -146,15 +142,13 @@ public final class Escape {
 		return f;
 	}
 
-	/** Straight up from feet in {@code feet}. {@code start}: still where it started (maybe standing on something). */
-	private double up(BlockPos feet, boolean start) {
-		long key = feet.asLong() * 2 + (start ? 1 : 0);
+	/** Straight up from {@code feet}: all open water, but for a lid judged {@link #fromAbove}. */
+	private double up(BlockPos feet) {
+		long key = feet.asLong();
 		double cached = upMemo.get(key);
 		if (!Double.isNaN(cached)) {
 			return cached;
 		}
-		// Only a block right over its head is dug standing: once it swims up, it's floating.
-		boolean grounded = start && LocalPathfinder.isSupport(level, feet.below());
 		double t = 0;
 		BlockPos head = feet.above();
 		double result = Double.POSITIVE_INFINITY;
@@ -166,15 +160,13 @@ public final class Escape {
 			BlockPos next = head.above();
 			boolean sprint = i < sprintBlocks && LocalPathfinder.isWater(level, head) && LocalPathfinder.isWater(level, next);
 			if (!open(next)) {
-				int dig = digTicks(next);
+				int dig = fromAbove && LocalPathfinder.isPassable(level, next.above()) ? digTicks(next) : -1;
 				if (dig < 0) {
 					break;
 				}
-				// Under water it mines 5x slower, and 5x again once floating (vanilla).
-				t += fromAbove && LocalPathfinder.isPassable(level, next.above()) ? dig : dig * waterDigFactor * (grounded ? 1 : 5);
+				t += dig;
 				sprint = false;
 			}
-			grounded = false;
 			// Like the swim itself (see Air#submerged): the last block, head coming out, isn't sprinted.
 			t += sprint ? 1 / Air.SPRINT_SWIM_SPEED : UP_TICKS;
 			head = next;

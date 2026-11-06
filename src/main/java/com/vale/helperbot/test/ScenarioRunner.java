@@ -110,11 +110,20 @@ public final class ScenarioRunner {
 		BlockPos origin = new BlockPos((index + 1) * SPACING, Arena.SURFACE, 0);
 		// Kept loaded for the whole scene, like the chunks around a player who has been there a while
 		// (the bot's own view only loads over the next few ticks, and the first scan comes sooner).
-		for (int cx = -LOADED; cx <= LOADED; cx++) {
-			for (int cz = -LOADED; cz <= LOADED; cz++) {
-				level.setChunkForced((origin.getX() >> 4) + cx, (origin.getZ() >> 4) + cz, true);
+		if (!forced) {
+			forced = true;
+			for (int cx = -LOADED; cx <= LOADED; cx++) {
+				for (int cz = -LOADED; cz <= LOADED; cz++) {
+					level.setChunkForced((origin.getX() >> 4) + cx, (origin.getZ() >> 4) + cz, true);
+				}
 			}
 		}
+		// Blocks and water only tick once a chunk's entities have loaded, off the server thread: at
+		// this speed that can be a good part of a scene, with water standing still over a hole.
+		if (ticks < LOAD_MAX && !(level.isPositionEntityTicking(origin) && level.areEntitiesLoaded(net.minecraft.world.level.ChunkPos.asLong(origin)))) {
+			return;
+		}
+		forced = false;
 		arena = new Arena(level, origin);
 		arena.clearMobs(64);
 		FakePlayer requester = FakePlayer.get(level);
@@ -156,6 +165,9 @@ public final class ScenarioRunner {
 
 	/** Long enough for a waterfall 20 high to finish forming (water falls a block every 5 ticks). */
 	private static final int SETTLE = 120;
+	/** Most ticks to wait for a scene's chunks to be ticking (see setup). */
+	private static final int LOAD_MAX = 6000;
+	private boolean forced;
 
 	private void unload() {
 		if (arena == null) {
@@ -207,7 +219,10 @@ public final class ScenarioRunner {
 			passed++;
 		}
 		String seconds = String.format("%.0f", ticks / 20.0);
-		rows.add("| " + s.id() + " | " + (pass ? "✅" : "❌") + " | " + s.title() + " | " + seconds + " 秒 | " + reason + " |");
+		// "Passed" says nothing of how: going up for air every other block passes too.
+		int breaths = log == null ? 0 : new Scenario.Context(arena, null, 0, log.toString()).logCount("该换气了");
+		rows.add("| " + s.id() + " | " + (pass ? "✅" : "❌") + " | " + s.title() + " | " + seconds + " 秒 | " + reason
+				+ (breaths > 0 ? "（被迫换气 " + breaths + " 次）" : "") + " |");
 		BotPlayer measured = BotManager.get();
 		if (measured != null) {
 			perfRows.add("| " + s.id() + " | " + seconds + " 秒 | " + measured.perf().compact() + " |");

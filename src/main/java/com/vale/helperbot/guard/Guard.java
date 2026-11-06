@@ -51,6 +51,18 @@ public final class Guard {
 		return DANGEROUS.contains(state.getBlock()) || state.getFluidState().is(FluidTags.LAVA);
 	}
 
+	/**
+	 * Only the sea has it, and it takes no time to break: what comes with water in it (kelp, sea
+	 * grass, sea pickles, coral). The one thing the bot mines with its head under water: that's the
+	 * gate, for what the plan may ask and for the hand alike (LocalPathfinder#clearCost,
+	 * MovementController#mine). Mining there is 5 to 25 times slower than on shore, and each block
+	 * gone changes the water around it: anything else it gets with its head out.
+	 */
+	public static boolean ofTheSea(BlockState state) {
+		Block block = state.getBlock();
+		return block.defaultBlockState().getFluidState().is(FluidTags.WATER) && block.defaultDestroyTime() == 0;
+	}
+
 	/** Strict-mode whitelist: blocks that look like untouched terrain. */
 	public static boolean isNaturalTerrain(BlockState state) {
 		if (state.hasBlockEntity()) {

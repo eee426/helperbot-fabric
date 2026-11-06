@@ -260,16 +260,16 @@ public class BotPlayer extends ServerPlayer {
 		return handovers;
 	}
 
-	/** How it's getting air: a planned way up, sealed in a shaft waiting for it to drain, or straight up. */
+	/** How it's getting air: a planned way up, or straight up. */
 	private enum Breath {
-		NONE, ROUTE, SEALED, CLIMB
+		NONE, ROUTE, CLIMB
 	}
 
 	private Breath breath = Breath.NONE;
 	private int breathTicks;
 	private double bestEscape;
-	/** Sealed in, the water should be gone within this (flowing water recedes every 5 ticks). */
-	private static final int SEAL_DRAIN_TICKS = 80;
+	/** The planner found no way up at all (see MovementController#digOut). */
+	private boolean digOut;
 	/** On the planned way up this long without getting any closer to air: just go straight up. */
 	private static final int ROUTE_STALL_TICKS = 60;
 
@@ -277,14 +277,11 @@ public class BotPlayer extends ServerPlayer {
 	 * Top survival priority, independent of what the task or path is doing. The same rule the
 	 * planner follows (see {@link Air}): the air budget, health it may spend included, must cover
 	 * the way back up from here. When it barely does (or the planner found nowhere to go on the air
-	 * left), it goes for air:
-	 * <ul>
-	 * <li>down a shaft it dug through the sea floor: block it off over its head, wait for the water
-	 * to drain, and carry on dry (what a player does);</li>
-	 * <li>otherwise up the quickest way the planner finds (digging through sand, around an
-	 * overhang...), or if that gets nowhere, straight up, digging what's overhead.</li>
-	 * </ul>
-	 * Then a full breath, and back to what it was doing. Returns true while busy with that.
+	 * left), it goes for air: up the quickest way the planner finds, swimming. If that gets nowhere
+	 * it swims straight up; and if there's really no way out by swimming (something changed behind
+	 * it: plans don't go where digging is the only way out), it digs what's overhead, the one time
+	 * it digs with its head under water. Then a full breath, and back to what it was doing. Returns
+	 * true while busy with that.
 	 */
 	private boolean breathe() {
 		boolean underwater = movement.headUnderwater();
@@ -299,54 +296,37 @@ public class BotPlayer extends ServerPlayer {
 			double escape = movement.escapeTicks();
 			boolean asked = movement.takeAirRequest();
 			boolean low = !Air.enough(budget, escape, 0); // the planner's rule, without its slack
-			boolean sealNow = movement.canSeal() && (movement.headingDown() || low || asked)
-					&& getAirSupply() < getMaxAirSupply();
-			if (!sealNow && !low && !asked) {
+			if (!low && !asked) {
 				return false;
 			}
 			breathTicks = 0;
-			if (sealNow && movement.seal()) {
-				breath = Breath.SEALED;
-				movement.pause();
-				log("在井里把头顶堵上，等水退掉");
-			} else {
-				breath = Breath.ROUTE;
-				bestEscape = escape;
-				String plan = movement.planAirNote();
-				log("该换气了（还能撑 " + budget / 20 + " 秒，上去要 "
-						+ (Double.isInfinite(escape) ? "?" : String.valueOf((int) Math.ceil(escape / 20))) + " 秒；实际 " + budget + " 刻"
-						+ (plan != null ? "；路线" + plan : "") + "）");
-				movement.headForAir();
-			}
+			breath = Breath.ROUTE;
+			bestEscape = escape;
+			String plan = movement.planAirNote();
+			log("该换气了（还能撑 " + budget / 20 + " 秒，上去要 "
+					+ (Double.isInfinite(escape) ? "?" : String.valueOf((int) Math.ceil(escape / 20))) + " 秒；实际 " + budget + " 刻"
+					+ (plan != null ? "；路线" + plan : "") + "）");
+			movement.headForAir();
 		}
 		breathTicks++;
 		if (underwater) {
-			switch (breath) {
-				case SEALED -> {
-					movement.tick();
-					if (breathTicks > SEAL_DRAIN_TICKS) {
-						log("水没退掉，改为游上去");
-						breath = Breath.ROUTE;
-						breathTicks = 0;
-						bestEscape = movement.escapeTicks();
-						movement.resume();
-						movement.headForAir();
-					}
+			if (breath == Breath.ROUTE) {
+				movement.tick();
+				double escape = movement.escapeTicks();
+				if (escape < bestEscape - 1) {
+					bestEscape = escape;
+					breathTicks = 0;
 				}
-				case ROUTE -> {
-					movement.tick();
-					double escape = movement.escapeTicks();
-					if (escape < bestEscape - 1) {
-						bestEscape = escape;
-						breathTicks = 0;
-					}
-					if (breathTicks > ROUTE_STALL_TICKS || movement.status() == MovementController.Status.FAILED) {
-						log("找路上不去，直接往上游/挖");
-						breath = Breath.CLIMB;
-						movement.pause();
-					}
+				boolean noWay = movement.status() == MovementController.Status.FAILED;
+				if (breathTicks > ROUTE_STALL_TICKS || noWay) {
+					log(noWay ? "找不到上去的路，直接往上，需要就挖开" : "找路上不去，直接往上游");
+					breath = Breath.CLIMB;
+					digOut = noWay;
+					movement.pause();
 				}
-				default -> movement.ascendStep();
+			} else {
+				movement.digOut(digOut || Double.isInfinite(movement.escapeTicks()));
+				movement.ascendStep();
 			}
 			return true;
 		}
@@ -360,11 +340,10 @@ public class BotPlayer extends ServerPlayer {
 			return true;
 		}
 		log("换好气了，继续");
-		Breath was = breath;
 		breath = Breath.NONE;
-		if (was != Breath.SEALED) {
-			movement.disengage();
-		}
+		digOut = false;
+		movement.digOut(false);
+		movement.disengage();
 		movement.resume();
 		return false;
 	}

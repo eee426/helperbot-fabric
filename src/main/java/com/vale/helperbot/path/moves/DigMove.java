@@ -1,5 +1,6 @@
 package com.vale.helperbot.path.moves;
 
+import com.vale.helperbot.path.Air;
 import com.vale.helperbot.path.Candidate;
 import com.vale.helperbot.path.LocalPathfinder;
 import com.vale.helperbot.path.PathStep;
@@ -18,6 +19,27 @@ final class DigMove implements Move {
 		}
 		for (Direction d : Direction.Plane.HORIZONTAL) {
 			digInto(pf, p, d, from.digPenalty(), out);
+		}
+		digOutUnder(pf, p, from.digPenalty(), out);
+	}
+
+	/**
+	 * Out of a dry mine, up through the roof into the water over it (the sea bed from below). With
+	 * the head in the air it may (see Guard#ofTheSea); once through it's swimming. It ends in the
+	 * roof's cell: that's water by then, as the world it plans on doesn't show, with water overhead
+	 * it goes on from there as from any other (see SwimMove).
+	 */
+	private static void digOutUnder(Planner pf, BlockPos p, double pen, List<Candidate> out) {
+		BlockPos head = p.above(), roof = head.above();
+		if (pf.water(head) || !pf.water(roof.above()) || !pf.inWindow(roof.above()) || pf.water(roof) || pf.nearLava(roof)) {
+			return;
+		}
+		List<BlockPos> breaks = new ArrayList<>(2);
+		pf.resetDig();
+		double dig = pf.clearCost(head, breaks, pen) + pf.clearCost(roof, breaks, pen);
+		if (dig >= 0 && !breaks.isEmpty()) {
+			double swim = 2 / Air.SWIM_UP_SPEED;
+			out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, roof, breaks), roof.getY(), swim + dig, swim + pf.dugTicks()));
 		}
 	}
 

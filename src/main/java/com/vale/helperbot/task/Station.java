@@ -113,7 +113,9 @@ final class Station {
 
 	private BotTask.Status setOff(BotPlayer bot) {
 		BlockPos shore = nearestDryGround(bot);
-		if (shore == null) {
+		// (In the water the flood finds no way to what's there, three times over, say a roof that
+		// stands in the sea: what's in sight won't do, so on to where there's land.)
+		if (shore == null || (bot.movement().isInWater() && walks >= MAX_WALKS)) {
 			return lookForLand(bot);
 		}
 		String name = new ItemStack(item).getHoverName().getString();
@@ -124,7 +126,12 @@ final class Station {
 		bot.log("这里放不下" + name + "，去有地方的位置（大致朝 " + shore.toShortString() + "）");
 		heading = shore;
 		BlockPos here = bot.movement().feet();
-		bot.movement().goTo((w, p) -> !p.equals(here) && roomBeside(w, p), shore, com.vale.helperbot.path.Mode.DEFAULT);
+		com.vale.helperbot.path.PathGoal room = (w, p) -> !p.equals(here) && roomBeside(w, p);
+		if (bot.movement().isInWater()) {
+			bot.movement().findWay(List.of(shore), room, com.vale.helperbot.path.Mode.DEFAULT);
+		} else {
+			bot.movement().goTo(room, shore, com.vale.helperbot.path.Mode.DEFAULT);
+		}
 		return BotTask.Status.RUNNING;
 	}
 
@@ -152,6 +159,7 @@ final class Station {
 		bot.log("这里全是水，放不下" + new ItemStack(item).getHoverName().getString() + "，先往 " + next.toShortString() + " 找陆地");
 		heading = next;
 		seeking = true;
+		walks = 0; // somewhere new: what's in sight from there gets its tries
 		bot.movement().goTo(Habitat.arrived(next, 16, Habitat.Layer.SURFACE), next, com.vale.helperbot.path.Mode.DEFAULT, true);
 		return BotTask.Status.RUNNING;
 	}

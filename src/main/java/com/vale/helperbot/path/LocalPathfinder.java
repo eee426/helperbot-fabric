@@ -73,8 +73,6 @@ public final class LocalPathfinder implements Planner {
 	public static final double SWIM_FLOOR = 0.1;
 	/** Vanilla swimming speed is roughly 0.1-0.15 blocks/tick. */
 	public static final double SWIM_SPEED = Air.SWIM_SPEED;
-	/** Deepest {@link #surfaceDistance} looks. (Diving itself is limited by air, see {@link Air}.) */
-	public static final int MAX_DIVE_DEPTH = 10;
 	/** Air is tracked in steps of this many ticks: two routes to a cell differing by less are the same. */
 	private static final int AIR_BUCKET = 30;
 	/**
@@ -297,7 +295,7 @@ public final class LocalPathfinder implements Planner {
 			if (reachOnly && cell(node.pos)[bucket(node.air)] != node) {
 				continue; // a route with more air came along while this one waited
 			}
-			if (goal.test(level, node.pos) && airForWork(node)) {
+			if (goal.test(level, node.pos)) {
 				result = reconstruct(node, true);
 				progress = (heuristic(origin) - heuristic(node.pos)) / walkCost;
 				return true;
@@ -529,6 +527,11 @@ public final class LocalPathfinder implements Planner {
 		// breath half way through, by the start's reckoning, on a step that ended fine).
 		BlockPos hole = holeAfter(from, c.step());
 		double way = c.step().toBreak().isEmpty() ? wayUp(to, hole) : Math.max(wayUp(to, hole), wayUp(from.pos, from.hole));
+		if (!c.step().toBreak().isEmpty() && Air.breathable(level, from.pos)) {
+			// Digging from where it can breathe (out of a dry mine, into the sea above it): if the water
+			// comes, that's the way back, which the world it plans on doesn't show as open yet.
+			way = Math.min(way, c.ticks());
+		}
 		if (!Air.enough(left, way, Air.PLAN_SLACK)) {
 			airRejected++;
 			return -1;
@@ -549,20 +552,6 @@ public final class LocalPathfinder implements Planner {
 		}
 		double ticks = Math.ceil((air.full() - node.air) / air.refill());
 		return new Candidate(new PathStep(PathStep.Type.WAIT, node.pos, node.pos, List.of()), node.floor, ticks);
-	}
-
-	/**
-	 * At the goal it has work to do (see {@link Air.Profile#workTicks}): arriving there must leave
-	 * air for that as well, at the speed it works there (under water, floating or standing), or it
-	 * gets there, finds it can't finish, goes up for air and comes back to the same spot. A goal
-	 * that leaves too little isn't one: the search goes on (by way of a breath, say).
-	 */
-	private boolean airForWork(Node node) {
-		if (!air.limited() || air.workTicks() <= 0 || Air.breathable(level, node.pos)) {
-			return true;
-		}
-		double work = Air.workUnderWater(air.workTicks(), digPenalty(node.pos));
-		return Air.enough(node.air, wayUp(node.pos, node.hole), work + Air.PLAN_SLACK);
 	}
 
 	private int bucket(int airLeft) {
@@ -739,9 +728,9 @@ public final class LocalPathfinder implements Planner {
 		}
 	}
 
-	/** Mining from feet in {@code p}: slower with the head under water, slower again floating. */
+	/** Mining from feet in {@code p}: slower floating. */
 	private double digPenalty(BlockPos p) {
-		return Air.digPenalty(level, p, air.waterDigFactor());
+		return Air.digPenalty(level, p);
 	}
 
 	/** Ticks to fall {@code blocks} under vanilla gravity (0.08 blocks/tick²). */
@@ -793,6 +782,9 @@ public final class LocalPathfinder implements Planner {
 
 	// ---- neighbours ---------------------------------------------------------------------
 
+	/** The head is out of the water where the cell being gone through would dig from (see {@link #clearCost}). */
+	private boolean digsDry;
+
 	/** Every step out of {@code p}: each move the bot knows adds its own (see {@link Moves}). */
 	private List<Candidate> neighbours(BlockPos p, double cur) {
 		List<Candidate> out = new ArrayList<>(16);
@@ -801,6 +793,7 @@ public final class LocalPathfinder implements Planner {
 		// (On top of a fence it's standing too, half a block up: from there digging may be the only way off.)
 		boolean standing = Math.abs(cur - p.getY()) < 1e-3 || (!isWater(level, p) && BlockTable.top(level.getBlockState(p.below()), level, p.below()) > 1 + 1e-6);
 		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), standing);
+		digsDry = !isWater(level, p.above());
 		for (Move move : Moves.ALL) {
 			move.addSteps(this, p, cur, from, out);
 		}
@@ -965,23 +958,6 @@ public final class LocalPathfinder implements Planner {
 		return BlockTable.empty(state, level, pos) && !BlockTable.dangerous(state);
 	}
 
-	/**
-	 * Blocks of water to swim straight up from {@code pos} before reaching breathable air,
-	 * or -1 if that's more than {@link #MAX_DIVE_DEPTH} or blocked.
-	 */
-	public static int surfaceDistance(BlockGetter level, BlockPos pos) {
-		for (int d = 0; d <= MAX_DIVE_DEPTH; d++) {
-			BlockPos p = pos.above(d);
-			if (isPassable(level, p)) {
-				return d;
-			}
-			if (!isOpenWater(level, p)) {
-				return -1;
-			}
-		}
-		return -1;
-	}
-
 	public static boolean isPassable(BlockGetter level, BlockPos pos) {
 		if (!Worlds.loaded(level, pos)) {
 			return false;
@@ -1048,6 +1024,10 @@ public final class LocalPathfinder implements Planner {
 	public double clearCost(BlockPos pos, List<BlockPos> breaks, double penalty) {
 		if (passable(pos)) {
 			return 0;
+		}
+		// The gate (see Guard#ofTheSea): a route never digs with its head under water, whatever for.
+		if (!digsDry && !Guard.ofTheSea(level.getBlockState(pos))) {
+			return -1e9;
 		}
 		if (reachOnly && !level.getBlockState(pos).is(net.minecraft.tags.BlockTags.ICE)) {
 			return -1e9;

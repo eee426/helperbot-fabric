@@ -604,7 +604,7 @@ public final class CraftPlanner {
 			long started = System.nanoTime();
 			// What each costs once there. Under water that's much more than the walk: it goes last
 			// even if it's nearest, and if it can't be done on a breath it isn't a source at all.
-			Air.Profile air = Air.profile((LivingEntity) breaker, true, 0, breaker instanceof Player p ? Air.sprintBlocks(p) : 0);
+			Air.Profile air = Air.profile((LivingEntity) breaker, true, breaker instanceof Player p ? Air.sprintBlocks(p) : 0);
 			Escape escape = new Escape(level, realInventory, air).fromAbove();
 			Map<BlockPos, Double> work = new HashMap<>();
 			for (BlockPos p : found) {
@@ -632,9 +632,9 @@ public final class CraftPlanner {
 
 	/** Ticks to mine one source, once there; under water its share of all {@code blocks} (see Air#diving). */
 	private double mineCost(Item item, BlockPos p, int blocks, Air.Profile air, Escape escape) {
-		if (!MineSpot.ofTheSea(level.getBlockState(p)) && breaker instanceof Player player
+		if (!com.vale.helperbot.guard.Guard.ofTheSea(level.getBlockState(p)) && breaker instanceof Player player
 				&& !MineSpot.headOut(level, p, player.getEyePosition(), MineSpot.reach(player), player.getEyeHeight())) {
-			return Double.POSITIVE_INFINITY; // it won't do that (see MineSpot#ofTheSea)
+			return Double.POSITIVE_INFINITY; // it won't do that (see Guard#ofTheSea)
 		}
 		double dry = buried(p, sourceBlocks.get(item)) * DIG_PER_BLOCK + MINE_PER_BLOCK;
 		BlockPos feet = LocalPathfinder.isWater(level, p) ? p : p.above();
@@ -643,7 +643,7 @@ public final class CraftPlanner {
 		}
 		int dig = BreakTimes.estimateTicks(realInventory, level, p, level.getBlockState(p));
 		double work = dry + (dig == Integer.MAX_VALUE ? 0 : dig - MINE_PER_BLOCK);
-		return Air.diving(air, blocks, Air.workUnderWater(work, Air.digPenalty(level, feet, air.waterDigFactor())), escape.ticks(feet)) / blocks;
+		return Air.diving(air, blocks, Air.workUnderWater(work, Air.digPenalty(level, feet)), escape.ticks(feet)) / blocks;
 	}
 
 	private final Map<Item, Route> routes = new HashMap<>();

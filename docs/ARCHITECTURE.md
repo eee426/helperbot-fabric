@@ -1,6 +1,6 @@
 # HelperBot 架构
 
-约 6800 行，36 个文件，分 5 层。**上层只调用下层，下层不知道上层的存在。**
+服务端约 1.6 万行，分 5 层。**上层只调用下层，下层不知道上层的存在。**
 
 ```
  玩家
@@ -73,7 +73,7 @@
 
 | 顺序 | 层 | 什么时候接管 |
 |---|---|---|
-| 1 | 换气 `breathe` | 水下快没气了 |
+| 1 | 换气 `breathe` | 水下快没气了；游不出去时才能挖开头顶 |
 | 2 | 自卫 `combat` | 有怪在打它（远程 10 格内 / 近战够得着） |
 | 3 | 吃东西 `tryEat` | 饿了（边走边吃） |
 | 4 | 捡掉落物 `Loot` | 任务挖掉的方块、打死的怪掉了它要的东西（按"出现时间"跟踪，飘走、滚远都认得；水下先不追正在上浮的，到水面再一起捡） |
@@ -97,10 +97,10 @@
 | 文件 | 作用 |
 |---|---|
 | `path/LocalPathfinder` | A* 寻路：在一块范围内找一串"走/跳/挖/搭桥/垫柱/游泳"的步骤；水下每个节点还带着"剩余空气" |
-| `path/Air`, `path/Escape` | **水下的唯一规则**：空气预算（剩余空气 + 允许扣的血）必须够它从当前位置出水；`Escape` 算"从这格到能呼吸要多少帧"（含水下挖方块的真实速度、掉落的沙子）。寻路、换气、选目标都用它 |
+| `path/Air`, `path/Escape` | **水下的气量规则**：空气预算（剩余空气 + 允许扣的血）必须够它从当前位置出水；`Escape` 算"从这格游到能呼吸要多少刻"，不算挖。寻路、换气、选目标都用它 |
 | `path/Mode` | 安全 / 普通 / 激进三种模式的参数 |
 | `path/BreakTimes`, `BuildingBlocks` | 挖一块要多久；哪些方块可以拿来搭路 |
-| `guard/Guard` | **能不能挖、能不能放**（所有挖和放都要先问它） |
+| `guard/Guard` | **能不能挖、能不能放**（所有挖和放都要先问它）。`ofTheSea` 是全局总闸的判断：头在水下只能挖这些，见 `UNDERWATER_PLAN.md` 最后一节 |
 | `guard/Rules`, `ProtectionZones` | 开放/严格规则；保护区 |
 | `mixin/*` | 改原版的三处：苦力怕不炸它、睡觉不算它、捡东西前问它要不要 |
 
@@ -109,8 +109,8 @@
 | 现象 | 多半在 |
 |---|---|
 | 卡住、走歪、悬空、掉坑 | `MovementController`（执行）或 `LocalPathfinder`（规划） |
-| 水下：憋气、换气、堵井口 | `BotPlayer.breathe`（什么时候、怎么换气），`Air`/`Escape`（够不够） |
-| 水下：路线、目标选择 | `LocalPathfinder.airAfter`，`GatherTask.targetCost` |
+| 水下：憋气、换气 | `BotPlayer.breathe`（什么时候、怎么换气），`Air`/`Escape`（够不够） |
+| 水下：路线、目标选择 | `LocalPathfinder.airAfter`，`MineSpot.seaBetween`，`MovementController.findWay` |
 | 打怪不对 | `BotPlayer.combat` |
 | 东西没捡 | `Loot`（所有掉落物的跟踪和拾取）、`ItemEntityMixin`（要不要） |
 | 挖了没掉东西 | `GatherTask.mine`（挖之前核对手里的东西）、`GatherTask.checkDrop`（日志里的"异常"） |

@@ -141,7 +141,7 @@ th{color:var(--muted);font-weight:600}
 <body>
 <header>
   <h1>HelperBot 模块图</h1>
-  <p class="sub">这是 Fabric 1.21.11 服务器模组加客户端按钮模组的结构。内容按提交 <code>4c37569</code> 写，服务端约 1.6 万行，客户端约 1100 行。</p>
+  <p class="sub">这是 Fabric 1.21.11 服务器模组加客户端按钮模组的结构。内容按全局总闸那次提交写，服务端约 1.6 万行，客户端约 1100 行。</p>
 </header>
 <nav><div class="tabs" role="tablist" id="tabs"></div></nav>
 <main>
@@ -190,7 +190,7 @@ th{color:var(--muted);font-weight:600}
   <h2>每一刻的优先级</h2>
   <p class="lead">服务器每秒 20 刻，每刻从上往下问，谁忙就由谁接管。代码在 <code>BotPlayer.behave()</code>。</p>
   <ol class="prio">
-    <li><div><b>换气</b><small><code>breathe()</code> 水下的气只够游上去，或者有人请求换气时接管。在自己挖的井里先堵井口，否则用寻路上去，寻路 3 秒没进展就直接往上游或往上挖。</small></div></li>
+    <li><div><b>换气</b><small><code>breathe()</code> 水下的气只够游上去，或者有人请求换气时接管。用寻路游上去，3 秒没进展就直接往上游；确实找不到路才挖开头顶。</small></div></li>
     <li><div><b>打架</b><small><code>combat()</code> 远程怪 10 格内追过去打，近战怪够得着才打。任务暂停，打完回到原来的事。</small></div></li>
     <li><div><b>吃东西</b><small><code>tryEat()</code> 饿了或受伤时吃玩家给的食物，边走边吃，任务暂停。</small></div></li>
     <li><div><b>任务</b><small><code>task.tick()</code> 背包快满时先整理，再跑当前任务一刻。</small></div></li>
@@ -234,7 +234,7 @@ th{color:var(--muted);font-weight:600}
     <tr><td>普通，第 3 层</td><td>还没结果</td><td>水平 ±64，上 24，下 32</td><td>20 万</td><td>能</td></tr>
     <tr><td>水下第 1 层</td><td>头在水下时替换第 1 层</td><td>上下左右都是 16</td><td>4 万</td><td>能</td></tr>
     <tr><td>保护区搜索</td><td>人在保护区里</td><td>最多到视距加 1 个区块</td><td>40 万</td><td>保护区里挖不了</td></tr>
-    <tr><td>下水前全量搜索</td><td>海里专有的目标、水下的猎物</td><td>机器人和目标所在的整片区块，高度到范围内最高的地面</td><td>200 万</td><td>不能，只有冰例外</td></tr>
+    <tr><td>下水前全量搜索</td><td>海里专有的目标、水下的猎物，水里找岸</td><td>机器人和目标所在的整片区块。目标都更低就搜机器人以下，都更高就搜机器人以上，没找到再全部搜</td><td>200 万</td><td>不能，只有冰例外</td></tr>
   </table></div>
   <div class="card"><b>窗口记住规则</b><p>小窗口找不到、大窗口能到终点时，后面继续用大窗口，直到离目标又近了 16 格。否则两个窗口的方向互相打架，机器人会左右徘徊。</p></div>
   <h2>动作</h2>
@@ -246,7 +246,12 @@ th{color:var(--muted);font-weight:600}
 
 <section id="water">
   <h2>水下规则（现在的代码）</h2>
-  <p class="lead">目标标准是不死循环、不白死、最后能结束。红色是今天查到还没修的漏洞。</p>
+  <p class="lead">目标标准是不死循环、不白死、最后能结束。总规则：要挖的那一刻头在水下就不挖，海里专有的方块除外，有水下呼吸也一样。</p>
+  <h3>全局总闸</h3>
+  <div class="grid2">
+    <div class="card"><b>规划层</b><p><code>LocalPathfinder.clearCost</code>：路线里不出现头在水下的挖法，也不进入要靠挖才能出来的地方。</p></div>
+    <div class="card"><b>执行层</b><p><code>MovementController.mine</code>：所有挖方块都走这里，每刻都查。只有换气确实搜不到路时才放行。</p></div>
+  </div>
   <h3>挖一个方块前的判断</h3>
   <div class="flow">
     <div class="n start"><b>选中一个目标方块</b></div><div class="a"></div>
@@ -254,11 +259,11 @@ th{color:var(--muted);font-weight:600}
     <div class="br" style="margin-top:9px">
       <div><div class="lab">是，海里专有</div>
         <div class="n"><b>下水前一次搜完所有目标</b><small>路上不挖，同格只留气最多的路线，先走气最多的格子</small></div><div class="a" data-t="能到"></div>
-        <div class="n"><b>动手前再查气</b><small><code>airCheck</code>：够挖完就挖，不够先换气，满气也不够就跳过</small></div><div class="a" data-t="全到不了"></div>
+        <div class="n"><b>人已在水里时不搜</b><small>下一个目标用普通规划，规划自己安排换气</small></div><div class="a" data-t="全到不了"></div>
         <div class="n bad"><b>一次放弃，去探索</b></div>
       </div>
       <div><div class="lab">不是</div>
-        <div class="n"><b>挖的时候头在水里吗？</b><small><code>MineSpot.headOut</code>：看站的位置；没地方站就看从矿往机器人方向的第一个空格</small></div><div class="a" data-t="头露出水面"></div>
+        <div class="n"><b>挖的时候头在水里吗？</b><small><code>MineSpot.seaBetween</code> 先排除整片海床：水面盖着、够深、直线穿过海水。<code>headOut</code> 再看站的位置</small></div><div class="a" data-t="头露出水面"></div>
         <div class="n good"><b>当普通目标</b><small>路线要走到头露出的位置</small></div><div class="a" data-t="头在水里"></div>
         <div class="n bad"><b>不要这个目标</b><small>记进 <code>OutOfReach</code></small></div>
       </div>
@@ -268,7 +273,7 @@ th{color:var(--muted);font-weight:600}
   <div class="card">
     <div class="formula">预算 = 当前的气 + 可以扣的血（血量留到 12）</div>
     <div class="formula">够用 = 预算 − 要花的 ≥ 上去的时间 × 1.25 + 40 刻</div>
-    <p>水下挖得慢：头在水下慢 5 倍，浮着再慢 5 倍。出水后每刻回 4 点气。规划和换气层用同一套算法，都在 <code>Air</code> 和 <code>Escape</code>。</p>
+    <p>水下不再有干活的时间，只算游。头露出水面浮着挖慢 5 倍。出水后每刻回 4 点气。规划和换气层用同一套算法，都在 <code>Air</code> 和 <code>Escape</code>，<code>Escape</code> 不算挖。</p>
   </div>
   <h3>水下什么时候重想</h3>
   <div class="grid2">
@@ -277,15 +282,6 @@ th{color:var(--muted);font-weight:600}
   </div>
   <h3>打猎</h3>
   <div class="card"><p>猎物的眼睛在水里时才走全量搜索，搜的是“现在能不能到”，能到才追。它不保证追得上会游的目标。太深的猎物先被 <code>withinBreath</code> 排除。陆地猎物不走这一步。</p></div>
-  <h2>今天查到的漏洞</h2>
-  <div class="card" style="border-color:var(--warn)">
-    <p><span class="tag t-bad">已确认</span><b>路过时水下还能挖。</b>“路上不许挖”只加给了海里专有的目标。去拿普通目标时寻路照样挖海床，你看到的挖沙砾多半就是这个，海床顶层就是沙砾。</p>
-    <p><span class="tag t-bad">已确认</span><b>海床下的小空洞会放行。</b>目标旁边有空气，算出来头在空气里，但要到那里得穿过海水和海床。</p>
-    <p><span class="tag t-bad">已确认</span><b>埋矿只看第一个空格。</b>这一格碰巧是地下空气，后面隔着海水也不看。</p>
-    <p><span class="tag t-q">次要</span><b>气量变大后记忆失效。</b>吃东西后 <code>-223,26,365</code> 又被选中一次。</p>
-    <p><span class="tag t-q">未查清</span><b>W49 全量里失败一次。</b>它走满 3 次到不了的高处后放弃，单独重跑 3 次都过了。</p>
-  </div>
-  <div class="card"><b>当时提的三处改法，等你决定</b><ol><li>普通目标的路线，不许在头泡水时挖任何东西，换气和逃生除外。</li><li>从机器人到矿的直线穿过水就不要，代价是湖对面洞里的矿也可能被排除。</li><li>加场景：海底下有带空气的小洞，矿在洞里，人在海面。</li></ol></div>
 </section>
 
 <section id="find">
@@ -336,18 +332,7 @@ th{color:var(--muted);font-weight:600}
     <div class="card"><b>架构</b><ul><li>规划器决定，其他层只发现偏差</li><li>偏差时从真实状态重新规划</li><li>不做计划外的事</li><li>系统保持简单，不给单个功能写专门逻辑</li><li>物品在地上和方块在世界里地位相同</li></ul></div>
     <div class="card"><b>数字和记忆</b><ul><li>只用真实单位：刻</li><li>代价必须是真实发生的事</li><li>不记时间，记原因</li><li>不用永久放弃名单</li><li>能涌现的行为不写特殊规则</li></ul></div>
     <div class="card"><b>像真人</b><ul><li>动作走原版流程</li><li>不动区块，不动存档</li><li>看得见才挖，够得着才打</li></ul></div>
-    <div class="card"><b>水下的目标</b><ul><li>不死循环</li><li>不白死</li><li>最后能结束</li><li>完不成要及时掉头，不追求 100% 成功</li></ul></div>
-  </div>
-  <h2>你回去可以想的问题</h2>
-  <div class="card">
-    <ol>
-      <li><b>规则到底看什么？</b>现在看“挖的时候头在哪”。漏洞说明还要看“怎么到那里”。是加直线判断，还是让寻路在水里不许挖，还是两个都要？</li>
-      <li><b>人在海里时，海底下的洞穴算不算？</b>要算，就得找到从陆地进去的路，这会很贵。不算就直接走开。</li>
-      <li><b>寻路该不该知道目标类型？</b>现在由任务告诉寻路“这趟不许挖”。</li>
-      <li><b>“路上不挖”要不要变成水下的默认？</b>换气和逃生仍要能挖，那就是全局规则加例外，比按目标类型简单。</li>
-      <li><b>选目标时的 64 个候选够不够？</b>这次在海中央，记到 1.8 万多处时它还在排除，一直没走开。</li>
-      <li><b>放工作台失败 3 次的规则</b>会不会被到不了的高处耗光？W49 那次看起来是这样，但没查清。</li>
-    </ol>
+    <div class="card"><b>水下的目标</b><ul><li>不死循环</li><li>不白死</li><li>最后能结束</li><li>完不成要及时掉头，不追求 100% 成功</li><li>头在水下不挖，海里专有的除外</li></ul></div>
   </div>
   <h2>暂缓的事</h2>
   <div class="card"><ul><li>缺方块时给自己下任务：你说之后亲自带着改</li><li>药水分支合并</li><li>规划器放到后台</li><li>结构查找：传送门、遗迹、林地府邸</li><li>门：不做，基地是开放的</li></ul></div>
@@ -380,12 +365,12 @@ var M=[
 ["BotInventoryMenu","entry","bot",113,"右键打开它的背包","5 行箱子界面，原版客户端也能用。",[],1],
 
 ["AcquireTask","task","task",451,"总指挥","/bot get 用它。问规划器要计划，只执行第一步，做完再规划。保存这一单的记忆和探索员。",["CraftPlanner","GatherTask","HuntTask","CraftStep","SmeltStep","FetchWaterTask","ComeTask","OutOfReach","Explorer","ZoneExit"],1],
-["GatherTask","task","task",1037,"采集","扫描目标、比较代价、走过去、挖、捡。阶段：PREPARE、FIND、MAP、LOCATE、TRAVEL、WAY、APPROACH、MINE、FETCH、RETURN。",["MineSpot","DropFetch","Explorer","OutOfReach","BlockScanner","DropAnalysis","BiomeHints","MovementController","Air","Guard"],1],
+["GatherTask","task","task",964,"采集","扫描目标、比较代价、走过去、挖、捡。阶段：PREPARE、FIND、MAP、LOCATE、TRAVEL、WAY、APPROACH、MINE、FETCH、RETURN。",["MineSpot","DropFetch","Explorer","OutOfReach","BlockScanner","DropAnalysis","BiomeHints","MovementController","Air","Guard"],1],
 ["HuntTask","task","task",705,"打猎","动物去找，怪物等刷新，特殊生物有就打。阶段：FIND、LOCATE、EXPLORE、WAIT、WAY、CHASE、FETCH、HEAL。",["MobDrops","DropFetch","Explorer","Sight","MovementController","Air","Habitat"],1],
-["MineSpot","task","task",266,"一块方块能从哪挖","站的位置、是否海里专有、挖的时候头在不在水里、挖要花多少时间。选目标、走过去、规划器共用同一个判断。",["Air","Escape","LocalPathfinder","BreakTimes","DropAnalysis","ProtectionZones","Guard"],1],
+["MineSpot","task","task",283,"一块方块能从哪挖","站的位置、海床排除、挖的时候头在不在水里。选目标、走过去、规划器共用同一个判断。",["Air","Escape","LocalPathfinder","BreakTimes","DropAnalysis","ProtectionZones","Guard"],1],
 ["CraftStep","task","task",124,"合成","走原版配方书的放置流程，再 shift 点击结果。",["Station","RecipeIndex"],1],
 ["SmeltStep","task","task",231,"熔炼","放自己的熔炉，放料和燃料，等，取，收回。",["Station","RecipeIndex"],1],
-["Station","task","task",292,"放工作台和熔炉","身边放不下就去有地方的位置，用完收回。不用别人放的。",["Explorer","OutOfReach","Placement","MovementController","Air"],1],
+["Station","task","task",300,"放工作台和熔炉","身边放不下就去有地方的位置，用完收回。不用别人放的。",["Explorer","OutOfReach","Placement","MovementController","Air"],1],
 ["Explorer","task","task",220,"下一处去哪找","用种子算出 2000 格内的群系地图，选下一个地方，记住看过的。",["ProtectionZones"],1],
 ["OutOfReach","task","task",71,"一单的到不了记录","judged、proven、failed 三种，不记时间，记原因。",[],1],
 ["DropFetch","task","task",180,"地上的物品也是来源","和方块、生物放在同一把尺子上比较。",["MovementController","Air"],1],
@@ -402,20 +387,20 @@ var M=[
 ["Obtainability","know","knowledge",46,"生存拿不到的物品","基岩这类直接拒绝。",[],0],
 ["PlanBench","know","knowledge",62,"规划耗时测试","开发工具。",[],0],
 
-["BotPlayer","body","bot",818,"每一刻的优先级","换气、打架、吃东西、任务。也管幽灵状态、死亡重置、整理背包。",["MovementController","Loot","Air","ProtectionZones"],1],
-["MovementController","body","bot",2095,"身体，最大的文件","走、游、挖、放、卡住处理、管理搜索、全量搜索、借用移动。",["LocalPathfinder","PathJob","Snapshot","Guard","Placement","ZoneExit","Air","Escape","Steps"],1],
+["BotPlayer","body","bot",797,"每一刻的优先级","换气、打架、吃东西、任务。也管幽灵状态、死亡重置、整理背包。",["MovementController","Loot","Air","ProtectionZones"],1],
+["MovementController","body","bot",2041,"身体，最大的文件","走、游、挖、放、卡住处理、管理搜索、全量搜索、借用移动。挖方块的唯一入口 mine() 在这里，全局总闸的执行层。",["LocalPathfinder","PathJob","Snapshot","Guard","Placement","ZoneExit","Air","Escape","Steps"],1],
 ["Steps","body","bot",229,"WalkStep 等执行步骤","WalkStep、PillarStep、BreatheStep，加上接口 StepExecutor。",[],1],
 ["Loot","body","bot",111,"跟踪掉落物","记下刚挖的方块掉了什么，用于核对。",[],1],
 ["Sight","body","bot",49,"能不能打到","够得着且看得见。",[],1],
 ["Perf","body","bot",141,"耗时统计","/bot perf，只测量。",[],0],
 ["FakeConnection","body","bot",68,"假的网络连接","机器人没有客户端。",[],0],
 
-["LocalPathfinder","path","path",1126,"A* 寻路","在窗口里找步骤，每个节点带着剩余的气。普通、保护区、全量搜索都是它。",["Moves","Air","Escape","Placement","ProtectionZones","BreakTimes","TravelEstimate","BlockTable","Guard"],1],
+["LocalPathfinder","path","path",1106,"A* 寻路","在窗口里找步骤，每个节点带着剩余的气。普通、保护区、全量搜索都是它。",["Moves","Air","Escape","Placement","ProtectionZones","BreakTimes","TravelEstimate","BlockTable","Guard"],1],
 ["Moves","path","path/moves",452,"五种动作","Walk、Swim、Dig、DigDown、Build，加上 Planner 接口。",[],1],
 ["PathJob","path","path",150,"后台搜索线程","所有机器人共用一条后台线程。",["LocalPathfinder"],1],
 ["Snapshot","path","path",182,"世界副本","复制方块给后台读，范围外当作未加载。",[],1],
-["Air","path","path",249,"气的规则","预算、余量、下潜代价、挖掘减速。",[],1],
-["Escape","path","path",231,"离出水还有多久","先横向找开口再向上，能算挖穿头顶。",["BreakTimes"],1],
+["Air","path","path",235,"气的规则","预算、余量、下潜代价、挖掘减速。",[],1],
+["Escape","path","path",223,"离出水还有多久","先横向找开口再向上，能算挖穿头顶。",["BreakTimes"],1],
 ["TravelEstimate","path","path",111,"窗口外还有多远","决定往哪条边走。",[],1],
 ["BreakTimes","path","path",91,"挖一块要多久","按真实工具和方块。",[],1],
 ["BlockTable","path","path",128,"方块属性缓存","空不空、多高、干不干净。",[],0],
@@ -426,7 +411,7 @@ var M=[
 ["PathGoal","path","path",14,"目标条件接口","判断一格算不算到了。",[],0],
 ["Worlds","path","path",41,"世界和副本的共同接口","让同一份代码两边都能跑。",[],0],
 
-["Guard","guard","guard",129,"能不能挖","所有挖之前都问它，还有绝不踩的方块。",["ProtectionZones","Rules","Restrictions"],1],
+["Guard","guard","guard",141,"能不能挖","所有挖之前都问它，还有绝不踩的方块。全局总闸的判断 ofTheSea 也在这里。",["ProtectionZones","Rules","Restrictions"],1],
 ["Placement","guard","guard",62,"能不能放","规划和动手同一个答案，拒绝都有原因。",["ProtectionZones","Rules"],1],
 ["ProtectionZones","guard","guard",202,"保护区块","整区块保护，能穿过不能动。",[],1],
 ["ZoneExit","guard","guard",165,"走出保护区","只看区块表，形状不限。",[],1],
@@ -439,8 +424,8 @@ var M=[
 ["ItemEntityMixin","body","mixin",50,"捡东西前先问它","它只捡任务要的和有限的搭路方块。",[],0],
 ["MobMixin","body","mixin",21,"苦力怕不瞄准它","免得它把苦力怕引回家，或炸坏地形。",[],0],
 ["SleepStatusMixin","body","mixin",28,"睡觉不算它","修改睡觉人数。",[],0],
-["Scenarios","entry","test",1336,"测试场景","全部回归场景。",[],0],
-["ScenarioRunner","entry","test",250,"跑场景写报告","开发服上跑，写 scenario-report.md。",[],0],
+["Scenarios","entry","test",1389,"测试场景","全部回归场景。",[],0],
+["ScenarioRunner","entry","test",265,"跑场景写报告","开发服上跑，写 scenario-report.md。",[],0],
 ["Arena","entry","test",89,"场景的场地","超平坦上的一块地。",[],0],
 ["Scenario","entry","test",90,"场景定义","检查条件和结果。",[],0]
 ];

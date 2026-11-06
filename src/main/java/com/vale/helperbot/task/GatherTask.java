@@ -10,12 +10,9 @@ import com.vale.helperbot.knowledge.BiomeHints;
 import com.vale.helperbot.knowledge.BlockScanner;
 import net.minecraft.core.component.DataComponents;
 import com.vale.helperbot.path.Air;
-import com.vale.helperbot.path.BreakTimes;
 import com.vale.helperbot.path.Escape;
-import com.vale.helperbot.path.LocalPathfinder;
 import com.vale.helperbot.knowledge.DropAnalysis;
 import com.vale.helperbot.knowledge.Obtainability;
-import com.vale.helperbot.path.LocalPathfinder;
 import com.vale.helperbot.path.Mode;
 import com.vale.helperbot.path.PathGoal;
 import net.minecraft.core.BlockPos;
@@ -272,7 +269,11 @@ public class GatherTask implements BotTask {
 		ServerLevel level = bot.level();
 		return BlockScanner.find(level, bot.blockPosition(), chunkRadius,
 				state -> toolFor.containsKey(state.getBlock()) && DropAnalysis.dropsFrom(item, state),
-				pos -> !outOfReach(bot, pos) && Guard.canHarvest(level, pos, level.getBlockState(pos)),
+				pos -> {
+					BlockState state = level.getBlockState(pos);
+					return !outOfReach(bot, pos) && Guard.canHarvest(level, pos, state)
+							&& (Guard.ofTheSea(state) || !MineSpot.seaBetween(level, pos, bot.getEyePosition(), MineSpot.reach(bot)));
+				},
 				64);
 	}
 
@@ -314,13 +315,12 @@ public class GatherTask implements BotTask {
 		}
 		targets.sort(Comparator.comparingDouble(p -> p.distSqr(here)));
 		// Of the nearest few, the one that's cheapest to get: under water that includes the air it
-		// costs (getting there and back, mining at the slow under-water speed). Ones it can't reach
-		// on a breath, or can't reach at all, are skipped; e.g. the bottom of a kelp stalk deeper
-		// than it can dive, when the top of the same stalk is right there.
+		// costs. Ones it can't reach on a breath, or can't reach at all, are skipped; e.g. the bottom
+		// of a kelp stalk deeper than it can dive, when the top of the same stalk is right there.
 		BlockPos best = null;
 		double bestCost = Double.MAX_VALUE;
 		// The nearest few; and if some of those are in water, also the nearest few on dry land, even
-		// if further away (otherwise a near patch under water always wins against plenty on land).
+		// if further away (otherwise a near patch to float over always wins against plenty on land).
 		int checked = 0;
 		int dryChecked = 0;
 		boolean sawWater = false;
@@ -358,7 +358,7 @@ public class GatherTask implements BotTask {
 		if (bestItem != null && bestItemCost <= bestCost) {
 			return fetch(bot, bestItem);
 		}
-		if (MineSpot.ofTheSea(level.getBlockState(best))) {
+		if (Guard.ofTheSea(level.getBlockState(best)) && !bot.movement().headUnderwater()) {
 			return findWay(bot);
 		}
 		targets.remove(best);
@@ -379,13 +379,9 @@ public class GatherTask implements BotTask {
 	private Status findWay(BotPlayer bot) {
 		ServerLevel level = bot.level();
 		wayTo.clear();
-		double work = 0;
 		for (BlockPos p : targets) {
-			BlockState state = level.getBlockState(p);
-			if (MineSpot.ofTheSea(state)) {
+			if (Guard.ofTheSea(level.getBlockState(p))) {
 				wayTo.put(p, MineSpot.reachGoal(p, MineSpot.reach(bot), bot.getEyeHeight(), MineSpot.exposed(level, p), false));
-				int dry = MineSpot.dryTicks(bot, p, state, toolFor.getOrDefault(state.getBlock(), MovementController.HAND));
-				work = dry == Integer.MAX_VALUE ? work : Math.max(work, dry);
 			}
 		}
 		List<PathGoal> goals = List.copyOf(wayTo.values());
@@ -396,7 +392,7 @@ public class GatherTask implements BotTask {
 				}
 			}
 			return false;
-		}, mode, work);
+		}, mode);
 		phase = Phase.WAY;
 		return Status.RUNNING;
 	}
@@ -440,13 +436,7 @@ public class GatherTask implements BotTask {
 		// (it stopped there, set about mining the floor as "in the way", and gave the block up).
 		// Buried ones (ore in rock) have no such spot: getting close and digging through is the way.
 		BlockState state = level.getBlockState(block);
-		bot.movement().goTo(MineSpot.reachGoal(block, reach, eyeHeight, MineSpot.exposed(level, block), !MineSpot.ofTheSea(state)), block, mode);
-		// Under water the plan must leave air to mine it too, not just to get there and back.
-		int dry = MineSpot.dryTicks(bot, block, state, behind != null ? MovementController.AUTO_TOOL
-				: toolFor.getOrDefault(state.getBlock(), MovementController.HAND));
-		if (dry != Integer.MAX_VALUE) {
-			bot.movement().workAtGoal(dry);
-		}
+		bot.movement().goTo(MineSpot.reachGoal(block, reach, eyeHeight, MineSpot.exposed(level, block), !Guard.ofTheSea(state)), block, mode);
 	}
 
 	/** None around: on to the next place that may have it (see Explorer). */
@@ -491,9 +481,9 @@ public class GatherTask implements BotTask {
 				: "方圆 " + Explorer.RADIUS + " 格内能去的地方都找过了，没找到");
 	}
 
-	/** All it comes from is what the sea alone has (see MineSpot#ofTheSea): the one thing to go to the sea for. */
+	/** All it comes from is what the sea alone has (see Guard#ofTheSea): the one thing to go to the sea for. */
 	private boolean seaOnly() {
-		return toolFor.keySet().stream().allMatch(b -> MineSpot.ofTheSea(b.defaultBlockState()));
+		return toolFor.keySet().stream().allMatch(b -> Guard.ofTheSea(b.defaultBlockState()));
 	}
 
 	private boolean announcedExplore;
@@ -647,18 +637,6 @@ public class GatherTask implements BotTask {
 		if (tool >= 0 && bot.getInventory().getItem(tool).getItem() != toolItems.get(currentBlock)) {
 			return toolMoved(bot);
 		}
-		if (!bot.movement().isBreaking(aim)) {
-			if (bot.movement().headUnderwater() && !MineSpot.ofTheSea(level.getBlockState(aim))) {
-				// Water came in on the way here (a dug tunnel floods): it isn't mined under water.
-				bot.log(aim.toShortString() + " 挖的时候头在水下，不挖，换下一个目标");
-				dropTarget(bot);
-				return nextTarget(bot);
-			}
-			Status air = airCheck(bot, aim, aimBlock, tool);
-			if (air != null) {
-				return air;
-			}
-		}
 		// Before the first hit: with what's actually in hand, on the block as it actually is, would
 		// it drop the item? The plan says so; this catches the hand drifting from the plan for any
 		// reason, before a block is wasted, instead of guessing afterwards. Checked inside the mining
@@ -690,12 +668,6 @@ public class GatherTask implements BotTask {
 		if (!Guard.canBreak(level, blocker, blockerState)) {
 			bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
 					+ realTarget().toShortString() + "，又不能挖，换下一个目标");
-			dropTarget(bot);
-			return nextTarget(bot);
-		}
-		if (bot.movement().headUnderwater() && !MineSpot.ofTheSea(blockerState)) {
-			bot.log(blocker.toShortString() + " 的" + blockerState.getBlock().getName().getString() + "挡着"
-					+ realTarget().toShortString() + "，水下不挖它，换下一个目标");
 			dropTarget(bot);
 			return nextTarget(bot);
 		}
@@ -771,51 +743,6 @@ public class GatherTask implements BotTask {
 			lastBreakTick = brokeAt;
 			return nextTarget(bot);
 		}
-		return Status.RUNNING;
-	}
-
-	/**
-	 * Under water, before the first hit: is there air enough to break it and still get up? Mining
-	 * progress is lost when it leaves, so starting on half a breath means doing it all again. Like a
-	 * player: not enough left, go up for air first; not even on a full breath from here, skip it.
-	 * Null: go ahead and mine.
-	 */
-	private Status airCheck(BotPlayer bot, BlockPos aim, Block expected, int tool) {
-		if (!bot.movement().headUnderwater()) {
-			return null;
-		}
-		int budget = Air.budget(bot);
-		if (budget >= Air.UNLIMITED) {
-			return null;
-		}
-		ServerLevel level = bot.level();
-		BlockState state = level.getBlockState(aim);
-		if (!state.is(expected)) {
-			// Already gone (mined, fell): the mining step notices. It used to cost the water that took
-			// its place (hardness 100: "3750 seconds") and skip a perfectly good target.
-			return null;
-		}
-		int dig = MineSpot.dryTicks(bot, aim, state, tool);
-		if (dig == Integer.MAX_VALUE) {
-			return null; // can't be mined at all: the mining step says so
-		}
-		// At the speed it will really go: under water, and 5x slower again when not standing (the
-		// same reckoning the plan made, see Air#digPenalty).
-		double mining = Air.workUnderWater(dig, Air.digPenalty(level, bot.blockPosition(), Air.waterDigFactor(bot)));
-		double escape = bot.movement().escapeTicks();
-		if (Air.enough(budget, escape, mining)) {
-			return null;
-		}
-		// Even with a full breath: back down here (about as long as the way up), then the mining.
-		if (!Air.enough(Air.fullBudget(bot) - escape, escape, mining)) {
-			bot.log(aim.toShortString() + " 的" + state.getBlock().getName().getString() + " 在水下要挖 " + (int) mining / 20
-					+ " 秒（" + toolName(bot, tool) + "，岸上 " + dig + " 刻，站在 " + bot.blockPosition().toShortString()
-					+ (LocalPathfinder.isSupport(level, bot.blockPosition().below()) ? "，站着" : "，浮着") + "），一口气挖不完再游上去，跳过");
-			dropTarget(bot);
-			return nextTarget(bot);
-		}
-		bot.log("剩下的气不够挖完 " + aim.toShortString() + "（要 " + (int) mining / 20 + " 秒），先去换气再挖");
-		bot.movement().requestAir();
 		return Status.RUNNING;
 	}
 

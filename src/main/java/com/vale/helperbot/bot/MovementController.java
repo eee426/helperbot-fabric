@@ -145,7 +145,6 @@ public final class MovementController {
 		stop();
 		this.leaving = null;
 		this.provenFrom = null;
-		this.asItIs = false;
 		this.goal = goal;
 		this.target = target;
 		this.mode = mode;
@@ -157,7 +156,6 @@ public final class MovementController {
 		this.emptyPlans = 0;
 		this.recoveries = 0;
 		this.frozenTicks = 0;
-		this.goalWork = 0;
 	}
 
 	/**
@@ -180,15 +178,13 @@ public final class MovementController {
 	 * {@link #provenFrom} is set if there's none.
 	 *
 	 * @param anyOf where each target can be got at from
-	 * @param work  what it will do on arrival (see {@link #workAtGoal})
 	 */
-	public void findWay(List<BlockPos> targets, PathGoal anyOf, Mode mode, double work) {
+	public void findWay(List<BlockPos> targets, PathGoal anyOf, Mode mode) {
 		BlockPos from = feet();
 		goTo(anyOf, targets.stream().min(java.util.Comparator.comparingDouble(from::distSqr)).orElse(from), mode);
-		goalWork = work;
-		asItIs = true;
 		wayEnd = null;
 		wayTargets = targets;
+		wayOneSide = true;
 	}
 
 	public boolean findingWay() {
@@ -209,8 +205,8 @@ public final class MovementController {
 	/** Set while it's yet to know if there's a way to these (see {@link #findWay}). */
 	private List<BlockPos> wayTargets;
 	private BlockPos wayEnd;
-	/** It's on its way by {@link #findWay}: any search on the way goes by the same terms. */
-	private boolean asItIs;
+	/** Looking only up from the bot, or only down from it (see startWay). */
+	private boolean wayOneSide;
 	/** Most cells of a search through everything: it's what a window of a hundred blocks of deep sea comes to. */
 	private static final int WAY_NODES = 2_000_000;
 	/** Around the targets: where they're reached from, and the way up from there. */
@@ -220,28 +216,6 @@ public final class MovementController {
 	public void leaveZone(ZoneExit exit, Mode mode) {
 		goTo((w, p) -> exit.outside(w, p), exit.nearestOutside(feet()), mode);
 		leaving = exit;
-	}
-
-	/**
-	 * What it will do on arrival, in ticks on dry land (mining the block it goes to, say): under
-	 * water the plan then leaves air for that too (see Air.Profile#workTicks). Set right after
-	 * {@link #goTo}; a fight or a pickup on the way doesn't count it.
-	 */
-	public void workAtGoal(double dryTicks) {
-		this.goalWork = dryTicks;
-	}
-
-	private double goalWork;
-
-	/**
-	 * With work to do under water, it's there when the plan says so, at the end of a route to the
-	 * goal: only the plan knows where the work fits the breath (LocalPathfinder#airForWork). A route
-	 * down to a standing spot passes cells already within reach on the way, and stopping at the
-	 * first, afloat, mining went 25 times slower than planned and the air ran out.
-	 */
-	private boolean planDecidesArrival() {
-		return goalWork > 0 && !engaged && !ignoreAir && headUnderwater()
-				&& !(path != null && index >= path.size() && pathReachesGoal);
 	}
 
 	/** Changes the destination; the current step finishes, then a new plan is made. */
@@ -419,6 +393,14 @@ public final class MovementController {
 	/** The planner found nowhere to go on the air left: the breathing layer should take over. */
 	private boolean airRequested;
 
+	/** No way out by swimming: the one time it may dig with its head under water. */
+	private boolean digOut;
+
+	/** See {@link #digOut}: only the breathing layer sets this, and no plan counts on it. */
+	public void digOut(boolean allowed) {
+		digOut = allowed;
+	}
+
 	/** Ticks from here until the head is out of the water (see {@link Escape}). */
 	public double escapeTicks() {
 		return newEscape().ticks(feet());
@@ -433,11 +415,6 @@ public final class MovementController {
 		boolean r = airRequested;
 		airRequested = false;
 		return r;
-	}
-
-	/** Ask the breathing layer for a full breath now (e.g. not enough air left to finish a block). */
-	public void requestAir() {
-		airRequested = true;
 	}
 
 	/** Already hitting this block (some progress made), as opposed to about to start on it. */
@@ -461,56 +438,6 @@ public final class MovementController {
 		engage((w, p) -> Air.breathable(w, p)
 				&& (LocalPathfinder.isPassable(w, p.above()) || !Escape.floodsWhenDug(w, p.above())),
 				f.above(Math.max(2, waterAbove())), "去换气");
-	}
-
-	/** Walking somewhere below where it is now (e.g. digging down to a cave under the sea). */
-	public boolean headingDown() {
-		return status == Status.MOVING && target != null && target.getY() < feet().getY() - 1;
-	}
-
-	/**
-	 * In a one-wide flooded shaft whose water only comes from above (it dug down through the sea
-	 * floor)? Then a block over its head cuts the water off, the water below drains away, and it's
-	 * standing in air: what a player does instead of swimming all the way back up.
-	 */
-	public boolean canSeal() {
-		ServerLevel level = bot.level();
-		BlockPos f = feet(), head = f.above(), top = head.above();
-		if (!headUnderwater() || !LocalPathfinder.isWater(level, top) || !Placement.allowed(level, top, Placement.Kind.BUILD)
-				|| BuildingBlocks.bestSlot(bot.getInventory()) < 0) {
-			return false;
-		}
-		for (BlockPos c : new BlockPos[]{f, head}) {
-			var fluid = level.getFluidState(c);
-			if (!fluid.isEmpty() && fluid.isSource()) {
-				return false; // still water here once cut off
-			}
-			for (Direction d : Direction.Plane.HORIZONTAL) {
-				BlockPos side = c.relative(d);
-				if (!level.getFluidState(side).isEmpty() || LocalPathfinder.isPassable(level, side)) {
-					return false; // water (or the way for it) comes in from the side
-				}
-			}
-		}
-		// The block needs something to go against: the shaft walls up there.
-		for (Direction d : Direction.Plane.HORIZONTAL) {
-			if (!level.getBlockState(top.relative(d)).getCollisionShape(level, top.relative(d)).isEmpty()) {
-				return true;
-			}
-		}
-		return false;
-	}
-
-	/** Put the block over its head (see {@link #canSeal}). */
-	public boolean seal() {
-		BlockPos top = feet().above(2);
-		Placement.Refusal refused = place(top, BuildingBlocks.bestSlot(bot.getInventory()));
-		if (refused != null) {
-			bot.log("堵井口失败：" + refused.why);
-			return false;
-		}
-		replan("堵住了头顶的井口");
-		return true;
 	}
 
 	/** Back to what the task was doing before the chase (re-planning from here if it was walking). */
@@ -592,7 +519,7 @@ public final class MovementController {
 		}
 		boolean atStepBoundary = !stepStarted && breakIndex == 0 && breakingPos == null;
 		if (atStepBoundary) {
-			if (goal.test(bot.level(), feet()) && !planDecidesArrival()) {
+			if (goal.test(bot.level(), feet())) {
 				// Arrived means at the middle of the cell, which is where plans and goals take it to
 				// stand (what it sees and reaches from there). Pushed or shuffled off it (after picking
 				// something up, say), it saw a block from the middle that was hidden from where it was.
@@ -687,17 +614,24 @@ public final class MovementController {
 		return dx * dx + dz * dz;
 	}
 
-	/** See {@link #findWay}: the box is whole chunks, from the lowest target up over everything in it. */
+	/**
+	 * See {@link #findWay}: the box is whole chunks. Everything is below the bot: from the bottom of
+	 * the world up to the bot; everything above: from the bot up over all that's in the box. That's
+	 * half of what there is to look through, usually. It can miss a way over a ridge higher than
+	 * the bot, so what it doesn't find is looked for again, top to bottom, before it's believed.
+	 */
 	private void startWay() {
 		ServerLevel level = bot.level();
 		BlockPos from = feet();
-		int minX = from.getX(), maxX = minX, minZ = from.getZ(), maxZ = minZ, lowest = from.getY();
+		int minX = from.getX(), maxX = minX, minZ = from.getZ(), maxZ = minZ;
+		boolean below = wayOneSide, above = wayOneSide;
 		for (BlockPos t : wayTargets) {
 			minX = Math.min(minX, t.getX());
 			maxX = Math.max(maxX, t.getX());
 			minZ = Math.min(minZ, t.getZ());
 			maxZ = Math.max(maxZ, t.getZ());
-			lowest = Math.min(lowest, t.getY());
+			below &= t.getY() <= from.getY();
+			above &= t.getY() >= from.getY();
 		}
 		minX -= WAY_MARGIN;
 		maxX += WAY_MARGIN;
@@ -714,11 +648,13 @@ public final class MovementController {
 				}
 			}
 		}
-		top += WAY_MARGIN;
-		lowest -= WAY_MARGIN;
+		// (With nothing higher than the bot in the box, down from it is all there is: no second search.)
+		wayOneSide = (below && top > from.getY()) || above;
+		top = below ? from.getY() + WAY_MARGIN : top + WAY_MARGIN;
+		int lowest = above ? from.getY() - WAY_MARGIN : level.getMinY();
 		int side = 16 + Math.max(Math.max(from.getX() - minX, maxX - from.getX()), Math.max(from.getZ() - minZ, maxZ - from.getZ()));
 		LocalPathfinder.Limits limits = new LocalPathfinder.Limits(side, top - from.getY(), from.getY() - lowest, WAY_NODES);
-		search = startSearch(Snapshot.box(level, minX, lowest, minZ, maxX, top, maxZ), from, bot.getY(), limits, goal, null, true);
+		search = startSearch(Snapshot.box(level, minX, lowest, minZ, maxX, top, maxZ), from, bot.getY(), limits, goal, null, true, true);
 		zoneSearch = false;
 		zoneRoute = false;
 		plannedAt = bot.tickCount;
@@ -729,6 +665,11 @@ public final class MovementController {
 		PathJob job = search;
 		search = null;
 		resetStep();
+		if (!job.result().reachesGoal() && wayOneSide) {
+			bot.log("只往一个方向搜没找到（" + job.nodes() + " 格），上下全部再搜一次");
+			wayOneSide = false;
+			return; // tickMoving starts it (see startWay)
+		}
 		int targets = wayTargets.size();
 		wayTargets = null;
 		LocalPathfinder.Result result = job.result();
@@ -784,15 +725,15 @@ public final class MovementController {
 
 	private PathJob startSearch(BlockPos start, double startFloor, LocalPathfinder.Limits limits, PathGoal goal,
 								java.util.function.ToDoubleFunction<BlockPos> ahead, boolean whole) {
-		return startSearch(Snapshot.around(bot.level(), start, limits, airProfile().limited()), start, startFloor, limits, goal, ahead, whole);
+		return startSearch(Snapshot.around(bot.level(), start, limits, airProfile().limited()), start, startFloor, limits, goal, ahead, whole, false);
 	}
 
 	private PathJob startSearch(Snapshot world, BlockPos start, double startFloor, LocalPathfinder.Limits limits, PathGoal goal,
-								java.util.function.ToDoubleFunction<BlockPos> ahead, boolean whole) {
+								java.util.function.ToDoubleFunction<BlockPos> ahead, boolean whole, boolean reachOnly) {
 		long started = System.nanoTime();
 		Air.Profile air = airProfile();
 		if (breathAtStart >= 0 && air.limited()) {
-			air = new Air.Profile(breathAtStart, air.full(), air.waterDigFactor(), true, air.workTicks(), air.refill(), air.sprintBlocks());
+			air = new Air.Profile(breathAtStart, air.full(), true, air.refill(), air.sprintBlocks());
 		}
 		Inventory tools = new Inventory(bot, new net.minecraft.world.entity.EntityEquipment());
 		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
@@ -801,7 +742,7 @@ public final class MovementController {
 		it.unimi.dsi.fastutil.longs.LongOpenHashSet avoided = avoidedNow();
 		it.unimi.dsi.fastutil.longs.LongOpenHashSet favored = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(lastPath);
 		PathJob job = new PathJob(new LocalPathfinder(world, tools, mode, mode.maxDropFor(bot.getHealth()), start, startFloor,
-				goal, target, horizontalOnly, limits, avoided::contains, air, favored::contains, whole, ahead, asItIs && !engaged));
+				goal, target, horizontalOnly, limits, avoided::contains, air, favored::contains, whole, ahead, reachOnly));
 		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
 		return job;
 	}
@@ -887,7 +828,7 @@ public final class MovementController {
 	private static final int WATER_REPLAN_TICKS = 20;
 
 	public Air.Profile airProfile() {
-		return Air.profile(bot, !ignoreAir, engaged ? 0 : goalWork, mode.sprint && !bot.isUsingItem() ? Air.sprintBlocks(bot) : 0);
+		return Air.profile(bot, !ignoreAir, mode.sprint && !bot.isUsingItem() ? Air.sprintBlocks(bot) : 0);
 	}
 
 	/** Sprinting is allowed (vanilla: more than 6 food, not eating) and this mode sprints. */
@@ -1537,6 +1478,12 @@ public final class MovementController {
 		if (bot.isGhost()) {
 			return MineResult.FAILED; // in a protected chunk it touches nothing (plans shouldn't ask)
 		}
+		// Checked every tick: water may come in halfway through. Plans never get here (see
+		// LocalPathfinder#clearCost): it's for what they couldn't know.
+		if (headUnderwater() && !Guard.ofTheSea(state) && !digOut) {
+			abortBreaking();
+			return MineResult.FAILED;
+		}
 		if (!pos.equals(breakingPos)) {
 			abortBreaking();
 			if (++breakAttempts > 3) {
@@ -1734,6 +1681,13 @@ public final class MovementController {
 	 * up), move horizontally, then come down onto the target floor.
 	 */
 	private void move(PathStep step) {
+		// Up through a roof into the water (see DigMove#digOutUnder): the way on is the water that's
+		// coming down. Going on before it's here, the step has nowhere to land, and it would set about
+		// another bit of the roof.
+		if (!stepStarted && step.to().getY() - step.from().getY() == 2 && !step.toBreak().isEmpty() && !isInWater()
+				&& LocalPathfinder.isWater(bot.level(), step.to().above())) {
+			return;
+		}
 		if (!stepStarted) {
 			stepFloor = executor(step).targetFloor(bot.level(), step);
 			if (Double.isNaN(stepFloor) && LocalPathfinder.isOpenWater(bot.level(), step.to())) {
@@ -1917,16 +1871,8 @@ public final class MovementController {
 		return !bot.level().noCollision(bot, bot.getBoundingBox().move(0, -0.03, 0));
 	}
 
-	boolean isInWater() {
+	public boolean isInWater() {
 		return LocalPathfinder.isWater(bot.level(), feet());
-	}
-
-	/** Floating at a water surface, head in the air. */
-	private boolean isFloating() {
-		BlockPos f = feet();
-		return LocalPathfinder.isWater(bot.level(), f)
-				&& !LocalPathfinder.isWater(bot.level(), f.above())
-				&& Math.abs(bot.getY() - (f.getY() + LocalPathfinder.SWIM_FLOOR)) < 0.05;
 	}
 
 	/** Standing, or in water (where it can hover between steps, like a player treading water). */

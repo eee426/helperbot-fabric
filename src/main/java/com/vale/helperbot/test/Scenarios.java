@@ -965,7 +965,7 @@ public final class Scenarios {
 					teleport(bot, a, 3, 41, 0);
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.KELP, 3, Mode.NORMAL);
-				}, Scenario.has(Items.KELP, 3, c -> !c.logHas("不要了"), "放弃了一个掉落物（没捡到）")),
+				}, Scenario.has(Items.KELP, 3, c -> !c.logHas("不要了") && c.logCount("该换气了") <= 1, "放弃了掉落物，或者每根都被叫上去换气")),
 
 				new Scenario("W32", "矿在湖底下的矿洞里：头在空气里，照常挖", 4 * MINUTE, (a, bot, me) -> {
 					// What counts is where the head is when mining, not what's over it.
@@ -1077,6 +1077,59 @@ public final class Scenarios {
 					return at >= 0 ? Scenario.Outcome.pass(c.log().substring(at, c.log().indexOf(10, at)))
 							: c.ended() ? Scenario.Outcome.fail("没搜") : null;
 				}),
+
+				new Scenario("W56", "总闸：有水下呼吸，站在水底，要的煤就在脚下：头在水下不挖", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(4, 34, -4, 12, 40, 4, Blocks.WATER);
+					a.set(8, 33, 0, Blocks.COAL_ORE);
+					teleport(bot, a, 8, 34, 0);
+					bot.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.WATER_BREATHING, 20 * 600));
+					give(bot, Items.WOODEN_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, c -> !c.arena().level.getBlockState(c.arena().at(8, 33, 0)).is(Blocks.COAL_ORE) ? Scenario.Outcome.fail("头在水下把煤挖了")
+						: c.ticks() > 400 ? Scenario.Outcome.pass("20 秒没挖") : null),
+
+				new Scenario("W57", "在干燥的矿洞里挖穿头顶的湖底，再游上来（挖的时候头在空气里）", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(2, 34, -12, 24, 40, 12, Blocks.WATER);
+					// Walled in with what it can't mine, and the lake over a stone ceiling.
+					a.fill(9, 30, -2, 13, 33, 2, Blocks.OBSIDIAN);
+					a.fill(10, 31, -1, 12, 32, 1, Blocks.AIR);
+					a.fill(10, 33, -1, 12, 33, 1, Blocks.STONE);
+					teleport(bot, a, 11, 31, 0);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					WET[0] = false;
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> {
+					WET[0] |= c.bot().movement().headUnderwater();
+					return c.bot().position().distanceTo(c.arena().at(0, Arena.SURFACE, 0).getBottomCenter()) <= 3
+							? (WET[0] ? Scenario.Outcome.pass("挖穿湖底游上来了") : Scenario.Outcome.fail("到了，但没走水路"))
+							: c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null;
+				}),
+
+				new Scenario("W58", "意外：封死的水井，游不出去：逃生时才挖开头顶", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(8, 33, 0, 8, 35, 0, Blocks.WATER);
+					a.set(8, 36, 0, Blocks.DIRT);
+					a.fill(8, 37, 0, 8, 40, 0, Blocks.AIR);
+					teleport(bot, a, 8, 33, 0);
+					give(bot, Items.IRON_SHOVEL, 1);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.arena().level.getBlockState(c.arena().at(8, 36, 0)).is(Blocks.DIRT) ? null
+						: Scenario.Outcome.pass("挖开逃出来了")),
+
+				new Scenario("W59", "海带比人低，但要翻过比人高 12 格的墙：只往下搜找不到，上下全部再搜一次", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(7, 41, -4, 15, 53, 4, Blocks.STONE);
+					a.fill(8, 34, -3, 14, 40, 3, Blocks.WATER);
+					a.fill(8, 41, -3, 14, 53, 3, Blocks.AIR);
+					for (int i = 0; i < 13; i++) {
+						a.fill(i - 6, 41, -1, i - 6, 41 + i, 1, Blocks.STONE); // the ramp up to the top of the wall
+					}
+					a.set(11, 34, 0, Blocks.KELP);
+					teleport(bot, a, -9, 41, 0);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.KELP, 1, Mode.NORMAL);
+				}, Scenario.has(Items.KELP, 1, c -> !c.logHas("都到不了"), "说到不了")),
 
 				new Scenario("W36", "9 格深的水底拿海带：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 32, -4, 12, 40, 4, Blocks.WATER);
