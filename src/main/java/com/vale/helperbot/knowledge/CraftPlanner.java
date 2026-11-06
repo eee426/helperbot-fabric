@@ -633,7 +633,7 @@ public final class CraftPlanner {
 	/** Ticks to mine one source, once there; under water its share of all {@code blocks} (see Air#diving). */
 	private double mineCost(Item item, BlockPos p, int blocks, Air.Profile air, Escape escape) {
 		if (!com.vale.helperbot.guard.Guard.ofTheSea(level.getBlockState(p)) && breaker instanceof Player player
-				&& !MineSpot.headOut(level, p, player.getEyePosition(), MineSpot.reach(player), player.getEyeHeight())) {
+				&& !MineSpot.headOut(level, p, MineSpot.reach(player), player.getEyeHeight())) {
 			return Double.POSITIVE_INFINITY; // it won't do that (see Guard#ofTheSea)
 		}
 		double dry = buried(p, sourceBlocks.get(item)) * DIG_PER_BLOCK + MINE_PER_BLOCK;

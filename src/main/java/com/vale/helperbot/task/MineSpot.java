@@ -45,19 +45,14 @@ public final class MineSpot {
 
 	/** Is this for the taking from where the bot is: from the sea, or to be mined with the head out of the water? */
 	static boolean workable(BotPlayer bot, BlockPos p) {
-		return Guard.ofTheSea(bot.level().getBlockState(p)) || headOut(bot.level(), p, bot.getEyePosition(), reach(bot), bot.getEyeHeight());
+		return Guard.ofTheSea(bot.level().getBlockState(p)) || headOut(bot.level(), p, reach(bot), bot.getEyeHeight());
 	}
 
 	/**
 	 * Mining it, is the head out of the water? Going by where it would stand, if there's anywhere
-	 * near; buried, with nowhere to stand yet, digging a way there is the plan's business. Not for
-	 * what's under the sea from where the bot is (see {@link #seaBetween}): a pocket of air under the
-	 * sea bed is no spot to stand, however near.
+	 * near; buried, with nowhere to stand yet, digging a way there is the plan's business.
 	 */
-	public static boolean headOut(ServerLevel level, BlockPos p, Vec3 from, double reach, double eyeHeight) {
-		if (seaBetween(level, p, from, reach)) {
-			return false;
-		}
+	public static boolean headOut(ServerLevel level, BlockPos p, double reach, double eyeHeight) {
 		boolean mustSee = exposed(level, p);
 		Vec3 center = Vec3.atCenterOf(p);
 		int r = (int) Math.ceil(reach);
@@ -79,26 +74,11 @@ public final class MineSpot {
 	}
 
 	/**
-	 * Is the sea in the way of this block, for someone at {@code from}? It lies under open water,
-	 * too deep to reach from the surface, and the straight line to it goes through that water. A
-	 * look at the column first, so it costs next to nothing for all of a sea bed, which is what it's
-	 * for: asked of each block in turn, it went through 18,000 and never moved off. Source water only:
-	 * a waterfall isn't in the way. From the shore or a mine a dry way under there still counts.
+	 * Within reach of whatever is on top of its column: mined from there, floating or standing, with
+	 * no digging to get to it (see path/DigStart).
 	 */
-	public static boolean seaBetween(ServerLevel level, BlockPos p, Vec3 from, double reach) {
-		int top = level.getHeight(Heightmap.Types.MOTION_BLOCKING, p.getX(), p.getZ());
-		if (level.getHeight(Heightmap.Types.OCEAN_FLOOR, p.getX(), p.getZ()) >= top || p.getY() >= top - Math.ceil(reach)) {
-			return false;
-		}
-		Vec3 to = Vec3.atCenterOf(p);
-		double length = from.distanceTo(to);
-		for (double d = 0; d < length; d += 0.5) {
-			var fluid = level.getFluidState(BlockPos.containing(from.add(to.subtract(from).scale(d / length))));
-			if (fluid.is(FluidTags.WATER) && fluid.isSource()) {
-				return true;
-			}
-		}
-		return false;
+	static boolean nearTheTop(ServerLevel level, BlockPos p, double reach) {
+		return p.getY() >= level.getHeight(Heightmap.Types.MOTION_BLOCKING, p.getX(), p.getZ()) - Math.ceil(reach);
 	}
 
 	/**
@@ -169,7 +149,7 @@ public final class MineSpot {
 				}
 			}
 		}
-		if (!anyStand && !nearWater(level, p) && (sea || headOut(level, p, bot.getEyePosition(), reach, bot.getEyeHeight()))) {
+		if (!anyStand && !nearWater(level, p) && (sea || headOut(level, p, reach, bot.getEyeHeight()))) {
 			// Buried (ore in solid rock, stone under the dirt): nowhere to stand next to it yet, but
 			// digging a way there makes one, like a player would. Costed by what's in the way. (It used
 			// to count as unreachable, so with no stone in the open it never got any cobblestone.)

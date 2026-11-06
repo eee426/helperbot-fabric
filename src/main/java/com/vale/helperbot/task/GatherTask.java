@@ -267,12 +267,14 @@ public class GatherTask implements BotTask {
 
 	private List<BlockPos> scan(BotPlayer bot, int chunkRadius) {
 		ServerLevel level = bot.level();
+		// Nowhere around to dig from, there's no getting at what's buried, all of it (see DigStart).
+		boolean canDig = com.vale.helperbot.path.DigStart.near(level, bot.movement().feet());
 		return BlockScanner.find(level, bot.blockPosition(), chunkRadius,
 				state -> toolFor.containsKey(state.getBlock()) && DropAnalysis.dropsFrom(item, state),
 				pos -> {
 					BlockState state = level.getBlockState(pos);
 					return !outOfReach(bot, pos) && Guard.canHarvest(level, pos, state)
-							&& (Guard.ofTheSea(state) || !MineSpot.seaBetween(level, pos, bot.getEyePosition(), MineSpot.reach(bot)));
+							&& (canDig || Guard.ofTheSea(state) || MineSpot.nearTheTop(level, pos, MineSpot.reach(bot)));
 				},
 				64);
 	}
@@ -600,9 +602,16 @@ public class GatherTask implements BotTask {
 		if (from != null) {
 			// Known, not a mishap on the way: nothing to count, and no going back for the same again.
 			bot.log(current.toShortString() + " 确定到不了（" + from.toShortString() + " 发现的），记下，换下一个目标");
-			unreachable.proven(realTarget(), Air.fullBudget(bot), from);
+			BlockPos lost = realTarget();
+			unreachable.proven(lost, Air.fullBudget(bot), from);
 			bot.movement().stop();
 			behind = null;
+			// Buried, and no way there from all it can dig from: the same for the rest of them here,
+			// one search each. Elsewhere, then.
+			if (!MineSpot.exposed(bot.level(), lost)) {
+				targets.clear();
+				return lookFurther(bot);
+			}
 			return nextTarget(bot);
 		}
 		if (status == MovementController.Status.ARRIVED) {

@@ -4,6 +4,7 @@ import net.minecraft.world.level.BlockGetter;
 import com.vale.helperbot.guard.Guard;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongArrayList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -102,19 +103,21 @@ public final class Escape {
 	 */
 	private double nearby(BlockPos feet) {
 		LongOpenHashSet seen = new LongOpenHashSet();
+		LongArrayList inOrder = new LongArrayList();
 		ArrayDeque<BlockPos> queue = new ArrayDeque<>();
 		queue.add(feet);
 		seen.add(feet.asLong());
+		inOrder.add(feet.asLong());
 		for (int steps = 0; !queue.isEmpty() && seen.size() < NEARBY_CELLS; steps++) {
 			for (int n = queue.size(); n > 0; n--) {
 				BlockPos c = queue.poll();
 				for (int dy = -1; dy <= 1; dy++) {
 					for (Direction dir : Direction.Plane.HORIZONTAL) {
-						visit(c.relative(dir).above(dy), seen, queue);
+						visit(c.relative(dir).above(dy), seen, inOrder, queue);
 					}
 				}
-				visit(c.above(), seen, queue);
-				visit(c.below(), seen, queue);
+				visit(c.above(), seen, inOrder, queue);
+				visit(c.below(), seen, inOrder, queue);
 			}
 			for (BlockPos c : queue) {
 				if (!wet(c.above())) {
@@ -122,15 +125,19 @@ public final class Escape {
 				}
 			}
 		}
-		if (queue.isEmpty()) {
-			// All there is, and no way out from any of it: no need to go through it again from each.
-			seen.forEach(cell -> memo.put(cell, Double.POSITIVE_INFINITY));
+		// No way out from any of it: no need to go through it again from each. If it stopped short (a
+		// sheet of water under ice), only for the nearer half: the rest may be close to a way out. Under
+		// wide ice, cell after cell, going through 512 cells each took a search ten times as long.
+		int known = queue.isEmpty() ? inOrder.size() : inOrder.size() / 2;
+		for (int i = 0; i < known; i++) {
+			memo.put(inOrder.getLong(i), Double.POSITIVE_INFINITY);
 		}
 		return Double.POSITIVE_INFINITY;
 	}
 
-	private void visit(BlockPos c, LongOpenHashSet seen, ArrayDeque<BlockPos> queue) {
+	private void visit(BlockPos c, LongOpenHashSet seen, LongArrayList inOrder, ArrayDeque<BlockPos> queue) {
 		if (open(c) && open(c.above()) && seen.add(c.asLong())) {
+			inOrder.add(c.asLong());
 			queue.add(c);
 		}
 	}

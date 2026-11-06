@@ -1186,6 +1186,44 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.GLOW_INK_SAC, 3, Mode.NORMAL);
 				}, Scenario.has(Items.GLOW_INK_SAC, 3)),
 
+				new Scenario("W65", "大海中央，煤埋在海床下很深：没地方开挖，立刻走开，不一块块搜", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(-100, 30, -100, 100, 40, 100, Blocks.WATER);
+					for (int x = -60; x <= 60; x += 6) {
+						for (int z = -60; z <= 60; z += 6) {
+							a.set(x, 12, z, Blocks.COAL_ORE);
+						}
+					}
+					teleport(bot, a, 0, 40, 0);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, c -> c.logHas("全量搜了") ? Scenario.Outcome.fail("一块块搜了")
+						: c.bot().position().distanceTo(c.arena().at(0, 40, 0).getBottomCenter()) > 40 ? Scenario.Outcome.pass("走开了")
+						: c.ended() ? Scenario.Outcome.fail("任务结束了") : null),
+
+				new Scenario("W66", "海中小岛，煤埋在岛下：有地方开挖，上岛挖", 4 * MINUTE, (a, bot, me) -> {
+					a.fill(-40, 30, -40, 40, 40, 40, Blocks.WATER);
+					a.fill(12, 30, -3, 18, 41, 3, Blocks.STONE);
+					a.set(15, 25, 0, Blocks.COAL_ORE);
+					teleport(bot, a, 0, 40, 0);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, Scenario.has(Items.COAL, 1)),
+
+				new Scenario("W67", "结冰的大海，煤埋在海床下：冰面能开挖，但水下走不通，一片只搜一次，很快走开", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(-60, 30, -60, 60, 39, 60, Blocks.WATER);
+					a.fill(-60, 40, -60, 60, 40, 60, Blocks.ICE);
+					for (int x = -24; x <= 24; x += 6) {
+						a.set(x, 12, 6, Blocks.COAL_ORE);
+					}
+					teleport(bot, a, 0, 41, 0);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, c -> c.bot().position().distanceTo(c.arena().at(0, 41, 0).getBottomCenter()) > 30 || c.count(Items.COAL) > 0 ? Scenario.Outcome.pass("没卡在原地")
+						: c.ended() ? Scenario.Outcome.pass("结束了") : null),
+
 				new Scenario("W36", "9 格深的水底拿海带：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 32, -4, 12, 40, 4, Blocks.WATER);
 					a.set(8, 32, 0, Blocks.KELP);
