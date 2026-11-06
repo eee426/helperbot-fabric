@@ -27,7 +27,9 @@ public interface Move {
 	 * @param digPenalty how much slower mining is from here (head under water, floating)
 	 * @param canAct     not in a protected chunk: it may dig and build (there it's a ghost)
 	 * @param standing   on a full block: digging and building assume a firm stand
+	 * @param afloat     at the surface with its head out: it can dig from there (the gate only asks
+	 *                   where the head is, see Guard#ofTheSea), at digPenalty, but not build
 	 */
-	record From(double digPenalty, boolean canAct, boolean standing) {
+	record From(double digPenalty, boolean canAct, boolean standing, boolean afloat) {
 	}
 }

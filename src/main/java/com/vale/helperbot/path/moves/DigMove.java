@@ -14,7 +14,7 @@ import java.util.List;
 final class DigMove implements Move {
 	@Override
 	public void addSteps(Planner pf, BlockPos p, double cur, From from, List<Candidate> out) {
-		if (!from.canAct() || !from.standing()) {
+		if (!from.canAct() || !(from.standing() || from.afloat())) {
 			return;
 		}
 		for (Direction d : Direction.Plane.HORIZONTAL) {

@@ -792,8 +792,8 @@ public final class LocalPathfinder implements Planner {
 		// Digging and building assume we stand on a full block (or hold still in water).
 		// (On top of a fence it's standing too, half a block up: from there digging may be the only way off.)
 		boolean standing = Math.abs(cur - p.getY()) < 1e-3 || (!isWater(level, p) && BlockTable.top(level.getBlockState(p.below()), level, p.below()) > 1 + 1e-6);
-		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), standing);
 		digsDry = !isWater(level, p.above());
+		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), standing, digsDry && isWater(level, p));
 		for (Move move : Moves.ALL) {
 			move.addSteps(this, p, cur, from, out);
 		}

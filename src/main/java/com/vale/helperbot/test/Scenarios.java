@@ -1131,6 +1131,17 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.KELP, 1, Mode.NORMAL);
 				}, Scenario.has(Items.KELP, 1, c -> !c.logHas("都到不了"), "说到不了")),
 
+				new Scenario("W60", "封闭水洞顶上的气窝，浮着，头在空气里，四周是石头（玩家报告）：挖出去", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(10, 28, 0, 11, 29, 0, Blocks.WATER);
+					a.set(11, 30, 0, Blocks.AIR);
+					teleport(bot, a, 11, 29, 0);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.bot().position().distanceTo(c.arena().at(0, Arena.SURFACE, 0).getBottomCenter()) <= 3
+						? Scenario.Outcome.pass("挖出来了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null),
+
 				new Scenario("W36", "9 格深的水底拿海带：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 32, -4, 12, 40, 4, Blocks.WATER);
 					a.set(8, 32, 0, Blocks.KELP);
