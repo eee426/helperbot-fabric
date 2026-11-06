@@ -219,6 +219,7 @@ public final class MovementController {
 		wayEnd = null;
 		wayTargets = targets;
 		wayOneSide = true;
+		wayDug = false;
 	}
 
 	public boolean findingWay() {
@@ -241,6 +242,8 @@ public final class MovementController {
 	private BlockPos wayEnd;
 	/** Looking only up from the bot, or only down from it (see startWay). */
 	private boolean wayOneSide;
+	/** The search that digs has had its say (see endWay). */
+	private boolean wayDug;
 	/** Most cells of a search through everything: it's what a window of a hundred blocks of deep sea comes to. */
 	private static final int WAY_NODES = 2_000_000;
 	/** Around the targets: where they're reached from, and the way up from there. */
@@ -264,6 +267,9 @@ public final class MovementController {
 		cancelSearches();
 		this.bestDistance = Double.MAX_VALUE;
 	}
+
+	/** Within this it follows what moves by the small windows; further off it keeps to the whole way. */
+	public static final double FOLLOW_RANGE = 16;
 
 	/** Same, for somewhere new it hasn't made sure of yet (a player who moved on): see {@link #locked}. */
 	public void redirect(PathGoal goal, BlockPos target) {
@@ -711,6 +717,15 @@ public final class MovementController {
 			wayOneSide = false;
 			return; // tickMoving starts it (see startWay)
 		}
+		if (!job.result().reachesGoal() && !wayDug && !headUnderwater()) {
+			// The flood digs nothing: a wall of rock is the end of it, and from a dry mine that's most
+			// ways in. Once, for the nearest: going through them all takes minutes, for what's mostly no.
+			wayDug = true;
+			bot.log("不挖到不了（" + job.nodes() + " 格），查一次最近的能不能挖过去");
+			startLocked();
+			return;
+		}
+		lockedSearch = false;
 		int targets = wayTargets.size();
 		wayTargets = null;
 		LocalPathfinder.Result result = job.result();

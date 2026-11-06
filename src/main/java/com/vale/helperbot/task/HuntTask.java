@@ -86,6 +86,7 @@ final class HuntTask {
 	private Mob target;
 	private BlockPos aimedAt;
 	private int phaseTicks;
+	private int chaseTicks;
 	private String failure;
 
 	/** For this item, the whole order long (see Explorer). */
@@ -169,17 +170,25 @@ final class HuntTask {
 
 	// ---- finding ------------------------------------------------------------------------
 
+	private static ServerLevel level(BotPlayer bot) {
+		return bot.level();
+	}
+
 	private Mob nearestPrey(BotPlayer bot, int radius) {
 		ServerLevel level = bot.level();
 		List<Mob> mobs = level.getEntitiesOfClass(Mob.class, bot.getBoundingBox().inflate(radius),
 				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID())
 						&& MobDrops.mayHunt(m) && !ProtectionZones.isProtected(level, m.blockPosition()));
 		shallowestTooDeep = Integer.MAX_VALUE;
+		nearestDeep = null;
 		Mob best = null;
 		for (Mob m : mobs) {
 			int depth = waterOver(level, m);
 			if (depth > 0 && !withinBreath(bot, depth)) {
 				shallowestTooDeep = Math.min(shallowestTooDeep, depth);
+				if (nearestDeep == null || bot.distanceToSqr(m) < bot.distanceToSqr(nearestDeep)) {
+					nearestDeep = m;
+				}
 				continue;
 			}
 			if (best == null || bot.distanceToSqr(m) < bot.distanceToSqr(best)) {
@@ -191,6 +200,10 @@ final class HuntTask {
 
 	/** Of the prey around left out as too deep for one breath (see withinBreath), the least deep; MAX_VALUE if none. */
 	private int shallowestTooDeep = Integer.MAX_VALUE;
+	/** Of those, the nearest: from here there may be a way the depth over it knows nothing of. */
+	private Mob nearestDeep;
+	/** One whole search for {@link #nearestDeep} a place, and told once. */
+	private boolean triedDeep, toldDeep;
 
 	/** Ticks of fighting under water, besides getting there: a few hits on a swimming mob. */
 	private static final double FIGHT_UNDERWATER_TICKS = 80;
@@ -261,9 +274,19 @@ final class HuntTask {
 				return BotTask.Status.RUNNING;
 			}
 		}
-		if (target == null && shallowestTooDeep != Integer.MAX_VALUE) {
-			return fail(bot, "附近的" + names().getString() + "都在水下太深（最浅的也在水面下 " + shallowestTooDeep
-					+ " 格），一口气潜不到、打完再回来。给我水下呼吸药水，或者戴一个有水下呼吸附魔的头盔，就能去");
+		if (target == null && nearestDeep != null) {
+			// With open sea between, the depth says it all. Through the rock it says nothing.
+			if (!triedDeep && !com.vale.helperbot.task.MineSpot.seaBetween(level(bot), nearestDeep.blockPosition(), bot.getEyePosition(),
+					com.vale.helperbot.task.MineSpot.reach(bot))) {
+				triedDeep = true;
+				target = nearestDeep;
+				return lockOn(bot);
+			}
+			if (!toldDeep) {
+				toldDeep = true;
+				bot.say(requester, Component.literal("附近的").append(names()).append("都到不了（最浅的也在水面下 " + shallowestTooDeep
+						+ " 格：太深，或者没有不用在水下挖的路），换地方找。有水下呼吸的话，深水也能去。"));
+			}
 		}
 		if (target != null) {
 			if (target.isUnderWater() && !bot.movement().headUnderwater()) {
@@ -288,6 +311,7 @@ final class HuntTask {
 	private BotTask.Status lockOn(BotPlayer bot) {
 		bot.log("盯上了 " + target.getType().getDescription().getString() + " @" + target.blockPosition().toShortString());
 		aimedAt = null;
+		chaseTicks = 0;
 		bot.holdWeapon();
 		setPhase(Phase.CHASE);
 		return BotTask.Status.RUNNING;
@@ -453,6 +477,8 @@ final class HuntTask {
 			} else {
 				explorer.leavePlace();
 			}
+			triedDeep = false;
+			toldDeep = false;
 			bot.movement().stop();
 			setPhase(Phase.FIND);
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
@@ -599,15 +625,11 @@ final class HuntTask {
 			setPhase(Phase.FIND);
 			return BotTask.Status.RUNNING;
 		}
-		int depth = waterOver(bot.level(), target);
-		if (depth > 0 && !withinBreath(bot, depth)) {
-			bot.log(target.getType().getDescription().getString() + " 游到了水下 " + depth + " 格，一口气够不着，换一只");
-			target = null;
-			bot.movement().stop();
-			setPhase(Phase.FIND);
-			return BotTask.Status.RUNNING;
+		// Close by: on the way there, however long the way, it isn't chasing yet.
+		if (bot.distanceTo(target) <= MovementController.FOLLOW_RANGE) {
+			chaseTicks++;
 		}
-		if (phaseTicks > CHASE_TIMEOUT || !MobDrops.mayHunt(target)) {
+		if (chaseTicks > CHASE_TIMEOUT || !MobDrops.mayHunt(target)) {
 			bot.log("追不上 " + target.getType().getDescription().getString() + "，换一只");
 			rejected.add(target.getUUID());
 			bot.movement().stop();
@@ -637,14 +659,16 @@ final class HuntTask {
 			setPhase(Phase.FIND);
 			return BotTask.Status.RUNNING;
 		}
+		// Far off it keeps to the whole way it made sure of; close by it keeps up with the small windows.
+		boolean near = bot.distanceTo(prey) <= MovementController.FOLLOW_RANGE;
 		if (bot.movement().status() != MovementController.Status.MOVING) {
-			if (aimedAt == null) {
+			if (aimedAt == null || !near || bot.movement().status() == MovementController.Status.FAILED) {
 				bot.movement().goTo(inReach, at, mode);
 			} else {
 				bot.movement().follow(inReach, at, mode);
 			}
 			aimedAt = at;
-		} else if (aimedAt == null || aimedAt.distSqr(at) > 4) {
+		} else if (near && (aimedAt == null || aimedAt.distSqr(at) > 4)) {
 			bot.movement().retarget(inReach, at);
 			aimedAt = at;
 		}

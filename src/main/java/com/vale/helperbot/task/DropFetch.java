@@ -141,7 +141,12 @@ final class DropFetch {
 			target = null;
 			return Result.UNREACHABLE;
 		}
-		if (idle || (moved && bot.tickCount - aimedTick >= REAIM_TICKS)) {
+		boolean near = bot.distanceTo(e) <= MovementController.FOLLOW_RANGE;
+		if (idle && !near) {
+			m.goTo(pickupSpot(bot, e), e.blockPosition(), mode);
+			aimedAt = e.position();
+			aimedTick = bot.tickCount;
+		} else if (idle || (near && moved && bot.tickCount - aimedTick >= REAIM_TICKS)) {
 			aim(bot, mode, !idle);
 		}
 		return Result.RUNNING;

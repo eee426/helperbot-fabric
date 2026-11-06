@@ -643,7 +643,9 @@ public final class CraftPlanner {
 		}
 		int dig = BreakTimes.estimateTicks(realInventory, level, p, level.getBlockState(p));
 		double work = dry + (dig == Integer.MAX_VALUE ? 0 : dig - MINE_PER_BLOCK);
-		return Air.diving(air, blocks, Air.workUnderWater(work, Air.digPenalty(level, feet)), escape.ticks(feet)) / blocks;
+		// (Out of reach, by the estimate? A way round it is the search's to find: see MineSpot#cost.)
+		double up = escape.ticks(feet);
+		return Air.diving(air, blocks, Air.workUnderWater(work, Air.digPenalty(level, feet)), Double.isInfinite(up) ? 0 : up) / blocks;
 	}
 
 	private final Map<Item, Route> routes = new HashMap<>();

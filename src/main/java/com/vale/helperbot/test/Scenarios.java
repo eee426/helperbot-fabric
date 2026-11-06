@@ -1013,7 +1013,7 @@ public final class Scenarios {
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.GLOW_INK_SAC, 1, Mode.NORMAL);
 				}, c -> c.logCount("该换气了") > 1 ? Scenario.Outcome.fail("潜下去又上来（白跑）")
-						: c.ended() && c.logHas("太深") ? Scenario.Outcome.pass("说明了太深、没去")
+						: c.logHas("太深") ? Scenario.Outcome.pass("说明了太深、没去")
 						: c.ended() ? Scenario.Outcome.fail("结束了，但没说是太深") : null),
 
 				new Scenario("W35", "浅水里的墨鱼（水下 3 格）：照样能打到墨囊", 3 * MINUTE, (a, bot, me) -> {
@@ -1027,7 +1027,7 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.INK_SAC, 1, Mode.NORMAL);
 				}, Scenario.has(Items.INK_SAC, 1)),
 
-				new Scenario("W52", "5 根海带都在封死的水洞里：一次搜完就知道，不下水，走开", 3 * MINUTE, (a, bot, me) -> {
+				new Scenario("W52", "5 根海带在封死的水洞里，从地面能挖进去：洪水不算挖，再查一次，挖进去拿", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(8, 30, -3, 16, 36, 3, Blocks.WATER);
 					for (int x = 9; x < 16; x += 2) {
 						a.set(x, 30, 0, Blocks.KELP);
@@ -1036,9 +1036,7 @@ public final class Scenarios {
 					teleport(bot, a, 3, 41, 0);
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.KELP, 1, Mode.NORMAL);
-				}, c -> c.logCount("一次搜完") > 1 ? Scenario.Outcome.fail("搜了不止一次")
-						: c.bot().getY() < Arena.SURFACE - 3 ? Scenario.Outcome.fail("下去了")
-						: c.ended() || c.logHas("到不了，记下") ? Scenario.Outcome.pass("知道到不了了") : null),
+				}, Scenario.has(Items.KELP, 1, c -> !c.logHas("都到不了"), "说到不了")),
 
 				new Scenario("W53", "岸上有条小河挡路：照常游过去", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(10, 36, -60, 15, 40, 60, Blocks.WATER);
@@ -1048,15 +1046,14 @@ public final class Scenarios {
 					return new ComeTask(me, Mode.NORMAL);
 				}, c -> c.ended() ? Scenario.Outcome.pass("过去了") : null),
 
-				new Scenario("W54", "鳕鱼在封死的水洞里：判断到不了，不去", 3 * MINUTE, (a, bot, me) -> {
+				new Scenario("W54", "鳕鱼在封死的水洞里，从地面能挖进去（玩家报告）：挖进去打", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(8, 34, -2, 12, 37, 2, Blocks.WATER);
 					a.spawn(EntityType.COD, 10, 35, 0);
 					teleport(bot, a, 3, 41, 0);
 					give(bot, Items.IRON_SWORD, 1);
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.COD, 1, Mode.NORMAL);
-				}, c -> c.bot().getY() < Arena.SURFACE - 3 ? Scenario.Outcome.fail("挖下去了")
-						: c.logHas("到不了（") ? Scenario.Outcome.pass("判断到不了，没去") : c.ended() ? Scenario.Outcome.fail("结束了也没判断") : null),
+				}, Scenario.has(Items.COD, 1)),
 
 				new Scenario("W55", "一片 120 格见方、30 格深的海，海带都封在水下的石盒里：一次搜完要多久（看说明里的时间）", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(0, 11, -60, 119, 40, 59, Blocks.WATER);

@@ -282,7 +282,7 @@ th{color:var(--muted);font-weight:600}
     <div class="card"><b>去换气的路上</b><ul><li>每秒重想一次</li><li>沙子、水流、海带会让路变化</li></ul></div>
   </div>
   <h3>打猎</h3>
-  <div class="card"><p>猎物的眼睛在水里时才走全量搜索，搜的是“现在能不能到”，能到才追。它不保证追得上会游的目标。太深的猎物先被 <code>withinBreath</code> 排除。陆地猎物不走这一步。</p></div>
+  <div class="card"><p>猎物的眼睛在水里时先洪水，不行再用 A* 查最近一只，能到才追。走完整路线，进 16 格才用小窗口追。太深的猎物先被 <code>withinBreath</code> 筛掉；隔着石头时再查一次。陆地猎物直接全量搜索。</p></div>
 </section>
 
 <section id="find">
