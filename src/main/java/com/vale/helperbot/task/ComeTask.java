@@ -13,6 +13,10 @@ public class ComeTask implements BotTask {
 	private final ServerPlayer player;
 	private final Mode mode;
 	private BlockPos lastTarget;
+	/** How often to look again for a way to a player it can't get to. */
+	private static final int RETRY_TICKS = 600;
+	private int waited;
+	private boolean told;
 
 	public ComeTask(ServerPlayer player, Mode mode) {
 		this.player = player;
@@ -41,11 +45,24 @@ public class ComeTask implements BotTask {
 		if (bot.distanceTo(player) <= ARRIVE_DISTANCE && movement.status() != MovementController.Status.MOVING) {
 			return Status.DONE;
 		}
+		// No way to them, a mine under the sea, say. It doesn't dive to find out again: it stays where
+		// it is, and when they've moved, or dug a way through, the next look finds that by itself.
+		if (movement.provenFrom() != null) {
+			if (!state.told) {
+				state.told = true;
+				bot.say(player, "你那里我过不去。你上来，或者挖一条通路，我就过去。");
+			}
+			if (++state.waited < RETRY_TICKS && state.lastTarget != null && state.lastTarget.distSqr(playerPos) <= 16) {
+				return Status.RUNNING;
+			}
+			state.waited = 0;
+			state.lastTarget = null;
+		}
 		if (state.lastTarget == null || movement.status() == MovementController.Status.IDLE) {
 			movement.goTo((w, p) -> p.closerThan(playerPos, ARRIVE_DISTANCE), playerPos, mode);
 			state.lastTarget = playerPos;
 		} else if (state.lastTarget.distSqr(playerPos) > 16) {
-			movement.retarget((w, p) -> p.closerThan(playerPos, ARRIVE_DISTANCE), playerPos);
+			movement.redirect((w, p) -> p.closerThan(playerPos, ARRIVE_DISTANCE), playerPos);
 			state.lastTarget = playerPos;
 		}
 		return switch (movement.status()) {

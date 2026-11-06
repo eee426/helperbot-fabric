@@ -148,7 +148,9 @@ public final class MovementController {
 		this.goal = goal;
 		this.target = target;
 		this.mode = mode;
-		this.horizontalOnly = horizontalOnly;
+		this.locked = !horizontalOnly && inSight(target);
+		// Where it can't see yet it goes by the map, not towards a depth that may lie under the sea.
+		this.horizontalOnly = !locked;
 		this.minLevel = 0;
 		this.status = Status.MOVING;
 		this.bestDistance = Double.MAX_VALUE;
@@ -159,9 +161,41 @@ public final class MovementController {
 	}
 
 	/**
-	 * Where it stood when it found the target out of reach, null if it hasn't: a search went through
-	 * everything without coming to it, or it ran out of air on the way there and had to turn back.
-	 * That needs no search to have finished: it's what happened.
+	 * Going to something it knows the place of, and can see all the way to: a block, an item, an
+	 * animal, a player nearby. It doesn't set off without the whole way (see {@link #startLocked}):
+	 * yes or no, before the first step. Heading off a bit at a time towards a place it could not see
+	 * took it to the sea bed, nearest the target by the crow, and nothing to dig there.
+	 */
+	private boolean locked;
+	/** The search under way is {@link #startLocked}'s. */
+	private boolean lockedSearch;
+	/** Past this it goes by the windows (LocalPathfinder#LEVELS), like anywhere it can't see. */
+	private static final int LOCK_RANGE = 128;
+	/** Around the bot and the target: the way may lead a little off the straight line. */
+	private static final int LOCK_MARGIN = 32;
+	/** About 15 seconds in the background: no way found by then counts as none. */
+	private static final int LOCK_NODES = 1_000_000;
+
+	private boolean inSight(BlockPos at) {
+		BlockPos from = feet();
+		return Math.abs(at.getX() - from.getX()) <= LOCK_RANGE && Math.abs(at.getZ() - from.getZ()) <= LOCK_RANGE
+				&& bot.level().getChunkSource().getChunkNow(at.getX() >> 4, at.getZ() >> 4) != null;
+	}
+
+	/**
+	 * Keep up with something that moves, close by, once it knows it can get there (see {@link #locked}):
+	 * the small windows, again and again, as it drifts or runs. A whole search each time would have
+	 * it stand and think while the thing got away.
+	 */
+	public void follow(PathGoal goal, BlockPos target, Mode mode) {
+		goTo(goal, target, mode);
+		locked = false;
+		horizontalOnly = false;
+	}
+
+	/**
+	 * Where it stood when a whole search found the target out of reach, null if it hasn't. Only ever
+	 * from a search: it may run short of breath on a way that's there, and that says nothing.
 	 */
 	public BlockPos provenFrom() {
 		return provenFrom;
@@ -215,6 +249,8 @@ public final class MovementController {
 	/** Walk out of the protected area it's in, by the nearest way that leads out. */
 	public void leaveZone(ZoneExit exit, Mode mode) {
 		goTo((w, p) -> exit.outside(w, p), exit.nearestOutside(feet()), mode);
+		locked = false;
+		horizontalOnly = false;
 		leaving = exit;
 	}
 
@@ -222,14 +258,24 @@ public final class MovementController {
 	public void retarget(PathGoal goal, BlockPos target) {
 		this.goal = goal;
 		this.target = target;
+		this.locked = false;
+		this.horizontalOnly = false;
 		this.replanRequested = true;
 		cancelSearches();
 		this.bestDistance = Double.MAX_VALUE;
 	}
 
+	/** Same, for somewhere new it hasn't made sure of yet (a player who moved on): see {@link #locked}. */
+	public void redirect(PathGoal goal, BlockPos target) {
+		retarget(goal, target);
+		locked = inSight(target);
+		horizontalOnly = !locked;
+	}
+
 	public void stop() {
 		abortBreaking();
 		paused = false;
+		locked = false;
 		engaged = false;
 		ignoreAir = false;
 		airRequested = false;
@@ -346,6 +392,7 @@ public final class MovementController {
 	private BlockPos savedTarget;
 	private Status savedStatus;
 	private boolean savedHorizontalOnly;
+	private boolean savedLocked;
 
 	/**
 	 * Go somewhere for a fight (e.g. to get at a skeleton), remembering the task's own
@@ -364,6 +411,8 @@ public final class MovementController {
 			savedTarget = target;
 			savedStatus = status;
 			savedHorizontalOnly = horizontalOnly;
+			savedLocked = locked;
+			locked = false;
 			lastPath.clear();
 			goal = chaseGoal;
 			target = chaseTarget;
@@ -428,12 +477,7 @@ public final class MovementController {
 	 */
 	public void headForAir() {
 		BlockPos f = feet();
-		ServerLevel level = bot.level();
 		ignoreAir = true; // read when it plans, next tick
-		// (Turned back with most of its breath left, that wasn't the way running out.)
-		if (status == Status.MOVING && !engaged && wayTargets == null && Air.budget(bot) < Air.fullBudget(bot) / 2) {
-			provenFrom = f;
-		}
 		// A cell whose head space is still a block to dig only counts if it won't be water once dug
 		// (the goal sees the world as it is now, not as the path will leave it).
 		engage((w, p) -> Air.breathable(w, p)
@@ -453,14 +497,10 @@ public final class MovementController {
 		target = savedTarget;
 		status = savedStatus;
 		horizontalOnly = savedHorizontalOnly;
+		locked = savedLocked;
 		bestDistance = Double.MAX_VALUE;
 		ticksWithoutProgress = 0;
 		recoveries = 0;
-		if (provenFrom != null && status == Status.MOVING) {
-			// Back from turning round for air: the way there is out, whoever sent it (see provenFrom).
-			fail("一口气到不了");
-			return;
-		}
 		replan("战斗结束，回到原来的事");
 	}
 
@@ -692,7 +732,68 @@ public final class MovementController {
 		emptyPlans = 0;
 	}
 
+	/** The box around the bot and the target, one search, to the end: see {@link #locked}. */
+	private void startLocked() {
+		zoneSearch = false;
+		zoneRoute = false;
+		BlockPos from = feet();
+		int across = Math.max(Math.abs(target.getX() - from.getX()), Math.abs(target.getZ() - from.getZ()));
+		LocalPathfinder.Limits limits = new LocalPathfinder.Limits(across + LOCK_MARGIN, Math.max(0, target.getY() - from.getY()) + LOCK_MARGIN,
+				Math.max(0, from.getY() - target.getY()) + LOCK_MARGIN, LOCK_NODES);
+		long started = System.nanoTime();
+		Snapshot world = Snapshot.around(bot.level(), from, limits, airProfile().limited());
+		TravelEstimate ahead = new TravelEstimate(world, bot.getInventory(), mode, target, false);
+		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
+		search = startSearch(world, from, bot.getY(), limits, goal, ahead::ticks, true, false);
+		lockedSearch = true;
+		search.await(PLAN_WAIT_NANOS);
+		plannedAt = bot.tickCount;
+	}
+
+	/** What {@link #startLocked} came to. No is only believed with the head out: see {@link #provenFrom}. */
+	private void endLocked() {
+		PathJob job = search;
+		search = null;
+		lockedSearch = false;
+		resetStep();
+		LocalPathfinder.Result result = job.result();
+		if (result.reachesGoal()) {
+			if (result.steps().isEmpty()) {
+				status = Status.ARRIVED;
+				path = null;
+				return;
+			}
+			bot.log("规划出 " + result.steps().size() + " 步（全量，能到终点）");
+			adopt(result);
+			emptyPlans = 0;
+			return;
+		}
+		bot.log("全量搜了 " + job.nodes() + " 格，用了 " + (bot.tickCount - plannedAt) / 20.0 + " 秒，" + (job.hitNodeLimit() ? "到上限了" : "搜完了")
+				+ "，到不了 " + target.toShortString());
+		path = null;
+		if (headUnderwater() && Air.budget(bot) < Air.UNLIMITED) {
+			airRequested = true; // with its breath running, that says little: again from up there
+			return;
+		}
+		if (startZoneSearch()) {
+			return;
+		}
+		if (Rules.open() && emptyPlans == 0 && BuildingBlocks.count(bot.getInventory()) < LOW_BLOCKS && !isInWater()) {
+			// Maybe a bridge or pillar would work: get some blocks first.
+			emptyPlans++;
+			gathering = true;
+			gatherRejected.clear();
+			return;
+		}
+		provenFrom = feet();
+		fail("全量搜索到不了 " + target.toShortString());
+	}
+
 	private void startPlanning(int levelIndex) {
+		if (locked) {
+			startLocked();
+			return;
+		}
 		zoneSearch = false;
 		zoneRoute = false;
 		if (levelIndex == minLevel) {
@@ -798,6 +899,7 @@ public final class MovementController {
 	}
 
 	private void cancelSearches() {
+		lockedSearch = false;
 		if (search != null) {
 			search.cancel();
 			search = null;
@@ -852,6 +954,10 @@ public final class MovementController {
 		}
 		if (wayTargets != null && !engaged) {
 			endWay();
+			return;
+		}
+		if (lockedSearch) {
+			endLocked();
 			return;
 		}
 		LocalPathfinder.Result result = search.result();
@@ -1005,7 +1111,8 @@ public final class MovementController {
 	}
 
 	private void checkProgress() {
-		if (target == null || status != Status.MOVING || breakingPos != null || zoneRoute) {
+		// (A way that's known may lead off from the target for a while: to the shore, say.)
+		if (target == null || status != Status.MOVING || breakingPos != null || zoneRoute || locked) {
 			return;
 		}
 		BlockPos here = bot.blockPosition();

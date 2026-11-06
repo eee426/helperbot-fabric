@@ -229,7 +229,8 @@ th{color:var(--muted);font-weight:600}
   <h2>四种搜索</h2>
   <div class="tw"><table>
     <tr><th>搜索</th><th>什么时候用</th><th>范围</th><th>节点上限</th><th>能挖吗</th></tr>
-    <tr><td>普通，第 1 层</td><td>默认</td><td>水平 ±16，上 8，下 16</td><td>4 万</td><td>能</td></tr>
+    <tr><td>全量搜索</td><td>有坐标、已加载、128 格内的目标，能到才出发</td><td>框住机器人和目标，外加 32 格</td><td>100 万</td><td>能，总闸生效</td></tr>
+    <tr><td>普通，第 1 层</td><td>目的地还看不到时</td><td>水平 ±16，上 8，下 16</td><td>4 万</td><td>能</td></tr>
     <tr><td>普通，第 2 层</td><td>小窗口没结果</td><td>水平 ±32，上 16，下 24</td><td>10 万</td><td>能</td></tr>
     <tr><td>普通，第 3 层</td><td>还没结果</td><td>水平 ±64，上 24，下 32</td><td>20 万</td><td>能</td></tr>
     <tr><td>水下第 1 层</td><td>头在水下时替换第 1 层</td><td>上下左右都是 16</td><td>4 万</td><td>能</td></tr>

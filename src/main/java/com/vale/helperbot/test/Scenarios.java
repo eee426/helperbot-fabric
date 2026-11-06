@@ -1153,6 +1153,29 @@ public final class Scenarios {
 						: c.bot().position().distanceTo(c.arena().at(0, Arena.SURFACE, 0).getBottomCenter()) <= 3
 						? Scenario.Outcome.pass("游上来了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null),
 
+				new Scenario("W62", "人在海面，要的煤埋在岸边地下很深（玩家报告：反复潜到海底）：不下潜，上岸再挖", 6 * MINUTE, (a, bot, me) -> {
+					a.fill(4, 28, -30, 70, 40, 30, Blocks.WATER);
+					a.set(0, 10, 0, Blocks.COAL_ORE);
+					teleport(bot, a, 14, 40, 0);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					WET[0] = false;
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, Scenario.has(Items.COAL, 1, c -> !(WET[0] |= c.bot().movement().headUnderwater() && c.bot().getY() < 39), "潜下去了")),
+
+				new Scenario("W63", "玩家在大海底下封闭的矿洞里（到不了）：不下潜，说明后在上面等", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(-60, 30, -60, 60, 40, 60, Blocks.WATER);
+					a.fill(-2, 22, -2, 2, 29, 2, Blocks.STONE);
+					a.fill(-1, 23, -1, 1, 25, 1, Blocks.AIR);
+					me.teleportTo(a.level, a.origin.getX() + 0.5, 23, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					teleport(bot, a, 12, 40, 0);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					WET[0] = false;
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> (WET[0] |= c.bot().movement().headUnderwater() && c.bot().getY() < 39) ? Scenario.Outcome.fail("潜下去了")
+						: c.ticks() > 800 && c.logHas("过不去") ? Scenario.Outcome.pass("说明了，在上面等") : c.ended() ? Scenario.Outcome.fail("任务结束了") : null),
+
 				new Scenario("W36", "9 格深的水底拿海带：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 32, -4, 12, 40, 4, Blocks.WATER);
 					a.set(8, 32, 0, Blocks.KELP);

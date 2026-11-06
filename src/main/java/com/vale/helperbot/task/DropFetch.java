@@ -97,7 +97,9 @@ final class DropFetch {
 		inRangeTicks = 0;
 		falseArrivals = 0;
 		bot.log("去捡地上的" + e.getItem().getHoverName().getString() + "（" + e.blockPosition().toShortString() + "）");
-		aim(bot, mode, false);
+		bot.movement().goTo(pickupSpot(bot, e), e.blockPosition(), mode);
+		aimedAt = e.position();
+		aimedTick = bot.tickCount;
 	}
 
 	void stop() {
@@ -151,7 +153,7 @@ final class DropFetch {
 		if (moving) {
 			bot.movement().retarget(goal, target.blockPosition());
 		} else {
-			bot.movement().goTo(goal, target.blockPosition(), mode);
+			bot.movement().follow(goal, target.blockPosition(), mode);
 		}
 		aimedAt = target.position();
 		aimedTick = bot.tickCount;

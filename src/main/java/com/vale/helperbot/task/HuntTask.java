@@ -287,6 +287,7 @@ final class HuntTask {
 
 	private BotTask.Status lockOn(BotPlayer bot) {
 		bot.log("盯上了 " + target.getType().getDescription().getString() + " @" + target.blockPosition().toShortString());
+		aimedAt = null;
 		bot.holdWeapon();
 		setPhase(Phase.CHASE);
 		return BotTask.Status.RUNNING;
@@ -628,8 +629,20 @@ final class HuntTask {
 		Mob prey = target;
 		com.vale.helperbot.path.PathGoal inReach = com.vale.helperbot.bot.Sight.attackSpot(bot, prey);
 		BlockPos at = prey.blockPosition();
+		if (bot.movement().provenFrom() != null) {
+			bot.log(target.getType().getDescription().getString() + " 到不了，换一只");
+			rejected.add(target.getUUID());
+			target = null;
+			bot.movement().stop();
+			setPhase(Phase.FIND);
+			return BotTask.Status.RUNNING;
+		}
 		if (bot.movement().status() != MovementController.Status.MOVING) {
-			bot.movement().goTo(inReach, at, mode);
+			if (aimedAt == null) {
+				bot.movement().goTo(inReach, at, mode);
+			} else {
+				bot.movement().follow(inReach, at, mode);
+			}
 			aimedAt = at;
 		} else if (aimedAt == null || aimedAt.distSqr(at) > 4) {
 			bot.movement().retarget(inReach, at);
