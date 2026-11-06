@@ -4,11 +4,13 @@ import net.minecraft.world.level.BlockGetter;
 import com.vale.helperbot.guard.Guard;
 import it.unimi.dsi.fastutil.longs.Long2DoubleOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.level.block.state.BlockState;
 
+import java.util.ArrayDeque;
 import java.util.Arrays;
 import java.util.PriorityQueue;
 
@@ -17,6 +19,8 @@ import java.util.PriorityQueue;
  * better way up: open water, the hole it came down through) and then straight up. With nothing but
  * a ceiling there is no way up, and that's what the planner goes by: it doesn't go where only
  * digging would get it out. (That's the breathing layer's last resort, for what plans can't foresee.)
+ * What those two don't see, a tunnel going up at a slant, say, the cells around are gone through
+ * for (see {@link #nearby}).
  *
  * <p>The sideways part is a shortest-path field per layer, built for a tile of columns at a time
  * (plus a margin, so ways up just across the tile's edge count too): under ice or a cave ceiling
@@ -31,6 +35,8 @@ public final class Escape {
 	public static final int REACH_SIDEWAYS = TILE + MARGIN, REACH_UP = 64 + 2;
 	/** Give up looking up after this many blocks (deeper than any ocean). */
 	private static final int MAX_UP = 64;
+	/** Most cells {@link #nearby} goes through: about what a breath covers in a narrow tunnel. */
+	private static final int NEARBY_CELLS = 512;
 	private static final double UP_TICKS = 1 / Air.SWIM_UP_SPEED;
 
 	private final BlockGetter level;
@@ -80,9 +86,53 @@ public final class Escape {
 			for (Direction dir : Direction.Plane.HORIZONTAL) {
 				best = Math.min(best, sideTicks + field(feet.relative(dir)));
 			}
+			if (Double.isInfinite(best)) {
+				best = nearby(feet);
+			}
 		}
 		memo.put(key, best);
 		return best;
+	}
+
+	/**
+	 * With no way by swimming across and up: every cell around that it fits in, a block at a time, up
+	 * and down as well, until the head is out. Layer by layer a stairway dug at a slant shows no way
+	 * out, with the air a block or two behind it: it was told there was none on a full breath, and
+	 * turned back for good. Charged at the slow speed, each block.
+	 */
+	private double nearby(BlockPos feet) {
+		LongOpenHashSet seen = new LongOpenHashSet();
+		ArrayDeque<BlockPos> queue = new ArrayDeque<>();
+		queue.add(feet);
+		seen.add(feet.asLong());
+		for (int steps = 0; !queue.isEmpty() && seen.size() < NEARBY_CELLS; steps++) {
+			for (int n = queue.size(); n > 0; n--) {
+				BlockPos c = queue.poll();
+				for (int dy = -1; dy <= 1; dy++) {
+					for (Direction dir : Direction.Plane.HORIZONTAL) {
+						visit(c.relative(dir).above(dy), seen, queue);
+					}
+				}
+				visit(c.above(), seen, queue);
+				visit(c.below(), seen, queue);
+			}
+			for (BlockPos c : queue) {
+				if (!wet(c.above())) {
+					return (steps + 1) * UP_TICKS;
+				}
+			}
+		}
+		if (queue.isEmpty()) {
+			// All there is, and no way out from any of it: no need to go through it again from each.
+			seen.forEach(cell -> memo.put(cell, Double.POSITIVE_INFINITY));
+		}
+		return Double.POSITIVE_INFINITY;
+	}
+
+	private void visit(BlockPos c, LongOpenHashSet seen, ArrayDeque<BlockPos> queue) {
+		if (open(c) && open(c.above()) && seen.add(c.asLong())) {
+			queue.add(c);
+		}
 	}
 
 	private double field(BlockPos pos) {

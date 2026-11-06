@@ -1142,6 +1142,17 @@ public final class Scenarios {
 				}, c -> c.bot().position().distanceTo(c.arena().at(0, Arena.SURFACE, 0).getBottomCenter()) <= 3
 						? Scenario.Outcome.pass("挖出来了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null),
 
+				new Scenario("W61", "斜向上的水下隧道（玩家报告）：气是满的，顺着游上去，不说一口气到不了", 3 * MINUTE, (a, bot, me) -> {
+					for (int i = 0; i <= 10; i++) {
+						a.fill(10 + i, 30 + i, 0, 10 + i, Math.min(40, 32 + i), 0, Blocks.WATER);
+					}
+					teleport(bot, a, 10, 30, 0);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.logHas("一口气到不了") || c.logHas("该换气了") ? Scenario.Outcome.fail("气是满的，却被叫去换气")
+						: c.bot().position().distanceTo(c.arena().at(0, Arena.SURFACE, 0).getBottomCenter()) <= 3
+						? Scenario.Outcome.pass("游上来了") : c.ended() ? Scenario.Outcome.fail("任务结束了但没到") : null),
+
 				new Scenario("W36", "9 格深的水底拿海带：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 32, -4, 12, 40, 4, Blocks.WATER);
 					a.set(8, 32, 0, Blocks.KELP);

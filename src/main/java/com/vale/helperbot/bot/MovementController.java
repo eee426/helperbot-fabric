@@ -430,7 +430,8 @@ public final class MovementController {
 		BlockPos f = feet();
 		ServerLevel level = bot.level();
 		ignoreAir = true; // read when it plans, next tick
-		if (status == Status.MOVING && !engaged && wayTargets == null) {
+		// (Turned back with most of its breath left, that wasn't the way running out.)
+		if (status == Status.MOVING && !engaged && wayTargets == null && Air.budget(bot) < Air.fullBudget(bot) / 2) {
 			provenFrom = f;
 		}
 		// A cell whose head space is still a block to dig only counts if it won't be water once dug
