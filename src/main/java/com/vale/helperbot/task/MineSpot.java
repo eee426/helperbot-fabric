@@ -18,7 +18,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -41,11 +40,6 @@ public final class MineSpot {
 	/** How far it may stand from what it mines. */
 	public static double reach(Player player) {
 		return player.blockInteractionRange() - REACH_MARGIN;
-	}
-
-	/** Is this for the taking from where the bot is: from the sea, or to be mined with the head out of the water? */
-	static boolean workable(BotPlayer bot, BlockPos p) {
-		return Guard.ofTheSea(bot.level().getBlockState(p)) || headOut(bot.level(), p, reach(bot), bot.getEyeHeight());
 	}
 
 	/**
@@ -71,14 +65,6 @@ public final class MineSpot {
 			}
 		}
 		return !anySpot;
-	}
-
-	/**
-	 * Within reach of whatever is on top of its column: mined from there, floating or standing, with
-	 * no digging to get to it (see path/DigStart).
-	 */
-	static boolean nearTheTop(ServerLevel level, BlockPos p, double reach) {
-		return p.getY() >= level.getHeight(Heightmap.Types.MOTION_BLOCKING, p.getX(), p.getZ()) - Math.ceil(reach);
 	}
 
 	/**

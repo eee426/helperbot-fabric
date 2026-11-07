@@ -1186,7 +1186,7 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.GLOW_INK_SAC, 3, Mode.NORMAL);
 				}, Scenario.has(Items.GLOW_INK_SAC, 3)),
 
-				new Scenario("W65", "大海中央，煤埋在海床下很深：没地方开挖，立刻走开，不一块块搜", 2 * MINUTE, (a, bot, me) -> {
+				new Scenario("W65", "大海中央，煤埋在海床下很深：一个地方的搜索额度用完就走开，不一块块搜", 2 * MINUTE, (a, bot, me) -> {
 					a.fill(-100, 30, -100, 100, 40, 100, Blocks.WATER);
 					for (int x = -60; x <= 60; x += 6) {
 						for (int z = -60; z <= 60; z += 6) {
@@ -1197,7 +1197,7 @@ public final class Scenarios {
 					give(bot, Items.IRON_PICKAXE, 1);
 					give(bot, Items.BREAD, 16);
 					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
-				}, c -> c.logHas("全量搜了") ? Scenario.Outcome.fail("一块块搜了")
+				}, c -> c.logCount("全量搜了") > 4 ? Scenario.Outcome.fail("一块块搜了")
 						: c.bot().position().distanceTo(c.arena().at(0, 40, 0).getBottomCenter()) > 40 ? Scenario.Outcome.pass("走开了")
 						: c.ended() ? Scenario.Outcome.fail("任务结束了") : null),
 
@@ -1223,6 +1223,17 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
 				}, c -> c.bot().position().distanceTo(c.arena().at(0, 41, 0).getBottomCenter()) > 30 || c.count(Items.COAL) > 0 ? Scenario.Outcome.pass("没卡在原地")
 						: c.ended() ? Scenario.Outcome.pass("结束了") : null),
+
+				new Scenario("W68", "海底干洞穴里没矿，走开的路上有矿：路上看到就停下来挖", 4 * MINUTE, (a, bot, me) -> {
+					a.fill(-120, 34, -120, 120, 40, 120, Blocks.WATER);
+					a.fill(-2, 28, -2, 2, 30, 2, Blocks.AIR);
+					a.fill(3, 28, 0, 40, 30, 0, Blocks.AIR);
+					a.set(41, 29, 0, Blocks.COAL_ORE);
+					teleport(bot, a, 0, 28, 0);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, Scenario.has(Items.COAL, 1)),
 
 				new Scenario("W36", "9 格深的水底拿海带：用游泳姿态潜下去", 3 * MINUTE, (a, bot, me) -> {
 					a.fill(4, 32, -4, 12, 40, 4, Blocks.WATER);

@@ -100,6 +100,8 @@ public class GatherTask implements BotTask {
 	private boolean outOfReach(BotPlayer bot, BlockPos pos) {
 		return unreachable.covers(pos, Air.fullBudget(bot), bot.blockPosition());
 	}
+	/** Search nodes left for this place: spent on what turns out out of reach, whole again once it gets somewhere. */
+	private int budget = MovementController.LOCK_NODES;
 	/** How many of the nearest targets are compared each time it picks the next one. */
 	private static final int TARGETS_COMPARED = 12;
 
@@ -267,15 +269,9 @@ public class GatherTask implements BotTask {
 
 	private List<BlockPos> scan(BotPlayer bot, int chunkRadius) {
 		ServerLevel level = bot.level();
-		// Nowhere around to dig from, there's no getting at what's buried, all of it (see DigStart).
-		boolean canDig = com.vale.helperbot.path.DigStart.near(level, bot.movement().feet());
 		return BlockScanner.find(level, bot.blockPosition(), chunkRadius,
 				state -> toolFor.containsKey(state.getBlock()) && DropAnalysis.dropsFrom(item, state),
-				pos -> {
-					BlockState state = level.getBlockState(pos);
-					return !outOfReach(bot, pos) && Guard.canHarvest(level, pos, state)
-							&& (canDig || Guard.ofTheSea(state) || MineSpot.nearTheTop(level, pos, MineSpot.reach(bot)));
-				},
+				pos -> !outOfReach(bot, pos) && Guard.canHarvest(level, pos, level.getBlockState(pos)),
 				64);
 	}
 
@@ -395,6 +391,7 @@ public class GatherTask implements BotTask {
 			}
 			return false;
 		}, mode);
+		bot.movement().limitSearch(budget);
 		phase = Phase.WAY;
 		return Status.RUNNING;
 	}
@@ -417,7 +414,7 @@ public class GatherTask implements BotTask {
 			wayTo.keySet().forEach(p -> unreachable.proven(p, Air.fullBudget(bot), from));
 			targets.removeAll(wayTo.keySet());
 			bot.movement().stop();
-			return nextTarget(bot);
+			return spent(bot);
 		}
 		targets.remove(reached);
 		current = reached;
@@ -439,6 +436,7 @@ public class GatherTask implements BotTask {
 		// Buried ones (ore in rock) have no such spot: getting close and digging through is the way.
 		BlockState state = level.getBlockState(block);
 		bot.movement().goTo(MineSpot.reachGoal(block, reach, eyeHeight, MineSpot.exposed(level, block), !Guard.ofTheSea(state)), block, mode);
+		bot.movement().limitSearch(budget);
 	}
 
 	/** None around: on to the next place that may have it (see Explorer). */
@@ -461,6 +459,7 @@ public class GatherTask implements BotTask {
 			phase = Phase.MAP;
 			return Status.RUNNING;
 		}
+		explorer.look(bot.blockPosition()); // here's been looked at: the next place is somewhere else
 		var owner = bot.current(requester);
 		BlockPos next = explorer.timeUp() ? null : explorer.next(level, bot.blockPosition(),
 				owner != null && owner.level() == level ? owner.blockPosition() : null, Math.max(1, wanted - collected(bot)));
@@ -537,7 +536,19 @@ public class GatherTask implements BotTask {
 		return Status.RUNNING;
 	}
 
+	/** That search came to nothing: on to the next target, or with the budget gone, somewhere else. */
+	private Status spent(BotPlayer bot) {
+		budget -= bot.movement().searchedNodes();
+		if (budget > 0) {
+			return nextTarget(bot);
+		}
+		bot.log("这里搜够了，都到不了，换个地方");
+		targets.clear();
+		return lookFurther(bot);
+	}
+
 	private void startTravel(BotPlayer bot, BlockPos to) {
+		budget = MovementController.LOCK_NODES;
 		travelTarget = to;
 		// At the height its sources are at: on the surface for trees and flowers (see Habitat).
 		ServerLevel level = bot.level();
@@ -550,9 +561,9 @@ public class GatherTask implements BotTask {
 	}
 
 	private Status travel(BotPlayer bot) {
-		if (++travelTicks % TRAVEL_SCAN_INTERVAL == 0) {
+		// (Swimming over the sea bed it's on its way somewhere better: what's under it isn't worth a search.)
+		if (++travelTicks % TRAVEL_SCAN_INTERVAL == 0 && (!bot.movement().isInWater() || seaOnly())) {
 			List<BlockPos> found = scan(bot, TRAVEL_SCAN_CHUNKS);
-			found.removeIf(p -> !MineSpot.workable(bot, p)); // swimming over coal in the sea bed: not a reason to stop
 			if (!found.isEmpty()) {
 				targets = found;
 				bot.movement().stop();
@@ -602,24 +613,18 @@ public class GatherTask implements BotTask {
 		if (from != null) {
 			// Known, not a mishap on the way: nothing to count, and no going back for the same again.
 			bot.log(current.toShortString() + " 确定到不了（" + from.toShortString() + " 发现的），记下，换下一个目标");
-			BlockPos lost = realTarget();
-			unreachable.proven(lost, Air.fullBudget(bot), from);
+			unreachable.proven(realTarget(), Air.fullBudget(bot), from);
 			bot.movement().stop();
 			behind = null;
-			// Buried, and no way there from all it can dig from: the same for the rest of them here,
-			// one search each. Elsewhere, then.
-			if (!MineSpot.exposed(bot.level(), lost)) {
-				targets.clear();
-				return lookFurther(bot);
-			}
-			return nextTarget(bot);
+			return spent(bot);
 		}
 		if (status == MovementController.Status.ARRIVED) {
+			budget = MovementController.LOCK_NODES;
 			phase = Phase.MINE;
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
 			bot.log("走不到 " + current.toShortString() + "（" + bot.movement().failReason() + "），换下一个目标");
 			dropTarget(bot);
-			return nextTarget(bot);
+			return spent(bot);
 		}
 		return Status.RUNNING;
 	}

@@ -149,6 +149,8 @@ public final class MovementController {
 		this.target = target;
 		this.mode = mode;
 		this.locked = !horizontalOnly && inSight(target);
+		this.lockNodes = LOCK_NODES;
+		this.searchedNodes = 0;
 		// Where it can't see yet it goes by the map, not towards a depth that may lie under the sea.
 		this.horizontalOnly = !locked;
 		this.minLevel = 0;
@@ -182,7 +184,23 @@ public final class MovementController {
 	/** Around the bot and the target: the way may lead a little off the straight line. */
 	private static final int LOCK_MARGIN = 32;
 	/** About 15 seconds in the background: no way found by then counts as none. */
-	private static final int LOCK_NODES = 1_000_000;
+	public static final int LOCK_NODES = 1_000_000;
+	/** Most nodes for the next whole search, and how many the last one took (see limitSearch). */
+	private int lockNodes = LOCK_NODES, searchedNodes;
+
+	/**
+	 * Hold the search of the {@link #goTo} just called to what's left of what the caller has to spend
+	 * here: one budget for all it tries in one place, so a place with nothing to be had costs the same
+	 * however many targets there are.
+	 */
+	public void limitSearch(int nodes) {
+		lockNodes = Math.max(1, nodes);
+	}
+
+	/** Nodes the last whole search went through. */
+	public int searchedNodes() {
+		return searchedNodes;
+	}
 
 	private boolean inSight(BlockPos at) {
 		BlockPos from = feet();
@@ -733,6 +751,9 @@ public final class MovementController {
 			startLocked();
 			return;
 		}
+		if (lockedSearch) {
+			searchedNodes = job.nodes();
+		}
 		lockedSearch = false;
 		int targets = wayTargets.size();
 		wayTargets = null;
@@ -762,7 +783,7 @@ public final class MovementController {
 		BlockPos from = feet();
 		int across = Math.max(Math.abs(target.getX() - from.getX()), Math.abs(target.getZ() - from.getZ()));
 		LocalPathfinder.Limits limits = new LocalPathfinder.Limits(across + LOCK_MARGIN, Math.max(0, target.getY() - from.getY()) + LOCK_MARGIN,
-				Math.max(0, from.getY() - target.getY()) + LOCK_MARGIN, LOCK_NODES);
+				Math.max(0, from.getY() - target.getY()) + LOCK_MARGIN, lockNodes);
 		long started = System.nanoTime();
 		Snapshot world = Snapshot.around(bot.level(), from, limits, airProfile().limited());
 		TravelEstimate ahead = new TravelEstimate(world, bot.getInventory(), mode, target, false);
@@ -779,6 +800,7 @@ public final class MovementController {
 		search = null;
 		lockedSearch = false;
 		resetStep();
+		searchedNodes = job.nodes();
 		LocalPathfinder.Result result = job.result();
 		if (result.reachesGoal()) {
 			if (result.steps().isEmpty()) {
