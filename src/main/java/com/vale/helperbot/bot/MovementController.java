@@ -56,50 +56,37 @@ public final class MovementController {
 	/** This step has (if it needed to) stepped back to the middle of its starting cell. */
 	private boolean centered;
 	/** Start planning the next stretch when this few steps of the current path are left. */
-	private static final int LOOKAHEAD_STEPS = 5;
-	private static final int MAX_EMPTY_PLANS = 2;
-	/**
-	 * How long the server thread waits for a search it just started, so a short one (most of
-	 * them) is taken in the same tick; a longer one is picked up in a later tick.
-	 */
-	private static final long PLAN_WAIT_NANOS = 1_000_000;
-	/** A partial path must get at least this many blocks closer, or a bigger window is tried. */
-	private static final double MIN_USEFUL_PROGRESS = 3.0;
+	static final int LOOKAHEAD_STEPS = 5;
+	static final int MAX_EMPTY_PLANS = 2;
 	/** Search bigger (then give up) when the distance to the target hasn't improved for this long. */
 	private static final int NO_PROGRESS_TICKS = 400;
 	/** Treat the bot as stuck when it hasn't moved at all for this long. */
 	private static final int FROZEN_TICKS = 40;
 	private static final int MAX_RECOVERIES = 4;
 	/** Gather blocks when fewer than this are left and no path exists. */
-	private static final int LOW_BLOCKS = 8;
+	static final int LOW_BLOCKS = 8;
 	private static final int GATHER_TARGET = 32;
 
 	final BotPlayer bot;
+	/** Which search to run, and what to make of it (see RouteSearch). */
+	final RouteSearch routes;
 	/** Moving the body by vanilla's rules (see Body). */
 	final Body body;
 	/** Mining and placing, the hands of the bot (see Hands). */
 	final Hands hands;
-	private Status status = Status.IDLE;
+	Status status = Status.IDLE;
 	private String failReason = "";
-	private PathGoal goal;
-	private BlockPos target;
+	PathGoal goal;
+	BlockPos target;
 	Mode mode = Mode.DEFAULT;
-	private boolean horizontalOnly;
+	boolean horizontalOnly;
 
-	/** The search running in the background, if any (see PathJob). */
-	private PathJob search;
-	private int searchLevel;
-	/** Smallest search level to start from; raised when the bot stops making progress. */
-	private int minLevel;
-	private double escalatedAtDistance;
-	/** The next stretch, planned while walking the current one. */
-	private PathJob lookahead;
-	private boolean pathReachesGoal;
-	private boolean replanRequested;
+	boolean pathReachesGoal;
+	boolean replanRequested;
 
-	private List<PathStep> path;
-	private int index;
-	private int emptyPlans;
+	List<PathStep> path;
+	int index;
+	int emptyPlans;
 	private double bestDistance;
 	private int ticksWithoutProgress;
 
@@ -113,12 +100,13 @@ public final class MovementController {
 	private int recoveries;
 
 
-	private boolean gathering;
+	boolean gathering;
 	private int gatherWait;
-	private final Set<BlockPos> gatherRejected = new HashSet<>();
+	final Set<BlockPos> gatherRejected = new HashSet<>();
 
 	MovementController(BotPlayer bot) {
 		this.bot = bot;
+		this.routes = new RouteSearch(this);
 		this.body = new Body(bot);
 		this.hands = new Hands(bot);
 	}
@@ -140,11 +128,11 @@ public final class MovementController {
 		this.target = target;
 		this.mode = mode;
 		this.locked = !horizontalOnly && inSight(target);
-		this.lockNodes = LOCK_NODES;
-		this.searchedNodes = 0;
+		routes.lockNodes = LOCK_NODES;
+		routes.searchedNodes = 0;
 		// Where it can't see yet it goes by the map, not towards a depth that may lie under the sea.
 		this.horizontalOnly = !locked;
-		this.minLevel = 0;
+		routes.minLevel = 0;
 		this.status = Status.MOVING;
 		this.bestDistance = Double.MAX_VALUE;
 		this.ticksWithoutProgress = 0;
@@ -167,17 +155,11 @@ public final class MovementController {
 	 * yes or no, before the first step. Heading off a bit at a time towards a place it could not see
 	 * took it to the sea bed, nearest the target by the crow, and nothing to dig there.
 	 */
-	private boolean locked;
-	/** The search under way is {@link #startLocked}'s. */
-	private boolean lockedSearch;
+	boolean locked;
 	/** Past this it goes by the windows (LocalPathfinder#LEVELS), like anywhere it can't see. */
 	private static final int LOCK_RANGE = 128;
-	/** Around the bot and the target: the way may lead a little off the straight line. */
-	private static final int LOCK_MARGIN = 32;
 	/** About 15 seconds in the background: no way found by then counts as none. */
 	public static final int LOCK_NODES = 1_000_000;
-	/** Most nodes for the next whole search, and how many the last one took (see limitSearch). */
-	private int lockNodes = LOCK_NODES, searchedNodes;
 
 	/**
 	 * Hold the search of the {@link #goTo} just called to what's left of what the caller has to spend
@@ -185,12 +167,12 @@ public final class MovementController {
 	 * however many targets there are.
 	 */
 	public void limitSearch(int nodes) {
-		lockNodes = Math.max(1, nodes);
+		routes.lockNodes = Math.max(1, nodes);
 	}
 
 	/** Nodes the last whole search went through. */
 	public int searchedNodes() {
-		return searchedNodes;
+		return routes.searchedNodes;
 	}
 
 	private boolean inSight(BlockPos at) {
@@ -233,19 +215,19 @@ public final class MovementController {
 	public void findWay(List<BlockPos> targets, PathGoal anyOf, Mode mode) {
 		BlockPos from = feet();
 		goTo(anyOf, targets.stream().min(java.util.Comparator.comparingDouble(from::distSqr)).orElse(from), mode);
-		wayEnd = null;
-		wayTargets = targets;
-		wayOneSide = true;
-		wayDug = false;
+		routes.wayEnd = null;
+		routes.wayTargets = targets;
+		routes.wayOneSide = true;
+		routes.wayDug = false;
 	}
 
 	public boolean findingWay() {
-		return wayTargets != null;
+		return routes.wayTargets != null;
 	}
 
 	/** Where the route {@link #findWay} found comes out. */
 	public BlockPos wayEnd() {
-		return wayEnd;
+		return routes.wayEnd;
 	}
 
 	/** Of what {@link #findWay} looked for, the one the route leads to: the rest is no longer the goal. */
@@ -253,18 +235,6 @@ public final class MovementController {
 		this.goal = goal;
 		this.target = target;
 	}
-
-	/** Set while it's yet to know if there's a way to these (see {@link #findWay}). */
-	private List<BlockPos> wayTargets;
-	private BlockPos wayEnd;
-	/** Looking only up from the bot, or only down from it (see startWay). */
-	private boolean wayOneSide;
-	/** The search that digs has had its say (see endWay). */
-	private boolean wayDug;
-	/** Most cells of a search through everything: it's what a window of a hundred blocks of deep sea comes to. */
-	private static final int WAY_NODES = 2_000_000;
-	/** Around the targets: where they're reached from, and the way up from there. */
-	private static final int WAY_MARGIN = 8;
 
 	/** Walk out of the protected area it's in, by the nearest way that leads out. */
 	public void leaveZone(ZoneExit exit, Mode mode) {
@@ -281,7 +251,7 @@ public final class MovementController {
 		this.locked = false;
 		this.horizontalOnly = false;
 		this.replanRequested = true;
-		cancelSearches();
+		routes.cancelSearches();
 		this.bestDistance = Double.MAX_VALUE;
 	}
 
@@ -305,9 +275,9 @@ public final class MovementController {
 		lastPath.clear(); // a new destination: the old route means nothing
 		status = Status.IDLE;
 		path = null;
-		cancelSearches();
+		routes.cancelSearches();
 		replanRequested = false;
-		wayTargets = null;
+		routes.wayTargets = null;
 		goal = null;
 		target = null;
 		gathering = false;
@@ -336,7 +306,7 @@ public final class MovementController {
 			case IDLE -> "待命";
 			case ARRIVED -> "已到达";
 			case FAILED -> "失败：" + failReason;
-			case MOVING -> search != null ? "思考中（搜索范围 ±" + search.limits().radiusXZ() + " 格）"
+			case MOVING -> routes.search != null ? "思考中（搜索范围 ±" + routes.search.limits().radiusXZ() + " 格）"
 					: gathering ? "方块不够，正在就地收集（现有 " + BuildingBlocks.count(bot.getInventory()) + "）"
 					: hands.breaking() != null ? "正在挖 " + hands.breaking().toShortString()
 					: path == null ? "规划路线中" : "移动中（第 " + (index + 1) + "/" + path.size() + " 步）";
@@ -415,7 +385,7 @@ public final class MovementController {
 
 	// ---- chasing in a fight, then back to the task -------------------------------------
 
-	private boolean engaged;
+	boolean engaged;
 	private PathGoal savedGoal;
 	private BlockPos savedTarget;
 	private Status savedStatus;
@@ -468,7 +438,7 @@ public final class MovementController {
 	/** Planning ignores air (on the way up for air: any way up will do). */
 	private boolean ignoreAir;
 	/** The planner found nowhere to go on the air left: the breathing layer should take over. */
-	private boolean airRequested;
+	boolean airRequested;
 
 	/** Ticks from here until the head is out of the water (see {@link Escape}). */
 	public double escapeTicks() {
@@ -560,17 +530,17 @@ public final class MovementController {
 			gatherTick();
 			return;
 		}
-		if (wayTargets != null && search == null && !engaged) {
+		if (routes.wayTargets != null && routes.search == null && !engaged) {
 			if (headUnderwater() && Air.budget(bot) < Air.UNLIMITED) {
 				airRequested = true; // up first (see findWay)
 			} else {
-				startWay();
+				routes.startWay();
 			}
 			return;
 		}
-		if (search != null) {
+		if (routes.search != null) {
 			// Thinking: standing still while a (possibly large) search runs over several ticks.
-			continuePlanning();
+			routes.continuePlanning();
 			return;
 		}
 		boolean atStepBoundary = !stepStarted && breakIndex == 0 && hands.breaking() == null;
@@ -596,17 +566,17 @@ public final class MovementController {
 			// said (what's ahead is checked by aheadChanged). The way up is different: the world
 			// there changes fast (sand, flowing water, kelp) and nothing matters more, so again and
 			// again from what's there now, quietly, it's routine.
-			if (path != null && headUnderwater() && (ignoreAir ? bot.tickCount - plannedAt > WATER_REPLAN_TICKS : shortOfBreath())) {
+			if (path != null && headUnderwater() && (ignoreAir ? bot.tickCount - routes.plannedAt > WATER_REPLAN_TICKS : shortOfBreath())) {
 				hands.abortBreaking();
 				path = null;
-				cancelLookahead();
+				routes.cancelLookahead();
 			}
 			// (Taking a breath before going under is a step of the plan now: see PathStep.Type.WAIT.)
 			if (path == null || index >= path.size() || replanRequested) {
-				if (!switchToLookahead()) {
+				if (!routes.switchToLookahead()) {
 					replanRequested = false;
-					startPlanning(minLevel);
-					continuePlanning();
+					routes.startPlanning(routes.minLevel);
+					routes.continuePlanning();
 					return;
 				}
 			}
@@ -616,7 +586,7 @@ public final class MovementController {
 				return;
 			}
 			executeStep(path.get(index));
-			advanceLookahead();
+			routes.advanceLookahead();
 		}
 		watchdog();
 		checkProgress();
@@ -625,336 +595,9 @@ public final class MovementController {
 		}
 	}
 
-	/**
-	 * In a protected area, where nothing can be dug or built, a wall is a wall: the small windows
-	 * and "go as far as you can see, then think again" that do so well outdoors walk it into dead
-	 * ends. And little needs thinking about there (it can only walk), so one search can take in all
-	 * that's loaded. It finishes what it starts: within what it sees, a dead end is simply never
-	 * chosen. If the way out lies past that, the path ends where it's nearest to it, and it looks
-	 * again from there. False if it isn't in a protected area.
-	 */
-	private boolean startZoneSearch() {
-		BlockPos from = feet();
-		ZoneExit exit = leaving != null ? leaving : ZoneExit.at(bot.level(), from);
-		if (exit == null) {
-			return false;
-		}
-		PathGoal searchGoal = goal;
-		java.util.function.ToDoubleFunction<BlockPos> ahead = null;
-		int reach = Math.max(LocalPathfinder.LEVELS[2].radiusXZ(), (int) Math.sqrt(from.distSqr(target)) + 16);
-		if (leaving != null) {
-			double walk = 1.0 / mode.speed();
-			ahead = p -> exit.blocksOut(p) * walk;
-		} else if (!exit.contains(target)) {
-			// Going through: any way out nearer the target than here will do. One further off is the
-			// way it came in, and it would come straight back in.
-			PathGoal original = goal;
-			BlockPos to = target;
-			double now = flatDistSq(from, to);
-			searchGoal = (w, p) -> original.test(w, p) || (exit.outside(w, p) && flatDistSq(p, to) < now);
-		}
-		int radius = Math.min(reach, (bot.level().getServer().getPlayerList().getViewDistance() + 1) * 16);
-		LocalPathfinder.Limits last = LocalPathfinder.LEVELS[2];
-		bot.log("在保护区里，一次搜完 ±" + radius + " 格" + (leaving != null ? "找出口" : "，目标 " + target.toShortString()));
-		if (search != null) {
-			search.cancel();
-		}
-		search = startSearch(from, bot.getY(), new LocalPathfinder.Limits(radius, last.up(), last.down(), ZONE_NODES), searchGoal, ahead);
-		zoneSearch = true;
-		plannedAt = bot.tickCount;
-		return true;
-	}
-
-	private static double flatDistSq(BlockPos a, BlockPos b) {
-		double dx = a.getX() - b.getX(), dz = a.getZ() - b.getZ();
-		return dx * dx + dz * dz;
-	}
-
-	/**
-	 * See {@link #findWay}: the box is whole chunks. Everything is below the bot: from the bottom of
-	 * the world up to the bot; everything above: from the bot up over all that's in the box. That's
-	 * half of what there is to look through, usually. It can miss a way over a ridge higher than
-	 * the bot, so what it doesn't find is looked for again, top to bottom, before it's believed.
-	 */
-	private void startWay() {
-		ServerLevel level = bot.level();
-		BlockPos from = feet();
-		int minX = from.getX(), maxX = minX, minZ = from.getZ(), maxZ = minZ;
-		boolean below = wayOneSide, above = wayOneSide;
-		for (BlockPos t : wayTargets) {
-			minX = Math.min(minX, t.getX());
-			maxX = Math.max(maxX, t.getX());
-			minZ = Math.min(minZ, t.getZ());
-			maxZ = Math.max(maxZ, t.getZ());
-			below &= t.getY() <= from.getY();
-			above &= t.getY() >= from.getY();
-		}
-		minX -= WAY_MARGIN;
-		maxX += WAY_MARGIN;
-		minZ -= WAY_MARGIN;
-		maxZ += WAY_MARGIN;
-		int top = from.getY();
-		for (int cx = minX >> 4; cx <= maxX >> 4; cx++) {
-			for (int cz = minZ >> 4; cz <= maxZ >> 4; cz++) {
-				var chunk = level.getChunkSource().getChunkNow(cx, cz);
-				for (int i = 0; chunk != null && i < 16; i++) {
-					for (int j = 0; j < 16; j++) {
-						top = Math.max(top, chunk.getHeight(net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING, i, j));
-					}
-				}
-			}
-		}
-		// (With nothing higher than the bot in the box, down from it is all there is: no second search.)
-		wayOneSide = (below && top > from.getY()) || above;
-		top = below ? from.getY() + WAY_MARGIN : top + WAY_MARGIN;
-		int lowest = above ? from.getY() - WAY_MARGIN : level.getMinY();
-		int side = 16 + Math.max(Math.max(from.getX() - minX, maxX - from.getX()), Math.max(from.getZ() - minZ, maxZ - from.getZ()));
-		LocalPathfinder.Limits limits = new LocalPathfinder.Limits(side, top - from.getY(), from.getY() - lowest, WAY_NODES);
-		search = startSearch(Snapshot.box(level, minX, lowest, minZ, maxX, top, maxZ), from, bot.getY(), limits, goal, null, true, true);
-		zoneSearch = false;
-		zoneRoute = false;
-		plannedAt = bot.tickCount;
-	}
-
-	/** What the search of {@link #findWay} came to. */
-	private void endWay() {
-		PathJob job = search;
-		search = null;
-		resetStep();
-		if (!job.result().reachesGoal() && wayOneSide) {
-			bot.log("只往一个方向搜没找到（" + job.nodes() + " 格），上下全部再搜一次");
-			wayOneSide = false;
-			return; // tickMoving starts it (see startWay)
-		}
-		if (!job.result().reachesGoal() && !wayDug && !headUnderwater()) {
-			// The flood digs nothing: a wall of rock is the end of it, and from a dry mine that's most
-			// ways in. Once, for the nearest: going through them all takes minutes, for what's mostly no.
-			wayDug = true;
-			bot.log("不挖到不了（" + job.nodes() + " 格），查一次最近的能不能挖过去");
-			startLocked();
-			return;
-		}
-		if (lockedSearch) {
-			searchedNodes = job.nodes();
-		}
-		lockedSearch = false;
-		int targets = wayTargets.size();
-		wayTargets = null;
-		LocalPathfinder.Result result = job.result();
-		bot.log("一次搜完 " + targets + " 个目标：" + job.nodes() + " 格，用了 " + (bot.tickCount - plannedAt) / 20.0 + " 秒，"
-				+ (result.reachesGoal() ? result.steps().size() + " 步能到" : job.hitNodeLimit() ? "到上限也没搜到" : "都到不了"));
-		if (!result.reachesGoal()) {
-			bot.log(job.diagnose());
-			provenFrom = feet();
-			fail("一次搜完了，都到不了");
-			return;
-		}
-		wayEnd = result.steps().isEmpty() ? feet() : result.steps().get(result.steps().size() - 1).to();
-		if (result.steps().isEmpty()) {
-			status = Status.ARRIVED;
-			path = null;
-			return;
-		}
-		adopt(result);
-		emptyPlans = 0;
-	}
-
-	/** The box around the bot and the target, one search, to the end: see {@link #locked}. */
-	private void startLocked() {
-		zoneSearch = false;
-		zoneRoute = false;
-		BlockPos from = feet();
-		int across = Math.max(Math.abs(target.getX() - from.getX()), Math.abs(target.getZ() - from.getZ()));
-		LocalPathfinder.Limits limits = new LocalPathfinder.Limits(across + LOCK_MARGIN, Math.max(0, target.getY() - from.getY()) + LOCK_MARGIN,
-				Math.max(0, from.getY() - target.getY()) + LOCK_MARGIN, lockNodes);
-		long started = System.nanoTime();
-		Snapshot world = Snapshot.around(bot.level(), from, limits, airProfile().limited());
-		TravelEstimate ahead = new TravelEstimate(world, bot.getInventory(), mode, target, false);
-		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
-		search = startSearch(world, from, bot.getY(), limits, goal, ahead::ticks, true, false);
-		lockedSearch = true;
-		search.await(PLAN_WAIT_NANOS);
-		plannedAt = bot.tickCount;
-	}
-
-	/** What {@link #startLocked} came to. No is only believed with the head out: see {@link #provenFrom}. */
-	private void endLocked() {
-		PathJob job = search;
-		search = null;
-		lockedSearch = false;
-		resetStep();
-		searchedNodes = job.nodes();
-		LocalPathfinder.Result result = job.result();
-		if (result.reachesGoal()) {
-			if (result.steps().isEmpty()) {
-				status = Status.ARRIVED;
-				path = null;
-				return;
-			}
-			bot.log("规划出 " + result.steps().size() + " 步（全量，能到终点）");
-			adopt(result);
-			emptyPlans = 0;
-			return;
-		}
-		bot.log("全量搜了 " + job.nodes() + " 格，用了 " + (bot.tickCount - plannedAt) / 20.0 + " 秒，" + (job.hitNodeLimit() ? "到上限了" : "搜完了")
-				+ "，到不了 " + target.toShortString());
-		path = null;
-		if (headUnderwater() && Air.budget(bot) < Air.UNLIMITED) {
-			airRequested = true; // with its breath running, that says little: again from up there
-			return;
-		}
-		if (startZoneSearch()) {
-			return;
-		}
-		if (Rules.open() && emptyPlans == 0 && BuildingBlocks.count(bot.getInventory()) < LOW_BLOCKS && !body.isInWater()) {
-			// Maybe a bridge or pillar would work: get some blocks first.
-			emptyPlans++;
-			gathering = true;
-			gatherRejected.clear();
-			return;
-		}
-		provenFrom = feet();
-		fail("全量搜索到不了 " + target.toShortString());
-	}
-
-	private void startPlanning(int levelIndex) {
-		if (locked) {
-			startLocked();
-			return;
-		}
-		zoneSearch = false;
-		zoneRoute = false;
-		if (levelIndex == minLevel) {
-			levels = LocalPathfinder.levels(headUnderwater());
-		}
-		searchLevel = levelIndex;
-		if (search != null) {
-			search.cancel();
-		}
-		search = startSearch(feet(), bot.getY(), levels[levelIndex]);
-		long started = System.nanoTime();
-		search.await(PLAN_WAIT_NANOS);
-		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
-		plannedAt = bot.tickCount;
-	}
-
-	/**
-	 * Starts a search in the background, on a copy of the blocks around it and of everything else
-	 * it reads (tools, cells to avoid, the last route), so it never touches what the server thread
-	 * is changing meanwhile. The copying is timed as pathfinding on the server thread.
-	 */
-	private PathJob startSearch(BlockPos start, double startFloor, LocalPathfinder.Limits limits) {
-		return startSearch(start, startFloor, limits, goal, null, false);
-	}
-
-	/** A search through a protected area (see startZoneSearch). */
-	private PathJob startSearch(BlockPos start, double startFloor, LocalPathfinder.Limits limits, PathGoal goal,
-								java.util.function.ToDoubleFunction<BlockPos> ahead) {
-		return startSearch(start, startFloor, limits, goal, ahead, true);
-	}
-
-	private PathJob startSearch(BlockPos start, double startFloor, LocalPathfinder.Limits limits, PathGoal goal,
-								java.util.function.ToDoubleFunction<BlockPos> ahead, boolean whole) {
-		return startSearch(Snapshot.around(bot.level(), start, limits, airProfile().limited()), start, startFloor, limits, goal, ahead, whole, false);
-	}
-
-	private PathJob startSearch(Snapshot world, BlockPos start, double startFloor, LocalPathfinder.Limits limits, PathGoal goal,
-								java.util.function.ToDoubleFunction<BlockPos> ahead, boolean whole, boolean reachOnly) {
-		long started = System.nanoTime();
-		Air.Profile air = airProfile();
-		if (breathAtStart >= 0 && air.limited()) {
-			air = new Air.Profile(breathAtStart, air.full(), true, air.workTicks(), air.refill(), air.sprintBlocks());
-		}
-		Inventory tools = new Inventory(bot, new net.minecraft.world.entity.EntityEquipment());
-		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
-			tools.setItem(slot, bot.getInventory().getItem(slot).copy());
-		}
-		it.unimi.dsi.fastutil.longs.LongOpenHashSet avoided = avoidedNow();
-		it.unimi.dsi.fastutil.longs.LongOpenHashSet favored = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(lastPath);
-		PathJob job = new PathJob(new LocalPathfinder(world, tools, mode, mode.maxDropFor(bot.getHealth()), start, startFloor,
-				goal, target, horizontalOnly, limits, avoided::contains, air, favored::contains, whole, ahead, reachOnly));
-		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
-		return job;
-	}
-
-	/** A search for further along: the breath the plan has for there, not what it has now. -1: now. */
-	private int breathAtStart = -1;
-
-	/** Cells it's steering around right now (see learnObstacle); expired ones are dropped. */
-	private it.unimi.dsi.fastutil.longs.LongOpenHashSet avoidedNow() {
-		it.unimi.dsi.fastutil.longs.LongOpenHashSet avoided = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
-		for (var it = avoidUntil.long2IntEntrySet().iterator(); it.hasNext(); ) {
-			var e = it.next();
-			if (e.getIntValue() < bot.tickCount) {
-				it.remove(); // its time is up
-			} else {
-				avoided.add(e.getLongKey());
-			}
-		}
-		return avoided;
-	}
-
-	/**
-	 * Diagnosis, when it's about to give up for lack of a path: the same search once more, on the
-	 * live world on this thread, for the log. If this one finds a way, the copy the background
-	 * search worked on was missing something. Capped, and only at giving up, so it costs nothing
-	 * otherwise.
-	 */
-	private void crossCheck() {
-		LocalPathfinder.Limits limits = levels[minLevel];
-		LocalPathfinder live = new LocalPathfinder(bot.level(), bot.getInventory(), mode, mode.maxDropFor(bot.getHealth()),
-				feet(), bot.getY(), goal, target, horizontalOnly, limits, avoidedNow()::contains, airProfile(),
-				new it.unimi.dsi.fastutil.longs.LongOpenHashSet(lastPath)::contains);
-		long started = System.nanoTime();
-		boolean done = false;
-		while (!done && System.nanoTime() - started < 200_000_000L) {
-			done = live.step(20_000_000L);
-		}
-		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
-		String what = !done ? "200 毫秒内没搜完"
-				: !live.result().steps().isEmpty() ? "能找到 " + live.result().steps().size() + " 步（后台用的那份世界有问题！）"
-				: "也找不到：" + live.diagnose();
-		bot.log("对照：在真实世界上同样搜一次（±" + limits.radiusXZ() + " 格）：" + what);
-	}
-
-	/** Has the search finished? Counts its background time once, when it has. */
-	private boolean finished(PathJob job) {
-		if (!job.done()) {
-			return false;
-		}
-		bot.perf().add(Perf.Part.BACKGROUND, job.takeNanos());
-		return true;
-	}
-
-	private void cancelSearches() {
-		lockedSearch = false;
-		if (search != null) {
-			search.cancel();
-			search = null;
-		}
-		cancelLookahead();
-	}
-
-	private void cancelLookahead() {
-		if (lookahead != null) {
-			lookahead.cancel();
-			lookahead = null;
-		}
-	}
-
-
-	/** Search windows in use: a small cube first under water (see LocalPathfinder#WATER_LEVELS). */
-	private LocalPathfinder.Limits[] levels = LocalPathfinder.LEVELS;
-	private int plannedAt;
-	/** The search under way is one of startZoneSearch's. */
-	private boolean zoneSearch;
-	/** The path being walked came from one: it's what it should be, not something to second-guess. */
-	private boolean zoneRoute;
 	/** Set while getting out of a protected area is the whole point (see leaveZone). */
-	private ZoneExit leaving;
-	private BlockPos provenFrom;
-	/** Most nodes of a search through a protected area: its window is many times the usual ones. */
-	private static final int ZONE_NODES = 400_000;
+	ZoneExit leaving;
+	BlockPos provenFrom;
 	/** On the way up for air, plan again this often. */
 	private static final int WATER_REPLAN_TICKS = 20;
 
@@ -971,148 +614,10 @@ public final class MovementController {
 		return bot.isEyeInFluid(FluidTags.WATER);
 	}
 
-	/**
-	 * Runs the current search for this tick's budget. If it finds nothing useful (no path, or a
-	 * partial path that barely gets closer), the next bigger window is tried.
-	 */
-	private void continuePlanning() {
-		bot.perf().testWait(search.paceForTests());
-		if (!finished(search)) {
-			return;
-		}
-		if (wayTargets != null && !engaged) {
-			endWay();
-			return;
-		}
-		if (lockedSearch) {
-			endLocked();
-			return;
-		}
-		LocalPathfinder.Result result = search.result();
-		boolean wasZone = zoneSearch;
-		zoneSearch = false;
-		if (!wasZone && !result.reachesGoal() && !headUnderwater() && startZoneSearch()) {
-			return;
-		}
-		// Not when it's known to lead nowhere: under water that would use up the breath getting
-		// nearer, come up, and start over from the same answer.
-		boolean proven = !wasZone && search.provenUnreachable();
-		String ended = (search.hitNodeLimit() ? "，节点到上限，没搜完" : proven ? "，搜完了" : "")
-				+ (search.blocksShort() > 0 ? "，方块不够" : "");
-		boolean useful = result.reachesGoal() || (wasZone && !result.steps().isEmpty())
-				|| (!proven && !result.steps().isEmpty() && search.progressBlocks() >= MIN_USEFUL_PROGRESS);
-		if (!useful && !wasZone && searchLevel < levels.length - 1) {
-			// The last line before a long think: if it never comes back, this says what it was doing.
-			bot.log("±" + search.limits().radiusXZ() + " 格内没有可用的路（用了 " + (bot.tickCount - plannedAt) / 20.0 + " 秒" + ended + "），扩大到 ±"
-					+ levels[searchLevel + 1].radiusXZ() + " 格，目标 " + (target == null ? "（无）" : target.toShortString()));
-			startPlanning(searchLevel + 1);
-			return;
-		}
-		int radius = search.limits().radiusXZ();
-		PathJob finished = search;
-		search = null;
-		resetStep();
-		if (result.reachesGoal() && result.steps().isEmpty()) {
-			status = Status.ARRIVED; // it's already where the plan would have it
-			path = null;
-			return;
-		}
-		if (result.steps().isEmpty()) {
-			bot.log("在 ±" + radius + " 格内找不到路：" + finished.diagnose());
-			noPathForAir = finished.airRejected() > 0;
-			if (emptyPlans + 1 >= MAX_EMPTY_PLANS) {
-				crossCheck(); // about to give up (see onNoPath)
-			}
-			onNoPath();
-			return;
-		}
-		if (proven) {
-			// Steps it could take, none of them to the goal, in the widest search there is.
-			provenFrom = feet();
-			fail("±" + radius + " 格内搜完了，确定到不了 " + target.toShortString());
-			return;
-		}
-		bot.log("规划出 " + result.steps().size() + " 步（±" + radius + " 格，"
-				+ (result.reachesGoal() ? "能到终点" : "先走一段") + ended + "）");
-		adopt(result);
-		zoneRoute = wasZone;
-		emptyPlans = 0;
-		if (!wasZone && result.reachesGoal() && searchLevel > minLevel) {
-			// The way there takes a window this wide: plan again from it, not from the small one, which
-			// can't see the goal and heads off the way the target lies. Under water, where it plans
-			// every second, the two took turns: a step along the route, a step back.
-			minLevel = searchLevel;
-			escalatedAtDistance = remaining(bot.blockPosition());
-		}
-	}
-
-	/**
-	 * Think while walking: when the current (partial) path is nearly done, start planning the next
-	 * stretch from where it ends, a little each tick, so it's ready on arrival and the bot doesn't
-	 * stop to think. Only once the remaining steps won't change the world (no digging or placing
-	 * left), since the search sees the world as it is now.
-	 */
-	private void advanceLookahead() {
-		if (lookahead != null) {
-			bot.perf().testWait(lookahead.paceForTests());
-			finished(lookahead); // only to count its time; it's taken at the end of the path
-			return;
-		}
-		if (path == null || pathReachesGoal || replanRequested || zoneRoute || path.size() - index > LOOKAHEAD_STEPS) {
-			return;
-		}
-		for (int i = index; i < path.size(); i++) {
-			PathStep step = path.get(i);
-			if (!step.toBreak().isEmpty() || step.place() != null) {
-				return;
-			}
-		}
-		BlockPos end = path.get(path.size() - 1).to();
-		double endFloor = LocalPathfinder.floorHeight(bot.level(), end);
-		if (Double.isNaN(endFloor)) {
-			return;
-		}
-		breathAtStart = pathAir.isEmpty() ? -1 : pathAir.get(pathAir.size() - 1);
-		lookahead = startSearch(end, endFloor, levels[minLevel]);
-		breathAtStart = -1;
-	}
-
-	/**
-	 * At the end of the current path: continue straight onto the next stretch if the lookahead
-	 * found a good one. Returns false if a normal (standing) re-plan is needed instead.
-	 */
-	private boolean switchToLookahead() {
-		PathJob next = lookahead;
-		lookahead = null;
-		if (next == null || replanRequested || path == null || !feet().equals(path.get(path.size() - 1).to())) {
-			if (next != null) {
-				next.cancel();
-			}
-			return false;
-		}
-		long started = System.nanoTime();
-		next.await(PLAN_WAIT_NANOS);
-		bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
-		if (!finished(next)) {
-			lookahead = next; // almost always done by now; if not, finish it next tick
-			return true;
-		}
-		LocalPathfinder.Result result = next.result();
-		boolean useful = result.reachesGoal()
-				|| (!result.steps().isEmpty() && next.progressBlocks() >= MIN_USEFUL_PROGRESS);
-		if (!useful || next.provenUnreachable() || (!result.reachesGoal() && ProtectionZones.isProtected(bot.level(), feet()))) {
-			return false; // let the normal planner try (and widen the search if needed)
-		}
-		adopt(result);
-		emptyPlans = 0;
-		resetStep();
-		return true;
-	}
-
 	/** The last search that found nothing turned steps down for want of air (see onNoPath). */
-	private boolean noPathForAir;
+	boolean noPathForAir;
 
-	private void onNoPath() {
+	void onNoPath() {
 		path = null;
 		// Only when air was the reason: it used to be assumed whenever it was under water with less
 		// than a full breath, and a drop it couldn't reach for another reason sent it up for air.
@@ -1130,7 +635,7 @@ public final class MovementController {
 			return;
 		}
 		if (++emptyPlans >= MAX_EMPTY_PLANS) {
-			int r = levels[levels.length - 1].radiusXZ();
+			int r = routes.levels[routes.levels.length - 1].radiusXZ();
 			// Under water the usual reason is air: nowhere it could go and still get back up in time.
 			fail(headUnderwater() && !ignoreAir
 					? "在水下，一口气能去又能回来换气的地方里找不到路（离换气的出口太远，或者头顶要挖的太慢）"
@@ -1140,7 +645,7 @@ public final class MovementController {
 
 	private void checkProgress() {
 		// (A way that's known may lead off from the target for a while: to the shore, say.)
-		if (target == null || status != Status.MOVING || hands.breaking() != null || zoneRoute || locked) {
+		if (target == null || status != Status.MOVING || hands.breaking() != null || routes.zoneRoute || locked) {
 			return;
 		}
 		BlockPos here = bot.blockPosition();
@@ -1149,14 +654,14 @@ public final class MovementController {
 			bestDistance = distance;
 			ticksWithoutProgress = 0;
 			recoveries = 0;
-			if (minLevel > 0 && distance < escalatedAtDistance - 16) {
-				minLevel = 0; // well past the obstacle: back to cheap small searches
+			if (routes.minLevel > 0 && distance < routes.escalatedAtDistance - 16) {
+				routes.minLevel = 0; // well past the obstacle: back to cheap small searches
 			}
 		} else if (++ticksWithoutProgress > NO_PROGRESS_TICKS) {
-			if (minLevel < levels.length - 1) {
+			if (routes.minLevel < routes.levels.length - 1) {
 				// Probably circling in a dead end the small window can't see out of: think bigger.
-				minLevel++;
-				escalatedAtDistance = distance;
+				routes.minLevel++;
+				routes.escalatedAtDistance = distance;
 				ticksWithoutProgress = 0;
 				replan("太久没靠近目标，扩大搜索范围");
 			} else {
@@ -1179,7 +684,7 @@ public final class MovementController {
 	 * {@link TravelEstimate}): climbing out of a mine on a long trip counts as getting closer. By
 	 * straight-line distance it didn't, and a long climb looked like being stuck.
 	 */
-	private double remaining(BlockPos here) {
+	double remaining(BlockPos here) {
 		if (travel == null || !target.equals(travelTarget) || horizontalOnly != travelHorizontal) {
 			travel = new TravelEstimate(bot.level(), bot.getInventory(), mode, target, horizontalOnly);
 			travelTarget = target;
@@ -1208,7 +713,7 @@ public final class MovementController {
 		body.settleToGround();
 	}
 
-	private void fail(String reason) {
+	void fail(String reason) {
 		bot.log("移动失败：" + reason);
 		hands.abortBreaking();
 		failReason = reason;
@@ -1218,7 +723,7 @@ public final class MovementController {
 		resetStep();
 	}
 
-	private void resetStep() {
+	void resetStep() {
 		stepTicks = 0;
 		breakIndex = 0;
 		hands.resetAttempts();
@@ -1238,7 +743,7 @@ public final class MovementController {
 	private static final int AVOID_TICKS = 600;
 	int blockedTicks;
 	/** Cells that turned out to block movement although the plan thought them open: pos -> expiry tick. */
-	private final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap avoidUntil = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
+	final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap avoidUntil = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
 
 	/**
 	 * Whatever blocked {@code attempted} (a fence sticking up from below, an odd-shaped block, a
@@ -1278,7 +783,7 @@ public final class MovementController {
 	/** Real ticks each step of the path should take. */
 	private List<Double> pathTicks = List.of();
 	/** Breath the plan expects at the end of each step (see LocalPathfinder.Result#air). */
-	private List<Integer> pathAir = List.of();
+	List<Integer> pathAir = List.of();
 
 	/**
 	 * For the log: where it is in the plan, as the plan saw it (the step, the breath it expected at
@@ -1299,7 +804,7 @@ public final class MovementController {
 	/** When the current step began (for planAirNote). */
 	private int stepBegan;
 	/** Cells of the most recent path towards the current goal: favoured when planning again. */
-	private final it.unimi.dsi.fastutil.longs.LongOpenHashSet lastPath = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+	final it.unimi.dsi.fastutil.longs.LongOpenHashSet lastPath = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
 	/** Ticks spent on the current step. */
 	private int stepTicks;
 	/** A step may take this much longer than its estimate before it's given up on. */
@@ -1308,7 +813,7 @@ public final class MovementController {
 	private static final int VERIFY_AHEAD = 5;
 	private static final int VERIFY_INTERVAL = 5;
 
-	private void adopt(LocalPathfinder.Result result) {
+	void adopt(LocalPathfinder.Result result) {
 		path = result.steps();
 		pathTicks = result.ticks();
 		pathAir = result.air();
@@ -1409,7 +914,7 @@ public final class MovementController {
 		}
 		hands.abortBreaking();
 		path = null;
-		cancelSearches();
+		routes.cancelSearches();
 		replanRequested = false;
 		resetStep();
 	}
