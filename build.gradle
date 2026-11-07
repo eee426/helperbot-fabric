@@ -57,5 +57,6 @@ tasks.register('coverageReport', JacocoReport) {
 	reports {
 		html.required = true
 		csv.required = true
+		xml.required = true
 	}
 }

@@ -1,0 +1,369 @@
+<title>HelperBot 行为图</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* A switchboard of task chains: chains on the left, the chain as a wired board, the chosen node beside it. */
+:root{
+  --bg:#eef1f3;--panel:#fbfcfc;--panel2:#e3e8ea;--line:#c3ccd1;--ink:#1c262b;--muted:#566771;--wire:#7d8f99;--accent:#0b6e7f;--accent-ink:#ffffff;
+  --q:#8a5a00;--q-soft:#f7ead0;--a:#2c5e9e;--a-soft:#e0eaf7;--g:#1d7a4d;--g-soft:#dbf0e4;--b:#b03030;--b-soft:#f8e0e0;--j:#6a4bb0;--j-soft:#e9e3f7;
+  --sans:"Noto Sans SC","Microsoft YaHei","PingFang SC",system-ui,sans-serif;--mono:"JetBrains Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#13191d;--panel:#1b2328;--panel2:#242e34;--line:#37444c;--ink:#e6edf0;--muted:#94a6b0;--wire:#62757f;--accent:#49c1d4;--accent-ink:#0b1a1e;
+  --q:#e8bf6a;--q-soft:#3b2f15;--a:#8db7ee;--a-soft:#1f3048;--g:#73d3a1;--g-soft:#183a2a;--b:#f09a9a;--b-soft:#472222;--j:#baa5ee;--j-soft:#2f2848;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#13191d;--panel:#1b2328;--panel2:#242e34;--line:#37444c;--ink:#e6edf0;--muted:#94a6b0;--wire:#62757f;--accent:#49c1d4;--accent-ink:#0b1a1e;
+  --q:#e8bf6a;--q-soft:#3b2f15;--a:#8db7ee;--a-soft:#1f3048;--g:#73d3a1;--g-soft:#183a2a;--b:#f09a9a;--b-soft:#472222;--j:#baa5ee;--j-soft:#2f2848;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 var(--sans);padding-block:14px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+h1{font-size:21px;margin:0;line-height:1.3;text-wrap:balance}
+.sub{color:var(--muted);margin:2px 0 12px;font-size:14px}
+.app{display:grid;grid-template-columns:200px minmax(0,1fr) 320px;gap:12px;align-items:start}
+nav{display:flex;flex-direction:column;gap:2px;min-width:0}
+nav h2{font-size:12.5px;letter-spacing:.06em;color:var(--muted);margin:10px 0 3px;font-weight:700}
+nav h2:first-child{margin-top:0}
+nav button{all:unset;box-sizing:border-box;cursor:pointer;padding:6px 9px;border-radius:7px;font-size:14px;display:flex;justify-content:space-between;gap:8px;align-items:center}
+nav button:hover{background:var(--panel2)}
+nav button[aria-current="true"]{background:var(--accent);color:var(--accent-ink);font-weight:600}
+nav button:focus-visible,.node:focus-visible,.opt:focus-visible,.tool:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mini{font:600 11.5px var(--mono);opacity:.85}
+.mid{min-width:0}
+.head{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;justify-content:space-between;margin-bottom:6px}
+.head h2{font-size:18px;margin:0}
+.head p{margin:0;color:var(--muted);font-size:14px;flex-basis:100%}
+.board{position:relative;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;max-height:calc(100vh - 150px);min-height:420px}
+.stage{position:relative}
+svg.wires{position:absolute;inset:0;pointer-events:none}
+.wire{fill:none;stroke:var(--wire);stroke-width:1.4}
+.wire.back{stroke-dasharray:5 4}
+.wire.on{stroke:var(--accent);stroke-width:2.6}
+.wl{font:12px var(--sans);fill:var(--muted);paint-order:stroke;stroke:var(--panel);stroke-width:4px}
+.node{all:unset;box-sizing:border-box;position:absolute;width:166px;min-height:58px;padding:7px 9px 7px 12px;border-radius:8px;cursor:pointer;background:var(--s);border:1.5px solid transparent;font-size:13.5px;line-height:1.35;overflow:hidden}
+.node::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--cov,var(--line))}
+.node b{display:block;font-weight:600;color:var(--c)}
+.node.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+.node.past{border-color:var(--accent)}
+.node .pc{display:block;font:600 11.5px var(--mono);color:var(--muted);margin-top:1px}
+.k-q{--c:var(--q);--s:var(--q-soft)}.k-a{--c:var(--a);--s:var(--a-soft)}.k-g{--c:var(--g);--s:var(--g-soft)}.k-b{--c:var(--b);--s:var(--b-soft)}.k-e{--c:var(--muted);--s:var(--panel2)}
+.side{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0;position:sticky;top:max(8px,env(safe-area-inset-top,0px))}
+.kind{font-size:12.5px;font-weight:700;letter-spacing:.04em;color:var(--c)}
+.side h3{margin:2px 0 4px;font-size:17px;line-height:1.35;text-wrap:balance}
+.side p{margin:0 0 10px}
+.opts{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
+.opt{all:unset;box-sizing:border-box;cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:14px;display:flex;justify-content:space-between;gap:10px}
+.opt:hover{background:var(--panel2)}
+.opt i{font-style:normal;color:var(--muted);text-align:right;min-width:0}
+.opt.jump i{color:var(--j);font-weight:600}
+.code{font:13px var(--mono);word-break:break-all;background:var(--panel2);padding:7px 9px;border-radius:7px;margin-bottom:6px}
+.covbar{height:6px;background:var(--panel2);border-radius:3px;overflow:hidden;margin:4px 0 3px}
+.covbar span{display:block;height:100%}
+.meta{font-size:13px;color:var(--muted)}
+.trail{margin-top:10px;border-top:1px solid var(--line);padding-top:8px;font-size:13px;color:var(--muted)}
+.trail ol{margin:4px 0 0;padding-left:20px;max-height:170px;overflow:auto}
+.trail li button{all:unset;cursor:pointer;color:var(--ink)}
+.trail li button:hover{text-decoration:underline}
+.tools{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.tool{all:unset;cursor:pointer;font-size:13px;border:1px solid var(--line);border-radius:7px;padding:3px 9px}
+.tool:hover{background:var(--panel2)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:13px;color:var(--muted);margin:7px 0 0}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.sw{width:13px;height:13px;border-radius:3px;background:var(--s);border:1px solid var(--c);display:inline-block}
+.bar{width:5px;height:14px;border-radius:2px;display:inline-block}
+@media (max-width:1000px){.app{grid-template-columns:minmax(0,1fr)}nav{flex-direction:row;flex-wrap:wrap;gap:4px}nav h2{display:none}nav button{padding:5px 8px}.mini{display:none}.side{position:static}.board{max-height:60vh}}
+@media (prefers-reduced-motion:no-preference){.board{scroll-behavior:smooth}}
+</style>
+
+<h1>HelperBot 行为图</h1>
+<p class="sub">按任务链看它实际怎么走。点方块看说明，点右边的分支走下去。内容按提交 2a88c46 的代码写，覆盖率来自 94 个测试场景。</p>
+<div class="app">
+  <nav id="nav" aria-label="任务链"></nav>
+  <div class="mid">
+    <div class="head"><h2 id="ttl"></h2><div class="tools"><button class="tool" id="reset">回到起点</button></div><p id="lead"></p></div>
+    <div class="board" id="board"><div class="stage" id="stage"></div></div>
+    <div class="legend">
+      <span><i class="sw k-q"></i>判断</span><span><i class="sw k-a"></i>动作</span><span><i class="sw k-g"></i>成功</span><span><i class="sw k-b"></i>失败</span>
+      <span><i class="bar" style="background:var(--g)"></i>函数测试跑过 80% 以上</span><span><i class="bar" style="background:var(--q)"></i>30～80%</span><span><i class="bar" style="background:var(--b)"></i>30% 以下</span><span><i class="bar" style="background:var(--line)"></i>没有对应函数</span>
+      <span>虚线：往回走</span>
+    </div>
+  </div>
+  <aside class="side" id="side" aria-live="polite"></aside>
+</div>
+
+<script>
+const CHAINS = [
+{id:"tick", group:"身体", title:"每一刻干什么", lead:"服务器每秒 20 刻。每刻从上往下问，谁接管，下面的就不跑。", start:"breath", nodes:{
+ breath:{k:"q",t:"要换气吗？",d:"头在水下，气只够游上去，或者有人请求换气。",c:"BotPlayer.breathe",n:[["要","jump:breath"],["不用","combat"]]},
+ combat:{k:"q",t:"要打架吗？",d:"远程怪 10 格内追过去打，近战怪够得着才打。任务暂停，打完回到原来的事。",c:"BotPlayer.combat",n:[["要","fight"],["不用","eat"]]},
+ fight:{k:"a",t:"打怪",d:"拿武器，蓄满力才挥。够不着就用 engage 借用移动追过去。",c:"BotPlayer.combat",n:[["这一刻结束","move"]]},
+ eat:{k:"q",t:"要吃东西吗？",d:"饥饿值 14 以下，或受伤且不到 18。任务要的东西不吃，除非快饿死。",c:"BotPlayer.tryEat",n:[["要","eating"],["不用","task"]]},
+ eating:{k:"a",t:"边走边吃",d:"按原版用时吃，走路减速。",c:"BotPlayer.tryEat",n:[["这一刻结束","move"]]},
+ task:{k:"a",t:"跑当前任务一刻",d:"背包快满先整理，然后 task.tick()。任务决定去哪、挖哪。",c:"BotPlayer.behave",n:[["一单 get","jump:order"],["然后","move"]]},
+ move:{k:"a",t:"身体动一刻",d:"身体只在这里移动。换气时由换气层自己调用。",c:"MovementController.tick",n:[["看移动","jump:step"]]}
+}},
+{id:"step", group:"身体", title:"移动一刻", lead:"MovementController 每刻怎么走一步。", start:"fall", nodes:{
+ fall:{k:"q",t:"脚下没东西？",d:"先掉下去。正在挖的放弃，落地后重新规划。",c:"MovementController.tickMoving",n:[["是","end1"],["否","gather"]]},
+ end1:{k:"e",t:"这一刻结束",d:"下一刻继续。",n:[]},
+ gather:{k:"q",t:"在就地收集垫脚方块？",d:"没路可走又方块不够时，挖身边的方块。",c:"MovementController.gatherTick",n:[["是","end1"],["否","way"]]},
+ way:{k:"q",t:"有洪水搜索待开始？",d:"头在水下就先去换气，头出水后才开始搜。",c:"MovementController.startWay",n:[["是","jump:flood"],["否","think"]]},
+ think:{k:"q",t:"有搜索在跑？",d:"站着等后台线程，每刻看一眼结果。",c:"MovementController.continuePlanning",n:[["是","end1"],["否","bound"]]},
+ bound:{k:"q",t:"走完这一步了？",d:"检查到目标没有、还在不在路线上、气够不够计划。",c:"MovementController.tickMoving",n:[["到了目标","arrived"],["路线没了","plan"],["继续走","exec"]]},
+ arrived:{k:"g",t:"状态变成 ARRIVED",d:"任务下一刻看到。",n:[]},
+ plan:{k:"a",t:"重新规划",d:"重新搜路。",c:"MovementController.startPlanning",n:[["看寻路","jump:goto"]]},
+ exec:{k:"a",t:"执行这一步",d:"先挖 toBreak，再放方块，然后移动。每次挖都过总闸。",c:"MovementController.executeStep",n:[["要挖","jump:mine"],["移动","stuck"]]},
+ stuck:{k:"q",t:"卡住了吗？",d:"一步比预计慢太多、前方变了、原地不动，都会重新规划。",c:"MovementController.stepTimedOut",n:[["卡住","plan"],["正常","end1"]]}
+}},
+{id:"mine", group:"身体", title:"挖一个方块", lead:"所有挖方块都经过这里，全局总闸的执行层。", start:"ghost", nodes:{
+ ghost:{k:"q",t:"在保护区块里？",d:"幽灵状态什么都不碰。",c:"MovementController.mine",n:[["是","fail"],["否","gate"]]},
+ gate:{k:"q",t:"头在水下？",d:"每刻都查，挖到一半水灌进来也会停。",c:"MovementController.mine",n:[["否","dig"],["是","sea"]]},
+ sea:{k:"q",t:"是海里专有的方块？",d:"海带、海草、海泡菜、珊瑚，一碰就碎的才算。",c:"Guard.ofTheSea",n:[["是","dig"],["否","escape"]]},
+ escape:{k:"q",t:"正在逃生？",d:"换气确实搜不到路，反射层才放行。",c:"MovementController.digOut",n:[["是","dig"],["否","fail"]]},
+ fail:{k:"b",t:"不挖，重新规划",d:"返回 FAILED。",n:[]},
+ dig:{k:"g",t:"走原版挖掘流程",d:"换工具，按原版进度挖，服务器确认后才算挖掉。",c:"MovementController.mine",n:[]}
+}},
+{id:"breath", group:"身体", title:"换气", lead:"反射层保命。正常情况下路线自己安排换气，这里是兜底。", start:"low", nodes:{
+ low:{k:"q",t:"气只够游上去？",d:"预算不够“上去的时间 × 1.25 + 2 秒”。",c:"BotPlayer.breathe",n:[["是","route"]]},
+ route:{k:"a",t:"用寻路游上去",d:"目标是任何能呼吸的地方。不挖，每秒重想一次。",c:"MovementController.headForAir",n:[["头出水了","full"],["搜不到路","climb"],["3 秒没进展","swim"]]},
+ swim:{k:"a",t:"直接往上游",d:"还有路时不挖。",c:"MovementController.ascendStep",n:[["头出水了","full"]]},
+ climb:{k:"a",t:"往上游，挖开头顶",d:"唯一能在水下挖的情况。浮着挖慢 25 倍，沙土来得及，石头基本来不及。",c:"MovementController.ascendStep",n:[["头出水了","full"],["气耗尽","dead"]]},
+ full:{k:"g",t:"等气满，回到原来的事",d:"disengage 恢复目标，再搜一次路。",c:"MovementController.disengage",n:[]},
+ dead:{k:"b",t:"淹死",d:"被堵死又挖不开时才会发生。",n:[]}
+}},
+{id:"order", group:"任务", title:"一单 /bot get", lead:"做一步，重新规划一次。一步失败只会得到新计划。", start:"plan", nodes:{
+ plan:{k:"q",t:"够数了吗？",d:"只数这一单拿到的数量。",c:"AcquireTask.plan",n:[["够了","ret"],["不够","limit"]]},
+ ret:{k:"a",t:"走回玩家身边",d:"到了说“右键我拿走”。",c:"ComeTask.followTick",n:[["看回玩家","jump:come"]]},
+ limit:{k:"q",t:"超过 80 步？",d:"防止原地打转。",c:"AcquireTask.plan",n:[["是","give"],["否","think"]]},
+ think:{k:"a",t:"物品规划器算计划",d:"用背包真实内容，算最省时间的一串动作，最多 4 万节点、2 秒。",c:"AcquireTask.plan",n:[["想不出","give"],["有计划","first"]]},
+ first:{k:"q",t:"第一步是什么？",d:"只执行第一步，做完回到开头。同一动作连续 3 次没进展就放弃。",c:"AcquireTask.plan",n:[["采集","jump:gather"],["打猎","jump:hunt"],["合成","jump:craft"],["熔炼","jump:smelt"],["打水","jump:water"],["这一步结束","done"]]},
+ done:{k:"q",t:"这一步成功了？",d:"失败记一次。在保护区里失败，先走出保护区，一单最多 2 次。",c:"AcquireTask.stepFailed",n:[["成功","plan"],["失败","count"]]},
+ count:{k:"q",t:"同一物品失败 3 次？",d:"这样拿不到，就从计划里去掉这个来源。",c:"AcquireTask.stepFailed",n:[["是，不再用这个来源","plan"],["否，重新规划再试","plan"]]},
+ give:{k:"b",t:"放弃这一单",d:"把原因告诉玩家。",c:"AcquireTask.giveUp",n:[]}
+}},
+{id:"gather", group:"任务", title:"采集", lead:"找方块、确认能到、挖、捡。一个地方一份 100 万格的搜索额度。", start:"prep", nodes:{
+ prep:{k:"a",t:"分析来源",d:"读掉落表：哪些方块掉这个东西，手里的工具哪个能用。",c:"GatherTask.prepare",n:[["有工具","scan"],["没工具","no"]]},
+ no:{k:"b",t:"告诉玩家需要什么",d:"这一步失败。",c:"GatherTask.prepare",n:[]},
+ scan:{k:"a",t:"扫描周围 6 个区块",d:"从近到远，取最近 64 处，跳过记忆本里的。",c:"GatherTask.scan",n:[["有目标","pick"],["一个都没有","explore"]]},
+ pick:{k:"a",t:"估算选一个",d:"比较最近 12 处，近处都在水里时再比岸上的。掉落物也放在一起比。",c:"GatherTask.nextTarget",n:[["选中掉落物","jump:drop"],["海里专有，头在水外","jump:flood"],["普通方块","search"],["这批都不行","scan"]]},
+ search:{k:"a",t:"全量搜索这一个",d:"框住机器人和目标，能到才出发。",c:"GatherTask.goNear",n:[["看寻路","jump:goto"],["能到","walk"],["到不了","spend"]]},
+ spend:{k:"q",t:"额度用完了？",d:"记下目标周围 4 格，扣掉用掉的节点数。",c:"GatherTask.spent",n:[["还有","pick"],["用完了","explore"]]},
+ walk:{k:"a",t:"走过去",d:"按完整路线走，路上不用再判断。",c:"GatherTask.approach",n:[["到了","dig"],["路断了","spend"]]},
+ dig:{k:"a",t:"挖",d:"看得见才挖，挡路的先挖，开挖前核对手里的工具。额度回到 100 万。",c:"GatherTask.mine",n:[["看挖方块","jump:mine"],["挖完","check"]]},
+ check:{k:"q",t:"够数了吗？",d:"地上的也算。",c:"GatherTask.afterHit",n:[["够了","done"],["不够","pick"]]},
+ explore:{k:"a",t:"交给探索者",d:"去下一处，到站后额度回满。",c:"GatherTask.lookFurther",n:[["看探索","jump:explore"],["找遍了","giveup"]]},
+ done:{k:"g",t:"这一步完成",d:"回到一单的流程。",n:[["回一单","jump:order"]]},
+ giveup:{k:"b",t:"这一步失败",d:"说明原因。",c:"GatherTask.giveUp",n:[]}
+}},
+{id:"explore", group:"任务", title:"探索下一处", lead:"用种子算 2000 格内的群系地图，每 48 格一个点。", start:"map", nodes:{
+ map:{k:"a",t:"算地图",d:"不加载区块。普通方块跳过海洋和河流，要地下的东西再看 4 个高度。",c:"Explorer.Explorer",n:[["算好了","next"]]},
+ next:{k:"q",t:"还有没看过的点？",d:"选最快拿够数的群系，同样好的选离自己和玩家都近的。",c:"Explorer.next",n:[["有","go"],["没有，圈内也没这种群系","far"],["没有","fail"]]},
+ far:{k:"a",t:"去最远 1 万格外最近的一处",d:"只去一趟。",c:"GatherTask.startLocate",n:[["到了","rescan"]]},
+ go:{k:"a",t:"赶路",d:"只看水平方向，用 ±16、32、64 窗口。",c:"GatherTask.startTravel",n:[["路上","scanq"]]},
+ scanq:{k:"q",t:"脚在水里？",d:"每 5 秒看一次。海带这类东西例外，在水里也扫。",c:"GatherTask.travel",n:[["是，这次跳过","scanq2"],["否，扫 3 个区块","found"]]},
+ scanq2:{k:"q",t:"到站了？",d:"走到那个点 16 格内。",c:"GatherTask.travel",n:[["到了","rescan"],["没到","scanq"]]},
+ found:{k:"q",t:"扫到目标？",d:"扫到就停下来选目标。",c:"GatherTask.travel",n:[["有","rescan"],["没有","scanq2"]]},
+ rescan:{k:"g",t:"回到采集扫描",d:"额度回满。",n:[["回采集","jump:gather"]]},
+ fail:{k:"b",t:"找遍了或超过 10 分钟",d:"这一步失败。",n:[]}
+}},
+{id:"hunt", group:"任务", title:"打猎", lead:"找猎物，内核确认能到，追上去打，捡掉落物。", start:"find", nodes:{
+ find:{k:"a",t:"找猎物和掉落物",d:"周围 64 格。地上的和最近的猎物比成本。",c:"HuntTask.find",n:[["掉落物更划算","jump:drop"],["猎物在水下，头在水外","jump:flood"],["有猎物","lock"],["都没有","further"]]},
+ lock:{k:"a",t:"盯上最近的",d:"拿武器。",c:"HuntTask.lockOn",n:[["开始追","chase"]]},
+ chase:{k:"q",t:"离猎物 16 格内？",d:"远时走完整路线，猎物动了也不换。",c:"HuntTask.chase",n:[["否，走完整路线","far"],["是，小窗口追","near"],["查实到不了","reject"]]},
+ far:{k:"a",t:"全量搜索",d:"路线要留 4 秒打架的气。",c:"HuntTask.chase",n:[["看寻路","jump:goto"],["到了","chase"]]},
+ near:{k:"q",t:"够得着又看得见？",d:"进 16 格后追超过 60 秒就换一只。",c:"HuntTask.chase",n:[["是","hit"],["否","near"],["超时","reject"]]},
+ hit:{k:"a",t:"打",d:"蓄满力才挥。",c:"HuntTask.chase",n:[["打死了","find"]]},
+ reject:{k:"a",t:"排除这一只",d:"换下一只。",c:"HuntTask.chase",n:[["继续","find"]]},
+ further:{k:"q",t:"它是动物还是怪物？",d:"看生物的出现方式。",c:"HuntTask.lookFurther",n:[["动物","exp"],["怪物","wait"],["都不刷","no"]]},
+ exp:{k:"a",t:"探索",d:"去它最多的群系，路上每 2 秒看一次。",c:"HuntTask.explore",n:[["看到","find"],["找遍了","no"]]},
+ wait:{k:"a",t:"原地等刷新",d:"白天露天就等天黑，最多 5 分钟。",c:"HuntTask.waitForSpawns",n:[["刷出来了","find"],["等不到","no"]]},
+ no:{k:"b",t:"这一步失败",d:"说明原因。",c:"HuntTask.fail",n:[]}
+}},
+{id:"drop", group:"任务", title:"捡掉落物", lead:"掉落物和方块同等价值，成本只算距离。", start:"start", nodes:{
+ start:{k:"a",t:"全量搜索到它旁边",d:"能到才出发。",c:"DropFetch.start",n:[["能到","track"],["到不了","skip"]]},
+ track:{k:"q",t:"进了拾取范围？",d:"原版自动吸进来。",c:"DropFetch.tick",n:[["是","got"],["否","moved"]]},
+ got:{k:"g",t:"捡到了",d:"回到选下一个来源。",n:[]},
+ moved:{k:"q",t:"离物品 16 格内，它又动了？",d:"远时继续走完整路线。",c:"DropFetch.tick",n:[["是，小窗口追","aim"],["否","track"]]},
+ aim:{k:"a",t:"重新瞄准",d:"每 5 刻最多一次。",c:"DropFetch.aim",n:[["继续","track"],["路没了","skip"]]},
+ skip:{k:"b",t:"这个不要了",d:"记下，换下一个来源。",c:"DropFetch.tick",n:[]}
+}},
+{id:"craft", group:"任务", title:"合成", lead:"走原版配方书流程。", start:"need", nodes:{
+ need:{k:"q",t:"要工作台吗？",d:"2×2 能做的不要。",c:"CraftStep.tick",n:[["要","table"],["不要","make"]]},
+ table:{k:"a",t:"放工作台",d:"不用别人放的。",c:"Station.placeTick",n:[["看放工作台","jump:station"],["放好了","make"]]},
+ make:{k:"a",t:"合成",d:"放好材料，shift 点击结果。",c:"CraftStep.craft",n:[["做完","back"]]},
+ back:{k:"g",t:"收回工作台",d:"挖掉捡回来。",c:"Station.retrieve",n:[]}
+}},
+{id:"smelt", group:"任务", title:"熔炼", lead:"放自己的熔炉，放料和燃料，等，取，收回。这条链没有自动测试。", start:"place", nodes:{
+ place:{k:"a",t:"放熔炉",d:"身边放不下就去有地方的位置。",c:"SmeltStep.tick",n:[["看放工作台","jump:station"],["放好了","load"],["放不下","bad"]]},
+ load:{k:"a",t:"放料和燃料",d:"燃料不够时用背包里别的。",c:"SmeltStep.load",n:[["放好了","wait"],["材料没了","unload"]]},
+ wait:{k:"a",t:"等",d:"按原版速度。",c:"SmeltStep.tick",n:[["烧好了","unload"]]},
+ unload:{k:"a",t:"取出",d:"放回背包。",c:"SmeltStep.tick",n:[["取完","pick"]]},
+ pick:{k:"g",t:"收回熔炉",d:"没有镐子就留在原地，告诉你坐标。",c:"SmeltStep.tick",n:[]},
+ bad:{k:"b",t:"这一步失败",d:"说明原因。",n:[]}
+}},
+{id:"station", group:"任务", title:"放工作台或熔炉", lead:"身边放不下就走到有地方的位置。", start:"here", nodes:{
+ here:{k:"q",t:"身边能放吗？",d:"Placement 判断，拒绝都有原因。",c:"Station.place",n:[["能","ok"],["不能","shore"]]},
+ ok:{k:"g",t:"放好了",d:"用完收回。",n:[]},
+ shore:{k:"q",t:"已加载范围内有干地？",d:"找最近的地方作方向。",c:"Station.nearestDryGround",n:[["有","walk"],["没有","land"]]},
+ walk:{k:"q",t:"脚在水里吗？",d:"走满 3 次还不行，在水里就去找陆地。",c:"Station.setOff",n:[["是，用洪水","jump:flood"],["否，全量搜索","jump:goto"],["走到了","here"]]},
+ land:{k:"a",t:"探索陆地群系",d:"跳过海洋和河流。",c:"Station.lookForLand",n:[["到了","here"],["找不到","bad"]]},
+ bad:{k:"b",t:"这一步失败",d:"说明原因。",n:[]}
+}},
+{id:"water", group:"任务", title:"打水", lead:"找水面，装满水桶。", start:"find", nodes:{
+ find:{k:"q",t:"附近有水？",d:"在已加载范围找水面。",c:"FetchWaterTask.find",n:[["有","go"],["没有","far"]]},
+ far:{k:"a",t:"去最近的水域群系",d:"用种子算，不加载区块。",c:"FetchWaterTask.locate",n:[["到了","find"]]},
+ go:{k:"a",t:"走到水边",d:"站在水面格 2 格内。",c:"FetchWaterTask.approach",n:[["到了","fill"],["走不通","find"]]},
+ fill:{k:"g",t:"装水",d:"对着水面用桶。",c:"FetchWaterTask.fill",n:[]}
+}},
+{id:"come", group:"任务", title:"回到玩家身边", lead:"也是任务结束后的回程。", start:"who", nodes:{
+ who:{k:"q",t:"玩家在线、同一维度？",d:"玩家死了或重进，按身份重新找人。",c:"ComeTask.followTick",n:[["是","near"],["否","stop"]]},
+ stop:{k:"b",t:"停下",d:"说明原因。",n:[]},
+ near:{k:"q",t:"3 格内了？",d:"",c:"ComeTask.followTick",n:[["是","done"],["否","go"]]},
+ done:{k:"g",t:"到了",d:"说“我到了”。",n:[]},
+ go:{k:"a",t:"搜路",d:"玩家移动超过 4 格就换目标。",c:"ComeTask.followTick",n:[["看寻路","jump:goto"],["查实到不了","wait"]]},
+ wait:{k:"a",t:"说明，留在原地等",d:"“你那里我过不去”。你移动后或每 30 秒再搜一次，你挖通路它能自己找来。",c:"ComeTask.followTick",n:[["再搜","go"]]}
+}},
+{id:"goto", group:"寻路内核", title:"寻路 goTo", lead:"所有走路都从这里开始。能不能到只有内核说了算。", start:"kind", nodes:{
+ kind:{k:"q",t:"目标看得到吗？",d:"有确定坐标，在已加载区块，128 格内。",c:"MovementController.goTo",n:[["看得到","locked"],["看不到","tier"]]},
+ locked:{k:"a",t:"全量搜索一次",d:"框住机器人和目标，外加 32 格。最多 100 万格。没有完整路线就不出发。",c:"MovementController.startLocked",n:[["算","astar"]]},
+ tier:{k:"a",t:"窗口搜索",d:"±16 → ±32 → ±64，只看水平方向，先走一段再想。",c:"MovementController.startPlanning",n:[["算","astar"]]},
+ astar:{k:"a",t:"A* 搜路",d:"每格问五种动作：走、游、挖、下挖、搭建。代价是真实的刻数。后台线程算。",c:"LocalPathfinder.step",n:[["每走一步","air"]]},
+ air:{k:"q",t:"走完这步气还够？",d:"还要够游上去。不够的路线丢掉。到目标还要留够干活的气。",c:"LocalPathfinder.airAfter",n:[["够","gate"],["不够","drop"]]},
+ gate:{k:"q",t:"这步要挖，头在水下？",d:"规划层总闸：这种路线不会产生。",c:"LocalPathfinder.clearCost",n:[["否","goal"],["是","drop"]]},
+ drop:{k:"b",t:"这条路不要",d:"继续搜别的。",n:[["继续","astar"]]},
+ goal:{k:"q",t:"结果？",d:"",c:"MovementController.endLocked",n:[["到终点","walk"],["头在水下搜不到","up"],["方块不够","blocks"],["查实到不了","no"]]},
+ up:{k:"a",t:"先上去，再搜一次",d:"水下的结果不算数。",c:"MovementController.endLocked",n:[["看换气","jump:breath"],["上来了","kind"]]},
+ blocks:{k:"a",t:"就地收集方块再试",d:"一次。",c:"MovementController.gatherTick",n:[["再试","kind"]]},
+ walk:{k:"g",t:"走路线",d:"世界变了才重算。",c:"MovementController.adopt",n:[["看移动","jump:step"]]},
+ no:{k:"b",t:"记下到不了",d:"任务写进记忆本 OutOfReach，换目标。",c:"MovementController.endLocked",n:[]}
+}},
+{id:"flood", group:"寻路内核", title:"洪水 findWay", lead:"一次查很多个水里的目标，不挖，气最多的格子先走。", start:"head", nodes:{
+ head:{k:"q",t:"头在水下？",d:"有水下呼吸除外。",c:"MovementController.tickMoving",n:[["是，先上去","jump:breath"],["否","box"]]},
+ box:{k:"a",t:"框范围",d:"目标都比人低，只搜人以下；都比人高，只搜人以上。",c:"MovementController.startWay",n:[["开始搜","run"]]},
+ run:{k:"a",t:"搜所有水和空气",d:"不挖不放，只有水面的冰例外。最多 200 万格。",c:"LocalPathfinder.step",n:[["能到","walk"],["到不了","side"]]},
+ side:{k:"q",t:"只搜了一边？",d:"可能错过翻过高处的路。",c:"MovementController.endWay",n:[["是，全部再搜","run"],["否","dig"]]},
+ dig:{k:"a",t:"A* 查最近一个",d:"这一步能挖，所以能从干洞穴挖进水洞。",c:"MovementController.endWay",n:[["能到","walk"],["到不了","no"]]},
+ walk:{k:"g",t:"走路线",d:"这批目标里最先碰到的。",c:"MovementController.adopt",n:[]},
+ no:{k:"b",t:"这批都记下",d:"走开去别处。",c:"GatherTask.way",n:[]}
+}}
+];
+
+const COV = {"AcquireTask.giveUp": {"c": 6, "m": 4, "l": 390, "f": "task/AcquireTask.java"}, "AcquireTask.plan": {"c": 65, "m": 15, "l": 229, "f": "task/AcquireTask.java"}, "AcquireTask.stepFailed": {"c": 8, "m": 0, "l": 151, "f": "task/AcquireTask.java"}, "BotPlayer.behave": {"c": 33, "m": 1, "l": 84, "f": "bot/BotPlayer.java"}, "BotPlayer.breathe": {"c": 50, "m": 0, "l": 287, "f": "bot/BotPlayer.java"}, "BotPlayer.combat": {"c": 27, "m": 17, "l": 382, "f": "bot/BotPlayer.java"}, "BotPlayer.tryEat": {"c": 28, "m": 1, "l": 513, "f": "bot/BotPlayer.java"}, "ComeTask.followTick": {"c": 24, "m": 3, "l": 38, "f": "task/ComeTask.java"}, "CraftStep.craft": {"c": 20, "m": 5, "l": 71, "f": "task/CraftStep.java"}, "CraftStep.tick": {"c": 10, "m": 0, "l": 53, "f": "task/CraftStep.java"}, "DropFetch.aim": {"c": 7, "m": 0, "l": 151, "f": "task/DropFetch.java"}, "DropFetch.start": {"c": 8, "m": 0, "l": 90, "f": "task/DropFetch.java"}, "DropFetch.tick": {"c": 18, "m": 15, "l": 104, "f": "task/DropFetch.java"}, "Explorer.Explorer": {"c": 11, "m": 0, "l": 40, "f": "task/Explorer.java"}, "Explorer.next": {"c": 26, "m": 0, "l": 149, "f": "task/Explorer.java"}, "FetchWaterTask.approach": {"c": 5, "m": 3, "l": 188, "f": "task/FetchWaterTask.java"}, "FetchWaterTask.fill": {"c": 23, "m": 8, "l": 200, "f": "task/FetchWaterTask.java"}, "FetchWaterTask.find": {"c": 12, "m": 4, "l": 86, "f": "task/FetchWaterTask.java"}, "FetchWaterTask.locate": {"c": 6, "m": 11, "l": 115, "f": "task/FetchWaterTask.java"}, "GatherTask.afterHit": {"c": 16, "m": 15, "l": 719, "f": "task/GatherTask.java"}, "GatherTask.approach": {"c": 18, "m": 0, "l": 607, "f": "task/GatherTask.java"}, "GatherTask.giveUp": {"c": 5, "m": 6, "l": 901, "f": "task/GatherTask.java"}, "GatherTask.goNear": {"c": 7, "m": 0, "l": 429, "f": "task/GatherTask.java"}, "GatherTask.lookFurther": {"c": 22, "m": 5, "l": 444, "f": "task/GatherTask.java"}, "GatherTask.mine": {"c": 20, "m": 1, "l": 633, "f": "task/GatherTask.java"}, "GatherTask.nextTarget": {"c": 65, "m": 2, "l": 279, "f": "task/GatherTask.java"}, "GatherTask.prepare": {"c": 19, "m": 10, "l": 207, "f": "task/GatherTask.java"}, "GatherTask.scan": {"c": 2, "m": 0, "l": 271, "f": "task/GatherTask.java"}, "GatherTask.spent": {"c": 6, "m": 0, "l": 541, "f": "task/GatherTask.java"}, "GatherTask.startLocate": {"c": 0, "m": 9, "l": 496, "f": "task/GatherTask.java"}, "GatherTask.startTravel": {"c": 10, "m": 0, "l": 551, "f": "task/GatherTask.java"}, "GatherTask.travel": {"c": 21, "m": 8, "l": 565, "f": "task/GatherTask.java"}, "GatherTask.way": {"c": 22, "m": 0, "l": 400, "f": "task/GatherTask.java"}, "Guard.ofTheSea": {"c": 2, "m": 0, "l": 62, "f": "guard/Guard.java"}, "HuntTask.chase": {"c": 30, "m": 11, "l": 559, "f": "task/HuntTask.java"}, "HuntTask.explore": {"c": 17, "m": 7, "l": 399, "f": "task/HuntTask.java"}, "HuntTask.fail": {"c": 0, "m": 3, "l": 619, "f": "task/HuntTask.java"}, "HuntTask.find": {"c": 30, "m": 2, "l": 204, "f": "task/HuntTask.java"}, "HuntTask.lockOn": {"c": 6, "m": 0, "l": 249, "f": "task/HuntTask.java"}, "HuntTask.lookFurther": {"c": 21, "m": 8, "l": 315, "f": "task/HuntTask.java"}, "HuntTask.waitForSpawns": {"c": 0, "m": 22, "l": 523, "f": "task/HuntTask.java"}, "LocalPathfinder.airAfter": {"c": 20, "m": 0, "l": 508, "f": "path/LocalPathfinder.java"}, "LocalPathfinder.clearCost": {"c": 33, "m": 1, "l": 1035, "f": "path/LocalPathfinder.java"}, "LocalPathfinder.step": {"c": 61, "m": 1, "l": 284, "f": "path/LocalPathfinder.java"}, "MovementController.adopt": {"c": 12, "m": 0, "l": 1329, "f": "bot/MovementController.java"}, "MovementController.ascendStep": {"c": 30, "m": 2, "l": 2094, "f": "bot/MovementController.java"}, "MovementController.continuePlanning": {"c": 41, "m": 11, "l": 996, "f": "bot/MovementController.java"}, "MovementController.digOut": {"c": 2, "m": 0, "l": 482, "f": "bot/MovementController.java"}, "MovementController.disengage": {"c": 15, "m": 0, "l": 522, "f": "bot/MovementController.java"}, "MovementController.endLocked": {"c": 25, "m": 6, "l": 799, "f": "bot/MovementController.java"}, "MovementController.endWay": {"c": 30, "m": 3, "l": 738, "f": "bot/MovementController.java"}, "MovementController.executeStep": {"c": 20, "m": 6, "l": 1485, "f": "bot/MovementController.java"}, "MovementController.gatherTick": {"c": 18, "m": 3, "l": 1438, "f": "bot/MovementController.java"}, "MovementController.goTo": {"c": 21, "m": 0, "l": 136, "f": "bot/MovementController.java"}, "MovementController.headForAir": {"c": 5, "m": 0, "l": 511, "f": "bot/MovementController.java"}, "MovementController.mine": {"c": 36, "m": 7, "l": 1620, "f": "bot/MovementController.java"}, "MovementController.startLocked": {"c": 15, "m": 0, "l": 781, "f": "bot/MovementController.java"}, "MovementController.startPlanning": {"c": 16, "m": 0, "l": 838, "f": "bot/MovementController.java"}, "MovementController.startWay": {"c": 33, "m": 0, "l": 697, "f": "bot/MovementController.java"}, "MovementController.stepTimedOut": {"c": 3, "m": 3, "l": 1348, "f": "bot/MovementController.java"}, "MovementController.tick": {"c": 17, "m": 0, "l": 540, "f": "bot/MovementController.java"}, "MovementController.tickMoving": {"c": 44, "m": 2, "l": 569, "f": "bot/MovementController.java"}, "SmeltStep.load": {"c": 0, "m": 21, "l": 95, "f": "task/SmeltStep.java"}, "SmeltStep.tick": {"c": 0, "m": 19, "l": 55, "f": "task/SmeltStep.java"}, "Station.lookForLand": {"c": 19, "m": 2, "l": 140, "f": "task/Station.java"}, "Station.nearestDryGround": {"c": 20, "m": 0, "l": 169, "f": "task/Station.java"}, "Station.place": {"c": 17, "m": 3, "l": 215, "f": "task/Station.java"}, "Station.placeTick": {"c": 15, "m": 5, "l": 79, "f": "task/Station.java"}, "Station.retrieve": {"c": 14, "m": 9, "l": 258, "f": "task/Station.java"}, "Station.setOff": {"c": 15, "m": 0, "l": 115, "f": "task/Station.java"}};
+const byId = Object.fromEntries(CHAINS.map(c => [c.id, c]));
+const W = 166, H = 66, GX = 34, GY = 62, PAD = 22;
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m]));
+const KIND = {q:"判断", a:"动作", g:"成功", b:"失败", e:"结束"};
+let chain, sel, trail = [];
+
+function covColor(p){ return p == null ? "var(--line)" : p >= 80 ? "var(--g)" : p >= 30 ? "var(--q)" : "var(--b)"; }
+function pct(c){ const v = COV[c]; return v ? Math.round(100 * v.c / Math.max(1, v.c + v.m)) : null; }
+function chainPct(ch){
+  const seen = new Set(); let c = 0, m = 0;
+  Object.values(ch.nodes).forEach(n => { if (n.c && COV[n.c] && !seen.has(n.c)) { seen.add(n.c); c += COV[n.c].c; m += COV[n.c].m; } });
+  return c + m ? Math.round(100 * c / (c + m)) : null;
+}
+
+/* Rows by distance from the start; an edge to a row at or above its own is drawn dashed. */
+function layout(ch){
+  const depth = {[ch.start]: 0}, queue = [ch.start];
+  while (queue.length) {
+    const id = queue.shift();
+    (ch.nodes[id].n || []).forEach(([, to]) => {
+      if (!to.startsWith("jump:") && !(to in depth)) { depth[to] = depth[id] + 1; queue.push(to); }
+    });
+  }
+  let last = Math.max(...Object.values(depth));
+  Object.keys(ch.nodes).forEach(id => { if (!(id in depth)) depth[id] = ++last; });
+  const rows = {};
+  Object.keys(ch.nodes).forEach(id => (rows[depth[id]] = rows[depth[id]] || []).push(id));
+  const widest = Math.max(...Object.values(rows).map(r => r.length));
+  const width = PAD * 2 + widest * W + (widest - 1) * GX, pos = {};
+  Object.entries(rows).forEach(([d, ids]) => {
+    const rowW = ids.length * W + (ids.length - 1) * GX;
+    ids.forEach((id, i) => pos[id] = {x: (width - rowW) / 2 + i * (W + GX), y: PAD + d * (H + GY)});
+  });
+  return {pos, width, height: PAD * 2 + (Object.keys(rows).length) * (H + GY) - GY};
+}
+
+function drawBoard(){
+  const {pos, width, height} = layout(chain), st = $("stage");
+  st.style.width = width + "px"; st.style.height = height + "px"; st.innerHTML = "";
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("class", "wires"); svg.setAttribute("width", width); svg.setAttribute("height", height);
+  const steps = new Set(); for (let i = 1; i < trail.length; i++) if (trail[i - 1].c === chain.id && trail[i].c === chain.id) steps.add(trail[i - 1].n + ">" + trail[i].n);
+  let out = "";
+  Object.entries(chain.nodes).forEach(([id, n]) => (n.n || []).forEach(([label, to], i) => {
+    if (to.startsWith("jump:") || !pos[to]) return;
+    const a = pos[id], b = pos[to], back = b.y <= a.y;
+    const x1 = a.x + W / 2 + (i - (n.n.length - 1) / 2) * 16, y1 = back ? a.y + H / 2 : a.y + H, x2 = b.x + W / 2, y2 = back ? b.y + H / 2 : b.y;
+    const off = a.x >= b.x ? W / 2 + 14 : -W / 2 - 14;
+    const d = back ? `M${a.x + (off > 0 ? W : 0)} ${y1} C${a.x + (off > 0 ? W : 0) + (off > 0 ? 28 : -28)} ${y1},${b.x + (off > 0 ? W : 0) + (off > 0 ? 28 : -28)} ${y2},${b.x + (off > 0 ? W : 0)} ${y2}`
+      : `M${x1} ${y1} C${x1} ${y1 + 28},${x2} ${y2 - 28},${x2} ${y2}`;
+    const on = steps.has(id + ">" + to);
+    out += `<path class="wire${back ? " back" : ""}${on ? " on" : ""}" d="${d}"/>`;
+    if (!back && n.n.length > 1) out += `<text class="wl" x="${(x1 + x2) / 2}" y="${y1 + 22}" text-anchor="middle">${esc(label.slice(0, 11))}</text>`;
+  }));
+  svg.innerHTML = out; st.appendChild(svg);
+  const visited = new Set(trail.filter(t => t.c === chain.id).map(t => t.n));
+  Object.entries(chain.nodes).forEach(([id, n]) => {
+    const b = document.createElement("button"), p = n.c ? pct(n.c) : null;
+    b.className = `node k-${n.k}` + (id === sel ? " sel" : visited.has(id) ? " past" : "");
+    b.style.left = pos[id].x + "px"; b.style.top = pos[id].y + "px"; b.style.setProperty("--cov", covColor(p));
+    b.innerHTML = `<b>${esc(n.t)}</b>${p != null ? `<span class="pc">${p}%</span>` : ""}`;
+    b.onclick = () => go(id);
+    st.appendChild(b);
+    if (id === sel && $("board").scrollTo) $("board").scrollTo({left: pos[id].x - 60, top: pos[id].y - 60});
+  });
+}
+
+function drawSide(){
+  const n = chain.nodes[sel], v = n.c && COV[n.c], p = n.c ? pct(n.c) : null;
+  let h = `<div class="kind k-${n.k}">${KIND[n.k]}</div><h3>${esc(n.t)}</h3>${n.d ? `<p>${esc(n.d)}</p>` : ""}`;
+  if ((n.n || []).length) {
+    h += `<div class="opts">` + n.n.map(([label, to], i) => {
+      const j = to.startsWith("jump:"), dest = j ? byId[to.slice(5)].title : chain.nodes[to].t;
+      return `<button class="opt${j ? " jump" : ""}" data-i="${i}"><span>${esc(label)}</span><i>${j ? "→ " : ""}${esc(dest)}</i></button>`;
+    }).join("") + `</div>`;
+  }
+  if (n.c) {
+    h += `<div class="code">${esc(v ? v.f + ":" + v.l : n.c)}<br>${esc(n.c)}</div>`;
+    if (v) h += `<div class="covbar"><span style="width:${p}%;background:${covColor(p)}"></span></div><div class="meta">测试跑过这个函数 ${p}% 的代码（${v.c} 行跑过，${v.m} 行没跑过）</div>`;
+  }
+  h += `<div class="trail">走过的路<ol>` + trail.map((t, i) => `<li><button data-t="${i}">${esc(byId[t.c].nodes[t.n].t)}</button></li>`).join("") + `</ol></div>`;
+  $("side").innerHTML = h;
+  $("side").querySelectorAll(".opt").forEach(b => b.onclick = () => {
+    const to = n.n[+b.dataset.i][1];
+    to.startsWith("jump:") ? open(to.slice(5), true) : go(to);
+  });
+  $("side").querySelectorAll("[data-t]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.t, t = trail[i]; trail = trail.slice(0, i + 1);
+    chain = byId[t.c]; sel = t.n; render();
+  });
+}
+
+function drawNav(){
+  const nav = $("nav"); nav.innerHTML = ""; let group = "";
+  CHAINS.forEach(c => {
+    if (c.group !== group) { group = c.group; const h = document.createElement("h2"); h.textContent = group; nav.appendChild(h); }
+    const b = document.createElement("button"), p = chainPct(c);
+    b.innerHTML = `<span>${esc(c.title)}</span>${p != null ? `<span class="mini">${p}%</span>` : ""}`;
+    if (c === chain) b.setAttribute("aria-current", "true");
+    b.onclick = () => open(c.id, false);
+    nav.appendChild(b);
+  });
+}
+
+function render(){
+  $("ttl").textContent = chain.title; $("lead").textContent = chain.lead;
+  drawNav(); drawBoard(); drawSide();
+  try { history.replaceState(null, "", "#" + chain.id); } catch (e) {}
+}
+function go(id){ sel = id; trail.push({c: chain.id, n: id}); render(); }
+function open(id, keep){
+  chain = byId[id]; sel = chain.start;
+  if (!keep) trail = [];
+  trail.push({c: chain.id, n: sel}); render();
+}
+$("reset").onclick = () => open(chain.id, false);
+open(byId[location.hash.slice(1)] ? location.hash.slice(1) : "order", false);
+</script>
