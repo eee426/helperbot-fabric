@@ -4,9 +4,10 @@
 #   scripts\run-scenarios.ps1 W -Repeat 5     the W scenes 5 times over, each on a fresh world,
 #                                             then a pass count per scene (scenes with chance in
 #                                             them, fish and drifting drops, need more than one run)
+#   scripts/run-scenarios.ps1 -Coverage       then gradlew coverageReport: build/reports/jacoco/coverageReport/html/index.html
 # The report is written to run\scenario-report.md (with -Repeat: run\repeat\report-N.md and
 # run\repeat\summary.md). Scenes: src\main\java\com\vale\helperbot\test\Scenarios.java
-param([string[]]$Only = @("all"), [int]$Repeat = 1)
+param([string[]]$Only = @("all"), [int]$Repeat = 1, [switch]$Coverage)
 
 $root = Split-Path -Parent $PSScriptRoot
 $run = Join-Path $root "run"
@@ -34,7 +35,7 @@ function Invoke-Scenes {
 	if (Test-Path $world) { Remove-Item -Recurse -Force $world }
 	if (Test-Path $report) { Remove-Item -Force $report }
 	$env:HELPERBOT_SCENARIOS = $Only -join ","
-	& (Join-Path $root "gradlew.bat") -p $root runServer --console=plain 2>&1 |
+	& (Join-Path $root "gradlew.bat") -p $root runServer $(if ($Coverage) { "-Pcoverage" }) --console=plain 2>&1 |
 		Select-String -Pattern "SCENARIO|Exception|ERROR" | ForEach-Object { $_.Line }
 	Remove-Item Env:\HELPERBOT_SCENARIOS
 }

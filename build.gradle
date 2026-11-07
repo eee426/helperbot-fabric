@@ -1,5 +1,6 @@
 plugins {
 	id 'fabric-loom' version "${loom_version}"
+	id 'jacoco'
 }
 
 version = project.version
@@ -33,4 +34,28 @@ tasks.withType(JavaCompile).configureEach {
 java {
 	sourceCompatibility = JavaVersion.VERSION_21
 	targetCompatibility = JavaVersion.VERSION_21
+}
+
+
+// Coverage of the test scenes, only when asked: scripts/run-scenarios.ps1 -Coverage, then gradlew coverageReport.
+// The report is build/reports/jacoco/coverageReport/html/index.html; deleting build/ clears it.
+jacoco {
+	toolVersion = '0.8.13'
+}
+
+if (project.hasProperty('coverage')) {
+	jacoco.applyTo(tasks.named('runServer').get())
+	tasks.named('runServer') {
+		extensions.getByType(JacocoTaskExtension).includes = ['com.vale.helperbot.*']
+	}
+}
+
+tasks.register('coverageReport', JacocoReport) {
+	executionData.from(layout.buildDirectory.file('jacoco/runServer.exec'))
+	sourceDirectories.from(sourceSets.main.java.srcDirs)
+	classDirectories.from(sourceSets.main.output.classesDirs)
+	reports {
+		html.required = true
+		csv.required = true
+	}
 }
