@@ -53,7 +53,6 @@ public final class PlanBench {
 						case CraftPlanner.Gather g -> "gather " + g.item() + "x" + g.count();
 						case CraftPlanner.Hunt h -> "hunt " + h.item() + "x" + h.count();
 						case CraftPlanner.Fill f -> "fill x" + f.count();
-						case CraftPlanner.Loot l -> "loot " + l.item() + "x" + l.count();
 						case CraftPlanner.Craft c -> "craft " + c.recipe().result() + "x" + c.times() * c.recipe().resultCount();
 						case CraftPlanner.Smelt s -> "smelt " + s.recipe().result() + "x" + s.count() * s.recipe().resultCount();
 					}).append(" > ");
@@ -69,6 +68,17 @@ public final class PlanBench {
 	/** Every item from an empty bag: can it be planned, by what kinds of step, and if not why (see scripts/run-sweep.ps1). */
 	private static void sweep(ServerLevel level, FakePlayer bot) {
 		long start = System.nanoTime();
+		// What the biome knowledge says, to check against the world: block, then its biomes, richest first.
+		try (java.io.PrintWriter out = new java.io.PrintWriter("biome-table.txt", java.nio.charset.StandardCharsets.UTF_8)) {
+			var table = new java.util.TreeMap<String, Map<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>, Double>>();
+			BiomeHints.table(level).forEach((block, biomes) -> table.put(net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(block).getPath(), biomes));
+			table.forEach((block, biomes) -> out.println(block + "	" + biomes.entrySet().stream()
+					.sorted(Map.Entry.<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>, Double>comparingByValue().reversed())
+					.map(e -> e.getKey().unwrapKey().map(k -> k.identifier().getPath()).orElse("?") + "=" + String.format("%.2f", e.getValue()))
+					.toList()));
+		} catch (java.io.IOException e) {
+			HelperBot.LOGGER.error("Biome table failed", e);
+		}
 		try (java.io.PrintWriter out = new java.io.PrintWriter("plan-sweep.txt", java.nio.charset.StandardCharsets.UTF_8)) {
 			for (Item item : net.minecraft.core.registries.BuiltInRegistries.ITEM) {
 				String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).toString();

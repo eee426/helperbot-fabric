@@ -2,7 +2,6 @@ package com.vale.helperbot.knowledge;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
-import net.minecraft.resources.ResourceKey;
 import com.vale.helperbot.path.Air;
 import com.vale.helperbot.path.BreakTimes;
 import com.vale.helperbot.path.Escape;
@@ -31,7 +30,6 @@ import net.minecraft.world.level.block.entity.FuelValues;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.structure.Structure;
-import net.minecraft.world.level.storage.loot.LootTable;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -53,7 +51,7 @@ import java.util.Set;
  * and plans again from the real inventory, which absorbs any surprises.
  */
 public final class CraftPlanner {
-	public sealed interface Action permits Gather, Hunt, Craft, Smelt, Fill, Loot {
+	public sealed interface Action permits Gather, Hunt, Craft, Smelt, Fill {
 	}
 
 	public record Gather(Item item, int count) implements Action {
@@ -71,10 +69,6 @@ public final class CraftPlanner {
 
 	/** Fill {@code count} empty buckets with water. */
 	public record Fill(int count) implements Action {
-	}
-
-	/** Out of the chests of these structures. */
-	public record Loot(Item item, int count, Set<Holder<Structure>> where, Set<ResourceKey<LootTable>> tables) implements Action {
 	}
 
 	/** Actions in order; empty if the inventory already has everything. Null actions = impossible. */
@@ -107,8 +101,6 @@ public final class CraftPlanner {
 	private static final double PLACE_TICKS = 5;
 	/** Running after what it hit, per kill. */
 	private static final int CHASE_BLOCKS = 12;
-	/** Chests it counts on in one structure, and from one to the next. */
-	private static final int CHESTS_PER_VISIT = 3, BETWEEN_CHESTS_BLOCKS = 24;
 	/** Sources this close are one vein. */
 	private static final int VEIN_BLOCKS = 4;
 	/** To the next herd, once the animals around are used up. */
@@ -241,8 +233,6 @@ public final class CraftPlanner {
 		final Map<Item, Integer> inv;
 		final List<Action> actions;
 		double cost;
-		/** Some of it hangs on what's in a chest. */
-		boolean drawn;
 
 		State(Map<Item, Integer> inv) {
 			this(inv, new ArrayList<>(), 0);
@@ -255,19 +245,12 @@ public final class CraftPlanner {
 		}
 
 		State copy() {
-			State copy = new State(new HashMap<>(inv), new ArrayList<>(actions), cost);
-			copy.drawn = drawn;
-			return copy;
+			return new State(new HashMap<>(inv), new ArrayList<>(actions), cost);
 		}
 
-		/**
-		 * Better than {@code other} (which may be null). What's in a chest is a draw: a plan that
-		 * doesn't count on one beats any that does, whatever each costs. Going for chests only for
-		 * what else can't be had has to hold for the whole plan: else iron nuggets from a chest, for
-		 * want of any other source of nuggets, beat mining iron.
-		 */
+		/** Better than {@code other} (which may be null). */
 		boolean beats(State other) {
-			return other == null || (drawn != other.drawn ? !drawn : cost < other.cost);
+			return other == null || cost < other.cost;
 		}
 
 		void become(State other) {
@@ -276,7 +259,6 @@ public final class CraftPlanner {
 			actions.clear();
 			actions.addAll(other.actions);
 			cost = other.cost;
-			drawn = other.drawn;
 		}
 
 		int have(Item item) {
@@ -304,16 +286,19 @@ public final class CraftPlanner {
 		if (n <= 0) {
 			return true;
 		}
-		if (depth > MAX_DEPTH || resolving.contains(item) || deadEnd(item, resolving)) {
-			return false; // too deep, or a loop (e.g. iron ingot <-> iron block)
+		if (resolving.contains(item) || deadEnd(item, resolving)) {
+			return false; // a loop (e.g. iron ingot <-> iron block), or known not to work
 		}
-		if (--budget < 0) {
-			return false; // recipe trees can branch a lot: stop exploring, keep what we have
+		if (depth > MAX_DEPTH || --budget < 0) {
+			cutShort++;
+			return false; // too deep, or the search has had its share: keep what we have
 		}
 		if (System.nanoTime() > deadline) {
 			timedOut = true;
+			cutShort++;
 			return false;
 		}
+		int cutsBefore = cutShort;
 		resolving.add(item);
 		State best = null;
 
@@ -351,15 +336,17 @@ public final class CraftPlanner {
 				best = t;
 			}
 		}
-		// Recipes, cheapest-looking first (see estimate), and only those that could compete: a way
-		// estimated at more than SLACK times the cheapest isn't searched at all. Exploring every
-		// recipe of every ingredient used up the whole search budget even for a stone pickaxe.
+		// Recipes, cheapest-looking first (see estimate). The ones that can't compete aren't
+		// searched: what a way takes at the very least (see #floor) already more than what's in hand.
 		List<Object> ways = new ArrayList<>();
 		Map<Object, Double> wayCost = new HashMap<>();
 		int tried = 0;
 		for (RecipeIndex.Craft craft : RecipeIndex.craftsFor(level, item)) {
 			if (tried++ >= MAX_RECIPES) {
 				break;
+			}
+			if (swapsWithin(craft)) {
+				continue;
 			}
 			ways.add(craft);
 			wayCost.put(craft, craftWay(s, craft, n));
@@ -369,40 +356,30 @@ public final class CraftPlanner {
 			wayCost.put(smelt, smeltWay(s, smelt, n));
 		}
 		ways.sort(Comparator.comparingDouble(wayCost::get));
-		// Against what worked, never what only looked good: an estimate sorts, it doesn't rule out. (A
-		// way that merely looked cheap, iron ingots out of iron blocks, ruled out the real one,
-		// smelting, and left it hunting zombies.)
-		double sure = best == null ? Double.POSITIVE_INFINITY : best.cost - s.cost;
 		for (Object way : ways) {
-			if (best != null && settled(s, best) && wayCost.get(way) > SLACK * sure) {
-				break; // sorted: the rest look even worse
+			// Never ruled out by what it only looks like: the estimate is an average, and an average
+			// above twice the best once skipped smelting gold, the way that worked.
+			if (best != null && wayFloor(s, way, n) >= best.cost - s.cost) {
+				continue;
 			}
 			State t = s.copy();
 			boolean ok = way instanceof RecipeIndex.Craft craft
 					? craftInto(t, craft, n, depth, resolving, limit(s, best))
 					: smeltInto(t, (RecipeIndex.Smelt) way, n, depth, resolving, limit(s, best));
-			if (ok && settled(s, t)) {
-				sure = Math.min(sure, wayCost.get(way));
-			}
 			if (ok && t.beats(best)) {
 				best = t;
 			}
 		}
 		resolving.remove(item);
-		// What's in a chest is a draw: only when nothing surer gets it.
-		Map<Holder<Structure>, Double> chests = best == null ? chestSources(item) : Map.of();
-		if (!chests.isEmpty()) {
-			best = s.copy();
-			best.drawn = true;
-			best.cost += lootCost(chests, n);
-			best.actions.add(new Loot(item, n, chests.keySet(), StructureIndex.tables(level, item, chests.keySet())));
-		}
 		if (best == null) {
-			if (ways.isEmpty() && prey.isEmpty() && chests.isEmpty() && !huntProblem.containsKey(item) && !gatherable(item)
+			if (ways.isEmpty() && prey.isEmpty() && !huntProblem.containsKey(item) && !gatherable(item)
 					&& Obtainability.refusal(level, item) == null) {
 				problems.add(Component.literal("不知道怎么弄到").append(name(item)).append("：挖、打、做都得不到"));
 			}
-			deadEnds.computeIfAbsent(item, i -> new ArrayList<>()).add(new HashSet<>(resolving));
+			if (cutShort == cutsBefore) {
+				// Only a real dead end: one that was cut short (too deep, out of budget) may work elsewhere.
+				deadEnds.computeIfAbsent(item, i -> new ArrayList<>()).add(new HashSet<>(resolving));
+			}
 			return false;
 		}
 		s.become(best);
@@ -427,6 +404,8 @@ public final class CraftPlanner {
 	}
 
 	private final Map<Item, List<Set<Item>>> deadEnds = new HashMap<>();
+	/** Searches stopped for depth, budget or time so far: a failure under one of those proves nothing. */
+	private int cutShort;
 
 	/**
 	 * Branch and bound: a way that already costs more than the best one found can stop there.
@@ -434,13 +413,9 @@ public final class CraftPlanner {
 	 * rest of ways that can't win.
 	 */
 	private static double limit(State from, State best) {
-		return best == null || !settled(from, best) ? Double.MAX_VALUE : best.cost;
+		return best == null ? Double.MAX_VALUE : best.cost;
 	}
 
-	/** {@code best} is good enough to go by: it doesn't bring a chest in that {@code from} didn't have. */
-	private static boolean settled(State from, State best) {
-		return !best.drawn || from.drawn;
-	}
 
 	private boolean craftInto(State t, RecipeIndex.Craft craft, int n, int depth, Set<Item> resolving, double limit) {
 		int times = (n + craft.resultCount() - 1) / craft.resultCount();
@@ -448,7 +423,10 @@ public final class CraftPlanner {
 			return false;
 		}
 		for (Map.Entry<Ingredient, Integer> e : group(craft.ingredients()).entrySet()) {
-			if (t.cost >= limit || !acquireIngredient(t, e.getKey(), e.getValue() * times, depth, resolving)) {
+			if (t.cost >= limit) {
+				return false;
+			}
+			if (!acquireIngredient(t, e.getKey(), e.getValue() * times, depth, resolving)) {
 				return false;
 			}
 		}
@@ -498,14 +476,24 @@ public final class CraftPlanner {
 		// white last). The rest are for when those turn out not to work.
 		State best = null;
 		int tried = 0;
-		for (Item option : byEstimate(options)) {
-			if (enough(t, best, tried, option, options)) {
-				break;
+		Set<Item> family = options.size() > 1 ? Set.copyOf(options) : null;
+		if (family != null) {
+			choosing.push(family);
+		}
+		try {
+			for (Item option : byEstimate(options)) {
+				if (enough(t, best, tried, option, n)) {
+					break;
+				}
+				tried++;
+				State u = t.copy();
+				if (acquire(u, option, n, depth + 1, resolving) && u.beats(best)) {
+					best = u;
+				}
 			}
-			tried++;
-			State u = t.copy();
-			if (acquire(u, option, n, depth + 1, resolving) && u.beats(best)) {
-				best = u;
+		} finally {
+			if (family != null) {
+				choosing.pop();
 			}
 		}
 		if (best == null) {
@@ -513,6 +501,33 @@ public final class CraftPlanner {
 		}
 		t.become(best);
 		return true;
+	}
+
+	/**
+	 * Families of things it's choosing one of right now (any wool, any bed, any planks): while it
+	 * is, none of them is made out of another one of them. Blue wool for "any wool" is made from
+	 * white wool and blue dye, not dyed from red wool, itself dyed from green...: that went round all
+	 * sixteen colours until the search budget was gone, and a white bed couldn't be planned. A
+	 * family of one isn't one: iron ingots from an iron block are fine.
+	 */
+	private final java.util.ArrayDeque<Set<Item>> choosing = new java.util.ArrayDeque<>();
+
+	/** This recipe makes one of a family being chosen from out of another one of it. */
+	private boolean swapsWithin(RecipeIndex.Craft craft) {
+		for (Set<Item> family : choosing) {
+			if (!family.contains(craft.result())) {
+				continue;
+			}
+			for (Ingredient ingredient : craft.ingredients()) {
+				int shared = 0;
+				for (Item option : RecipeIndex.options(ingredient)) {
+					if (family.contains(option) && ++shared >= 2) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
 	}
 
 	/** Enough fuel for {@code burnTicks} of smelting: from the bag first, else the cheapest fuel to get. */
@@ -608,7 +623,7 @@ public final class CraftPlanner {
 		State best = null;
 		int tried = 0;
 		for (Item tool : byEstimate(tools)) {
-			if (enough(t, best, tried, tool, tools)) {
+			if (enough(t, best, tried, tool, 1)) {
 				break;
 			}
 			tried++;
@@ -643,7 +658,9 @@ public final class CraftPlanner {
 			long started = System.nanoTime();
 			boolean nowhere = BiomeHints.biomesFor(level, sourceBlocks.get(item)).isEmpty();
 			tBiome += System.nanoTime() - started;
-			Set<Holder<Structure>> built = nowhere ? StructureIndex.holding(level, sourceBlocks.get(item)) : Set.of();
+			// What a structure is built with: only what nothing else gives. Gold blocks are made from
+			// ingots, not taken off ruined portals two at a time.
+			Set<Holder<Structure>> built = nowhere && onlyInStructures(item) ? StructureIndex.holding(level, sourceBlocks.get(item)) : Set.of();
 			if (nowhere && built.isEmpty()) {
 				if (!quiet) problems.add(Component.literal("附近没有").append(name(item)).append("，也不知道该去哪找"));
 				return Double.NaN;
@@ -662,14 +679,20 @@ public final class CraftPlanner {
 		return r.cost[all] + rest + (found.size() < MAX_SITES ? ticks(TRIP_BLOCKS) : 0);
 	}
 
-	/** One source of it, somewhere it doesn't know yet: the way from the last one, mining it. */
+	/**
+	 * One source of it, somewhere it doesn't know yet: the way from the last one, mining it. The
+	 * way between them is by how many a chunk of the richest biome has (one in 256 columns: 16
+	 * blocks apart, the whole surface: next to each other).
+	 */
 	private double perSource(Item item) {
 		double mine = Double.POSITIVE_INFINITY;
 		BlockPos here = breaker.blockPosition();
 		for (Block block : sourceBlocks.get(item)) {
 			mine = Math.min(mine, breakTicks(item, here, block.defaultBlockState()));
 		}
-		return ticks(BETWEEN_SOURCES_BLOCKS) + (Double.isInfinite(mine) ? 0 : mine) + PICKUP_TICKS;
+		double perChunk = BiomeHints.richest(level, sourceBlocks.get(item));
+		double apart = perChunk > 0 ? Math.max(1, Math.sqrt(256 / perChunk)) : BETWEEN_SOURCES_BLOCKS;
+		return ticks(apart) + (Double.isInfinite(mine) ? 0 : mine) + PICKUP_TICKS;
 	}
 
 	/**
@@ -817,11 +840,6 @@ public final class CraftPlanner {
 
 	// ---- estimates ----------------------------------------------------------------------
 
-	/**
-	 * Ways estimated at more than this many times the cheapest one aren't searched. Estimates leave
-	 * out what the bag already holds and stations shared between steps, hence the room.
-	 */
-	private static final double SLACK = 2.0;
 
 	/**
 	 * Estimated cost of {@code item} from nothing, in two parts: what each one takes, and what's
@@ -937,12 +955,6 @@ public final class CraftPlanner {
 		}
 		for (RecipeIndex.Smelt smelt : RecipeIndex.smeltsFor(level, item)) {
 			best = cheaper(best, smeltEstimate(smelt));
-		}
-		if (Double.isInfinite(best.total())) {
-			Map<Holder<Structure>, Double> chests = chestSources(item);
-			if (!chests.isEmpty()) {
-				best = split(lootCost(chests, 1), lootCost(chests, SPLIT_AT));
-			}
 		}
 		return best;
 	}
@@ -1086,19 +1098,107 @@ public final class CraftPlanner {
 	}
 
 	/**
-	 * Enough alternatives tried, with {@code next} up: only once one has worked. As long as none
-	 * has, the next is tried however it looks: estimates only sort. (They used to rule out as well:
-	 * the stone pickaxe was dropped for looking dearer than the iron one, which then took iron.)
+	 * Enough alternatives tried, with {@code next} up: when what it takes at the very least is
+	 * already more than the one in hand, or the search has given each kind its share. As long as
+	 * none has worked, the next is tried, however it looks.
 	 */
-	private boolean enough(State from, State best, int tried, Item next, List<Item> options) {
-		if (best == null || !settled(from, best)) {
+	private boolean enough(State from, State best, int tried, Item next, int n) {
+		if (best == null) {
 			return false;
 		}
-		double cheapest = Double.POSITIVE_INFINITY;
-		for (Item option : options) {
-			cheapest = Math.min(cheapest, estimate(option).total());
+		return tried >= MAX_ALTERNATIVES || floor(next, n) >= best.cost - from.cost;
+	}
+
+	// ---- floors -----------------------------------------------------------------------------
+
+	/**
+	 * Ticks that getting {@code n} of {@code item} takes at the very least, by the plan's own costs:
+	 * what can't be had for less in any way, with nothing in the bag. Gathering and hunting are
+	 * what they cost from here; making it is the crafts, the cooking time and the stations it puts
+	 * down, plus the floors of the ingredients. Tools, stations made and fuel count for nothing:
+	 * the bag may have them. A loop, or a recipe tree too deep, counts for nothing too. So a floor
+	 * is never more than what the plan would come to, and a way whose floor is more than what's in
+	 * hand can be left alone without losing the cheapest plan.
+	 */
+	private double floor(Item item, double n) {
+		if (n <= 0) {
+			return 0;
 		}
-		return tried >= MAX_ALTERNATIVES || estimate(next).total() > SLACK * cheapest;
+		Map<Integer, Double> known = floors.computeIfAbsent(item, i -> new HashMap<>());
+		int count = (int) Math.ceil(n);
+		Double cached = known.get(count);
+		if (cached != null) {
+			return cached;
+		}
+		if (flooring.size() > MAX_DEPTH || !flooring.add(item)) {
+			return 0;
+		}
+		double best = Double.POSITIVE_INFINITY;
+		if (gatherable(item)) {
+			double g = gatherCost(item, count, true);
+			if (!Double.isNaN(g)) {
+				best = g;
+			}
+		}
+		if (item == Items.WATER_BUCKET) {
+			best = Math.min(best, ticks(WATER_TRIP_BLOCKS) + FILL_PER_ITEM * count + floor(Items.BUCKET, count));
+		}
+		Map<EntityType<?>, Double> prey = huntSources(item);
+		if (!prey.isEmpty()) {
+			best = Math.min(best, huntCost(prey, count));
+		}
+		for (RecipeIndex.Craft craft : recipes(item)) {
+			int times = (count + craft.resultCount() - 1) / craft.resultCount();
+			double c = CRAFT_PER_OP * times + (craft.needsTable() ? stationUse(Items.CRAFTING_TABLE) : 0);
+			for (Map.Entry<Ingredient, Integer> e : group(craft.ingredients()).entrySet()) {
+				c += optionFloor(e.getKey(), e.getValue() * times);
+			}
+			best = Math.min(best, c);
+		}
+		for (RecipeIndex.Smelt smelt : RecipeIndex.smeltsFor(level, item)) {
+			int inputs = (count + smelt.resultCount() - 1) / smelt.resultCount();
+			best = Math.min(best, stationUse(Items.FURNACE) + (double) inputs * smelt.cookingTime() + optionFloor(smelt.input(), inputs));
+		}
+		flooring.remove(item);
+		known.put(count, best);
+		return best;
+	}
+
+	private final Map<Item, Map<Integer, Double>> floors = new HashMap<>();
+	/** Items whose floor is being worked out: one met again is a loop (see #floor). */
+	private final Set<Item> flooring = new HashSet<>();
+
+	private double optionFloor(Ingredient ingredient, double n) {
+		double best = Double.POSITIVE_INFINITY;
+		for (Item option : RecipeIndex.options(ingredient)) {
+			best = Math.min(best, floor(option, n));
+		}
+		return best;
+	}
+
+	/** The floor of a way, for what this bag doesn't hold already. */
+	private double wayFloor(State s, Object way, int n) {
+		if (way instanceof RecipeIndex.Craft craft) {
+			int times = (n + craft.resultCount() - 1) / craft.resultCount();
+			double c = CRAFT_PER_OP * times + (craft.needsTable() ? stationUse(Items.CRAFTING_TABLE) : 0);
+			for (Map.Entry<Ingredient, Integer> e : group(craft.ingredients()).entrySet()) {
+				c += optionFloor(e.getKey(), missing(s, e.getKey(), e.getValue() * times));
+			}
+			return c;
+		}
+		RecipeIndex.Smelt smelt = (RecipeIndex.Smelt) way;
+		int inputs = (n + smelt.resultCount() - 1) / smelt.resultCount();
+		return stationUse(Items.FURNACE) + (double) inputs * smelt.cookingTime() + optionFloor(smelt.input(), missing(s, smelt.input(), inputs));
+	}
+
+	/** How many of these still to get, after what the bag holds. */
+	private int missing(State s, Ingredient ingredient, int n) {
+		for (Item option : RecipeIndex.options(ingredient)) {
+			if (option != reserved) {
+				n -= s.have(option);
+			}
+		}
+		return Math.max(0, n);
 	}
 
 	/**
@@ -1179,23 +1279,9 @@ public final class CraftPlanner {
 		return StructureIndex.typicalDistance(level, where);
 	}
 
-	/** Structures with chests that may hold it (nothing if that's been tried and failed, or it's restricted). */
-	private Map<Holder<Structure>, Double> chestSources(Item item) {
-		if (noGather.contains(item) || Obtainability.refusal(level, item) != null) {
-			return Map.of();
-		}
-		return chestSources.computeIfAbsent(item, i -> StructureIndex.chests(level, i));
-	}
-
-	private final Map<Item, Map<Holder<Structure>, Double>> chestSources = new HashMap<>();
-
-	/** The way to the nearest structure, for every few chests it takes, and from chest to chest. */
-	private double lootCost(Map<Holder<Structure>, Double> chests, double n) {
-		double perChest = chests.values().stream().mapToDouble(Double::doubleValue).max().orElse(1.0);
-		double opened = Math.ceil(n / Math.max(1e-3, perChest));
-		double trips = Math.ceil(opened / CHESTS_PER_VISIT);
-		return trips * ticks(StructureIndex.typicalDistance(level, chests.keySet()))
-				+ opened * (ticks(BETWEEN_CHESTS_BLOCKS) + PICKUP_TICKS);
+	/** Nothing makes it, and no mob drops it: the one case where a structure is where to go. */
+	private boolean onlyInStructures(Item item) {
+		return RecipeIndex.craftsFor(level, item).isEmpty() && RecipeIndex.smeltsFor(level, item).isEmpty() && huntSources(item).isEmpty();
 	}
 
 	/** Ticks until monsters spawn in the open: none under cover, or at night. */

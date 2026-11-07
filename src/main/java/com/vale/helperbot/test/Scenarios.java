@@ -223,20 +223,6 @@ public final class Scenarios {
 							: c.logHas("血也没回够") ? Scenario.Outcome.pass("等满 30 秒后去打了") : Scenario.Outcome.fail("没等就去打了");
 				}),
 
-				new Scenario("L1", "附近有没开过的结构箱子：去开，只拿要的", 2 * MINUTE, (a, bot, me) -> {
-					a.set(9, Arena.SURFACE, 3, Blocks.CHEST);
-					chestWith(a, 9, 3, "chests/igloo_chest");
-					return new com.vale.helperbot.task.LootTask(me, Items.GOLDEN_APPLE, 1, Mode.NORMAL, java.util.Set.of(), java.util.Set.of(table("chests/igloo_chest")));
-				}, Scenario.has(Items.GOLDEN_APPLE, 1)),
-
-				new Scenario("L2", "开过的箱子是别人的：不碰", 30 * 20, (a, bot, me) -> {
-					a.set(9, Arena.SURFACE, 3, Blocks.CHEST);
-					((net.minecraft.world.level.block.entity.ChestBlockEntity) a.level.getBlockEntity(a.at(9, Arena.SURFACE, 3)))
-							.setItem(0, new ItemStack(Items.GOLDEN_APPLE));
-					return new com.vale.helperbot.task.LootTask(me, Items.GOLDEN_APPLE, 1, Mode.NORMAL, java.util.Set.of(), java.util.Set.of(table("chests/igloo_chest")));
-				}, c -> c.count(Items.GOLDEN_APPLE) > 0 ? Scenario.Outcome.fail("拿了玩家箱子里的")
-						: c.ended() ? Scenario.Outcome.pass("没碰") : null),
-
 				new Scenario("T22", "挖 10 个钻石：一处 4 个的矿堆要挖干净再去下一处", 8 * MINUTE, (a, bot, me) -> {
 					a.fill(5, -50, 5, 6, -50, 6, Blocks.DEEPSLATE_DIAMOND_ORE); // 4, the nearer vein
 					a.fill(25, -50, 25, 28, -49, 25, Blocks.DEEPSLATE_DIAMOND_ORE); // 8, further off
@@ -1560,14 +1546,6 @@ public final class Scenarios {
 	private static final String[] PLAN_RESULT = new String[2];
 	/** W36: whether the bot was seen in the swimming pose. */
 	private static final boolean[] SWAM = new boolean[1];
-
-	private static net.minecraft.resources.ResourceKey<net.minecraft.world.level.storage.loot.LootTable> table(String path) {
-		return net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.LOOT_TABLE, net.minecraft.resources.Identifier.withDefaultNamespace(path));
-	}
-
-	private static void chestWith(Arena a, int x, int z, String path) {
-		((net.minecraft.world.level.block.entity.ChestBlockEntity) a.level.getBlockEntity(a.at(x, Arena.SURFACE, z))).setLootTable(table(path), 1L);
-	}
 
 	private static void hungry(BotPlayer bot, float health, int food) {
 		bot.setHealth(health);

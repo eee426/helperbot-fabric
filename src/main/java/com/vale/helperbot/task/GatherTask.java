@@ -462,8 +462,8 @@ public class GatherTask implements BotTask {
 			return Status.RUNNING;
 		}
 		Explorer explorer = explorers.computeIfAbsent(item, i -> {
-			Map<Holder<Biome>, Double> worth = new HashMap<>();
-			biomes.forEach(b -> worth.put(b, 1.0));
+			// How much a chunk of each has, on average, by how the game makes it (see BiomeHints).
+			Map<Holder<Biome>, Double> worth = new HashMap<>(BiomeHints.perChunk(level, toolFor.keySet()));
 			return new Explorer(level, bot.blockPosition(), worth, BiomeHints.layerFor(level, toolFor.keySet()) != com.vale.helperbot.knowledge.Habitat.Layer.SURFACE, !seaOnly(), SCAN_CHUNKS * 16, mode.speed());
 		});
 		if (!explorer.ready()) {

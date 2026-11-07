@@ -32,7 +32,7 @@ public class AcquireTask implements BotTask {
 	private static final int MAX_PROBLEMS_SHOWN = 4;
 
 	private enum Phase {
-		PLAN, GATHER, HUNT, FILL, LOOT, CRAFT, SMELT, LEAVE_ZONE, RETURN
+		PLAN, GATHER, HUNT, FILL, CRAFT, SMELT, LEAVE_ZONE, RETURN
 	}
 
 	private final ServerPlayer requester;
@@ -61,8 +61,6 @@ public class AcquireTask implements BotTask {
 	private CraftStep craft;
 	private SmeltStep smelt;
 	private FetchWaterTask fill;
-	private LootTask loot;
-	private Item lootItem;
 
 	public AcquireTask(ServerPlayer requester, Item item, int wanted, Mode mode) {
 		this.requester = requester;
@@ -127,23 +125,6 @@ public class AcquireTask implements BotTask {
 					fill = null;
 					phase = Phase.PLAN;
 					failedHere |= s == Status.FAILED;
-				}
-				yield Status.RUNNING;
-			}
-			case LOOT -> {
-				Status s = loot.tick(bot);
-				if (s != Status.RUNNING) {
-					loot.onEnd(bot, s);
-					if (s == Status.FAILED) {
-						if (loot.failure() != null) {
-							bot.log(loot.failure());
-						}
-						stepFailed(bot, lootItem, "找");
-					} else {
-						failures.remove(lootItem);
-					}
-					loot = null;
-					phase = Phase.PLAN;
 				}
 				yield Status.RUNNING;
 			}
@@ -343,11 +324,6 @@ public class AcquireTask implements BotTask {
 				fill = new FetchWaterTask(requester, mode, true);
 				phase = Phase.FILL;
 			}
-			case CraftPlanner.Loot l -> {
-				lootItem = l.item();
-				loot = new LootTask(requester, l.item(), l.count(), mode, l.where(), l.tables());
-				phase = Phase.LOOT;
-			}
 			case CraftPlanner.Craft c -> {
 				bot.movement().stop();
 				craft = new CraftStep(requester, c, outOfReach);
@@ -368,7 +344,6 @@ public class AcquireTask implements BotTask {
 			case CraftPlanner.Gather g -> g.item();
 			case CraftPlanner.Hunt h -> h.item();
 			case CraftPlanner.Fill f -> Items.WATER_BUCKET;
-			case CraftPlanner.Loot l -> l.item();
 			case CraftPlanner.Craft c -> c.recipe().result();
 			case CraftPlanner.Smelt s -> s.recipe().result();
 		};
@@ -381,7 +356,6 @@ public class AcquireTask implements BotTask {
 		for (CraftPlanner.Action action : actions) {
 			switch (action) {
 				case CraftPlanner.Gather g -> planItems.add(g.item());
-				case CraftPlanner.Loot l -> planItems.add(l.item());
 				case CraftPlanner.Hunt h -> planItems.add(h.item());
 				case CraftPlanner.Fill f -> {
 					planItems.add(Items.BUCKET);
@@ -411,7 +385,6 @@ public class AcquireTask implements BotTask {
 				case CraftPlanner.Gather g -> text.append("采集 ").append(name(g.item())).append(" ×" + g.count());
 				case CraftPlanner.Hunt h -> text.append("打猎 ").append(name(h.item())).append(" ×" + h.count());
 				case CraftPlanner.Fill f -> text.append("装水 ").append(name(Items.WATER_BUCKET)).append(" ×" + f.count());
-				case CraftPlanner.Loot l -> text.append("去结构的箱子里找 ").append(name(l.item())).append(" ×" + l.count());
 				case CraftPlanner.Craft c -> text.append("合成 ").append(name(c.recipe().result()))
 						.append(" ×" + c.times() * c.recipe().resultCount());
 				case CraftPlanner.Smelt s -> text.append("熔炼 ").append(name(s.recipe().result()))
@@ -462,9 +435,6 @@ public class AcquireTask implements BotTask {
 		if (hunt != null) {
 			hunt.onEnd(bot);
 		}
-		if (loot != null) {
-			loot.onEnd(bot, status);
-		}
 		switch (status) {
 			case DONE -> bot.say(requester, Component.literal("带回来了 " + Math.max(0, count(bot.getInventory()) - startCount)
 					+ " 个").append(name(item)).append("，右键我拿走吧。"));
@@ -483,7 +453,6 @@ public class AcquireTask implements BotTask {
 			case HUNT -> "获取 " + what + " → " + hunt.describe();
 			case CRAFT -> "获取 " + what + " → " + craft.describe().getString();
 			case FILL -> "获取 " + what + " → " + fill.describe();
-			case LOOT -> "获取 " + what + " → " + loot.describe();
 			case SMELT -> "获取 " + what + " → " + smelt.describe().getString();
 			case LEAVE_ZONE -> "获取 " + what + "：先走出保护区";
 			case RETURN -> "获取 " + what + "：返回";

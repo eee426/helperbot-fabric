@@ -6,7 +6,6 @@ import com.mojang.serialization.JsonOps;
 import com.vale.helperbot.HelperBot;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
-import net.minecraft.core.HolderLookup;
 import net.minecraft.core.HolderSet;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -18,12 +17,9 @@ import net.minecraft.nbt.Tag;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.RegistryOps;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.random.Weighted;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.MobSpawnSettings;
 import net.minecraft.world.level.block.Block;
@@ -34,9 +30,6 @@ import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStruct
 import net.minecraft.world.level.levelgen.structure.pools.StructureTemplatePool;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplateManager;
-import net.minecraft.world.level.storage.loot.LootParams;
-import net.minecraft.world.level.storage.loot.LootTable;
-import net.minecraft.world.level.storage.loot.parameters.LootContextParamSets;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -57,22 +50,18 @@ import java.util.regex.Pattern;
  * <ul>
  * <li>Jigsaw structures (villages, bastions, trial chambers, most modded ones) name their pools,
  * and pools name their templates, which name further pools: followed all the way, that's every
- * piece a structure can have. A template lists its blocks, the loot table of each chest, and its
- * spawners and mobs.
+ * piece a structure can have. A template lists its blocks, and its spawners and mobs.
  * <li>The older structures are built by code, which can't be read. Their parts go by name: all
- * the words of the structure's id in the name of a template folder or of a chest's loot table
- * ({@code mansion} and {@code woodland_mansion/...}), and structures of one structure set are
+ * the words of the structure's id in the name of a template folder ({@code mansion} and
+ * {@code woodland_mansion/...}), and structures of one structure set are
  * variants of each other ({@code shipwreck}, {@code shipwreck_beached}). A name that doesn't
  * match is left out: a place it doesn't know beats sending it to the wrong one.
  * <li>Mobs also come from each structure's own spawn lists.
  * </ul>
  *
- * <p>What's in a chest is the odds of its loot table, rolled: the bot goes by what the structure
- * may have, like a player who knows the game, and it sees what it got when it opens one.
+ * <p>What's in chests isn't counted on: it's a draw, and nearly all of it can be made.
  */
 public final class StructureIndex {
-	/** Rolls of a chest's loot table. */
-	private static final int LOOT_ROLLS = 200;
 	private static final Pattern ID = Pattern.compile("[a-z0-9_.\\-]+:[a-z0-9_./\\-]+");
 	/** Most chunks searched around a point for the nearest structure. */
 	private static final int SEARCH_CHUNKS = 200;
@@ -83,52 +72,19 @@ public final class StructureIndex {
 	private static final class Contents {
 		final Set<Block> blocks = new HashSet<>();
 		final Set<EntityType<?>> mobs = new HashSet<>();
-		final Set<ResourceKey<LootTable>> tables = new HashSet<>();
 	}
 
 	private static Map<Holder<Structure>, Contents> contents;
-	/** chest loot table -> item -> average number per chest. */
-	private static Map<ResourceKey<LootTable>, Map<Item, Double>> loot;
 
 	private StructureIndex() {
 	}
 
 	public static void clearCache() {
 		contents = null;
-		loot = null;
 	}
 
 	public static void warmUp(ServerLevel level) {
 		build(level);
-	}
-
-	/** Structures of this world that may hold {@code item} in a chest, with the best average per chest. */
-	public static Map<Holder<Structure>, Double> chests(ServerLevel level, Item item) {
-		build(level);
-		Map<Holder<Structure>, Double> found = new HashMap<>();
-		for (Holder<Structure> structure : present(level)) {
-			for (ResourceKey<LootTable> table : contents.getOrDefault(structure, new Contents()).tables) {
-				double rate = loot.getOrDefault(table, Map.of()).getOrDefault(item, 0.0);
-				if (rate > 0) {
-					found.merge(structure, rate, Math::max);
-				}
-			}
-		}
-		return found;
-	}
-
-	/** The chest loot tables, in these structures, that may hold {@code item}. */
-	public static Set<ResourceKey<LootTable>> tables(ServerLevel level, Item item, Collection<Holder<Structure>> structures) {
-		build(level);
-		Set<ResourceKey<LootTable>> found = new HashSet<>();
-		for (Holder<Structure> structure : structures) {
-			for (ResourceKey<LootTable> table : contents.getOrDefault(structure, new Contents()).tables) {
-				if (loot.getOrDefault(table, Map.of()).getOrDefault(item, 0.0) > 0) {
-					found.add(table);
-				}
-			}
-		}
-		return found;
 	}
 
 	/** Structures of this world built with any of these blocks. */
@@ -231,9 +187,8 @@ public final class StructureIndex {
 			return;
 		}
 		long start = System.nanoTime();
-		MinecraftServer server = level.getServer();
+		var server = level.getServer();
 		RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, level.registryAccess());
-		Map<String, ResourceKey<LootTable>> chestTables = chestTables(server);
 		Set<Identifier> templateIds = new HashSet<>();
 		StructureTemplateManager templates = server.getStructureManager();
 		templates.listTemplates().forEach(templateIds::add);
@@ -257,10 +212,6 @@ public final class StructureIndex {
 				if (!seen.add(id)) {
 					continue;
 				}
-				ResourceKey<LootTable> table = chestTables.get(id.toString());
-				if (table != null) {
-					c.tables.add(table);
-				}
 				if (pools.containsKey(id)) {
 					queue.addAll(poolIdsIn.computeIfAbsent(id, i -> ids(StructureTemplatePool.DIRECT_CODEC.encodeStart(ops, pools.getValue(i))
 							.result().map(JsonElement::toString).orElse(""))));
@@ -272,19 +223,10 @@ public final class StructureIndex {
 				}
 			}
 		});
-		long followed = System.nanoTime();
-		matchByName(level, built, chestTables, templateIds, templates, templateIdsIn);
-		long named = System.nanoTime();
+		matchByName(level, built, templateIds, templates, templateIdsIn);
 		contents = built;
-		loot = rollChests(level, chestTables.values());
-		HelperBot.LOGGER.info("HelperBot structure index timing: followed {} ms, by name {} ms, loot {} ms",
-				(followed - start) / 1_000_000, (named - followed) / 1_000_000, (System.nanoTime() - named) / 1_000_000);
-		Set<String> unplaced = new java.util.TreeSet<>(chestTables.keySet());
-		built.values().forEach(c -> c.tables.forEach(t -> unplaced.remove(t.identifier().toString())));
-		HelperBot.LOGGER.info("HelperBot chest tables with no structure found for them: {}", unplaced);
-		long linked = built.values().stream().flatMap(c -> c.tables.stream()).distinct().count();
-		HelperBot.LOGGER.info("HelperBot structure index: {} structures, {} templates read, {} of {} chest tables placed, {} ms",
-				built.size(), templateIdsIn.size(), linked, chestTables.size(), (System.nanoTime() - start) / 1_000_000);
+		HelperBot.LOGGER.info("HelperBot structure index: {} structures, {} templates read, {} ms",
+				built.size(), templateIdsIn.size(), (System.nanoTime() - start) / 1_000_000);
 	}
 
 	private static void readSpawnLists(Structure structure, Contents c) {
@@ -293,18 +235,6 @@ public final class StructureIndex {
 				c.mobs.add(entry.value().type());
 			}
 		}
-	}
-
-	/** Loot tables made for containers, whatever their name. */
-	private static Map<String, ResourceKey<LootTable>> chestTables(MinecraftServer server) {
-		Map<String, ResourceKey<LootTable>> found = new HashMap<>();
-		HolderLookup.RegistryLookup<LootTable> tables = server.reloadableRegistries().lookup().lookupOrThrow(Registries.LOOT_TABLE);
-		tables.listElementIds().forEach(key -> {
-			if (server.reloadableRegistries().getLootTable(key).getParamSet() == LootContextParamSets.CHEST) {
-				found.put(key.identifier().toString(), key);
-			}
-		});
-		return found;
 	}
 
 	/** The ids named in a template: its palette, what its blocks carry, its mobs. */
@@ -376,22 +306,14 @@ public final class StructureIndex {
 	 * The structures code builds: by name (see the class comment). Variants in one structure set
 	 * share what any of them found.
 	 */
-	private static void matchByName(ServerLevel level, Map<Holder<Structure>, Contents> built, Map<String, ResourceKey<LootTable>> chestTables,
+	private static void matchByName(ServerLevel level, Map<Holder<Structure>, Contents> built,
 									Set<Identifier> templateIds, StructureTemplateManager templates, Map<Identifier, Set<Identifier>> templateIdsIn) {
-		Set<ResourceKey<LootTable>> taken = new HashSet<>();
-		built.values().forEach(c -> taken.addAll(c.tables));
 		built.forEach((holder, c) -> {
 			Identifier id = holder.unwrapKey().map(ResourceKey::identifier).orElse(null);
-			if (id == null || !c.tables.isEmpty()) {
+			if (id == null) {
 				return;
 			}
 			Set<String> words = Set.of(id.getPath().split("_"));
-			chestTables.values().forEach(table -> {
-				Identifier t = table.identifier();
-				if (t.getNamespace().equals(id.getNamespace()) && !taken.contains(table) && words(t.getPath()).containsAll(words)) {
-					c.tables.add(table);
-				}
-			});
 			if (c.blocks.isEmpty()) {
 				for (Identifier template : templateIds) {
 					String folder = template.getPath().split("/")[0];
@@ -408,7 +330,6 @@ public final class StructureIndex {
 				if (c != null) {
 					shared.blocks.addAll(c.blocks);
 					shared.mobs.addAll(c.mobs);
-					shared.tables.addAll(c.tables);
 				}
 			}
 			for (StructureSet.StructureSelectionEntry entry : set.value().structures()) {
@@ -416,7 +337,6 @@ public final class StructureIndex {
 				if (c != null) {
 					c.blocks.addAll(shared.blocks);
 					c.mobs.addAll(shared.mobs);
-					c.tables.addAll(shared.tables);
 				}
 			}
 		});
@@ -424,30 +344,5 @@ public final class StructureIndex {
 
 	private static Set<String> words(String path) {
 		return new HashSet<>(Arrays.asList(path.split("[_/]")));
-	}
-
-	private static Map<ResourceKey<LootTable>, Map<Item, Double>> rollChests(ServerLevel level, Collection<ResourceKey<LootTable>> tables) {
-		Map<ResourceKey<LootTable>, Map<Item, Double>> rolled = new HashMap<>();
-		// No position: given one, an explorer map in a table searches the world on every roll, two
-		// minutes of a server start, for a chest's odds that don't depend on where it is.
-		LootParams params = new LootParams.Builder(level).create(new net.minecraft.util.context.ContextKeySet.Builder()
-				.optional(net.minecraft.world.level.storage.loot.parameters.LootContextParams.ORIGIN).build());
-		for (ResourceKey<LootTable> key : tables) {
-			Map<Item, Double> items = new HashMap<>();
-			try {
-				LootTable table = level.getServer().reloadableRegistries().getLootTable(key);
-				for (int i = 0; i < LOOT_ROLLS; i++) {
-					for (ItemStack stack : table.getRandomItems(params)) {
-						if (!stack.isEmpty()) {
-							items.merge(stack.getItem(), (double) stack.getCount() / LOOT_ROLLS, Double::sum);
-						}
-					}
-				}
-			} catch (RuntimeException e) {
-				continue; // a (modded) table needing context it can't fake
-			}
-			rolled.put(key, items);
-		}
-		return rolled;
 	}
 }
