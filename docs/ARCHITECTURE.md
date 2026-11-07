@@ -83,14 +83,14 @@
 
 上层（自卫、捡东西）要临时去别的地方时，用 `engage` 借用移动；结束时用 `disengage` 把任务原来的目的地还回去。
 
-### MovementController：身体（最大、bug 最多的文件）
+### 移动的四个模块
 
-| 部分 | 作用 |
+| 文件 | 只负责 |
 |---|---|
-| 走路 | 按路径一步步走：迈步、跳、下落、游泳；速度、跳跃高度、重力都按原版限制 |
-| 挖/放 | 走原版的"挖方块""右键放方块"流程 |
-| 卡住处理 | 原地不动检测、记住挡路的格子并绕开、扩大搜索、贴墙滑动 |
-| 收方块 | 没路可走时就地挖些方块，用来搭桥、垫柱子 |
+| `MovementController` | 跟着路线走：对外的 `goTo`、`status`、`follow`，走一步、卡住处理、借用移动 |
+| `RouteSearch` | 选哪种搜索、怎么看结果：全量搜索、窗口、洪水、保护区、边走边想 |
+| `Hands` | 挖和放，全局总闸的执行层，工具选择 |
+| `Body` | 碰撞、重力、摔伤、浮沉、直接往上游 |
 
 ## ⑤ 底层
 
@@ -108,9 +108,9 @@
 
 | 现象 | 多半在 |
 |---|---|
-| 卡住、走歪、悬空、掉坑 | `MovementController`（执行）或 `LocalPathfinder`（规划） |
+| 卡住、走歪、悬空、掉坑 | `MovementController`（走路线）、`Body`（碰撞）或 `LocalPathfinder`（规划） |
 | 水下：憋气、换气 | `BotPlayer.breathe`（什么时候、怎么换气），`Air`/`Escape`（够不够） |
-| 水下：路线、目标选择 | `LocalPathfinder.airAfter`，`MineSpot.seaBetween`，`MovementController.findWay` |
+| 水下：路线、目标选择 | `LocalPathfinder.airAfter`，`RouteSearch`，`GatherTask.spent` |
 | 打怪不对 | `BotPlayer.combat` |
 | 东西没捡 | `Loot`（所有掉落物的跟踪和拾取）、`ItemEntityMixin`（要不要） |
 | 挖了没掉东西 | `GatherTask.mine`（挖之前核对手里的东西）、`GatherTask.checkDrop`（日志里的"异常"） |

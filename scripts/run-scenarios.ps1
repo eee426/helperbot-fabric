@@ -14,8 +14,9 @@ $run = Join-Path $root "run"
 New-Item -ItemType Directory -Force $run | Out-Null
 Set-Content -Encoding ascii (Join-Path $run "eula.txt") "eula=true"
 
+# No structures: a mineshaft or a village turning up at random made scenes pass or fail by luck.
 # Superflat plains: bedrock, stone up to y=36, 3 dirt, grass at y=40 (stand at y=41).
-$flat = '{"layers":[{"block":"minecraft:bedrock","height":1},{"block":"minecraft:stone","height":100},{"block":"minecraft:dirt","height":3},{"block":"minecraft:grass_block","height":1}],"biome":"minecraft:plains"}'
+$flat = '{"layers":[{"block":"minecraft:bedrock","height":1},{"block":"minecraft:stone","height":100},{"block":"minecraft:dirt","height":3},{"block":"minecraft:grass_block","height":1}],"biome":"minecraft:plains","structure_overrides":[]}'
 @"
 online-mode=false
 level-name=scenarios

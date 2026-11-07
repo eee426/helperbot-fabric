@@ -47,6 +47,7 @@ if (project.hasProperty('coverage')) {
 	jacoco.applyTo(tasks.named('runServer').get())
 	tasks.named('runServer') {
 		extensions.getByType(JacocoTaskExtension).includes = ['com.vale.helperbot.*']
+		outputs.upToDateWhen { false } // or it counts the run as done, and skips the scenes
 	}
 }
 
