@@ -48,13 +48,6 @@ public final class MovementController {
 		IDLE, MOVING, ARRIVED, FAILED
 	}
 
-	static final double GRAVITY = 0.08;
-	static final double DRAG = 0.98;
-	static final double JUMP_VELOCITY = 0.42;
-	private static final double SWIM_UP_SPEED = 0.06;
-	private static final double SWIM_VERTICAL_SPEED = Air.SWIM_UP_SPEED;
-	/** How fast it sinks when idle under water. */
-	private static final double SINK_SPEED = 0.02;
 	/** Place the pillar block only once the feet are this far above the cell (see {@link #pillar}). */
 	static final double PILLAR_CLEARANCE = 0.05;
 	/** Jumps allowed for one pillar step before giving up on it (e.g. something blocks the jump). */
@@ -62,9 +55,6 @@ public final class MovementController {
 	int pillarJumps;
 	/** This step has (if it needed to) stepped back to the middle of its starting cell. */
 	private boolean centered;
-	/** Degrees below the horizon the bot looks while walking. */
-	private static final float WALK_PITCH = 20f;
-	static final double EPS = 1e-4;
 	/** Start planning the next stretch when this few steps of the current path are left. */
 	private static final int LOOKAHEAD_STEPS = 5;
 	private static final int MAX_EMPTY_PLANS = 2;
@@ -85,6 +75,8 @@ public final class MovementController {
 	private static final int GATHER_TARGET = 32;
 
 	final BotPlayer bot;
+	/** Moving the body by vanilla's rules (see Body). */
+	final Body body;
 	/** Mining and placing, the hands of the bot (see Hands). */
 	final Hands hands;
 	private Status status = Status.IDLE;
@@ -115,12 +107,10 @@ public final class MovementController {
 	private boolean stepStarted;
 	boolean placed;
 	private double stepFloor;
-	double verticalVelocity;
 
 	private Vec3 lastPosition = Vec3.ZERO;
 	private int frozenTicks;
 	private int recoveries;
-	private double airborneFromY = Double.NaN;
 
 
 	private boolean gathering;
@@ -129,6 +119,7 @@ public final class MovementController {
 
 	MovementController(BotPlayer bot) {
 		this.bot = bot;
+		this.body = new Body(bot);
 		this.hands = new Hands(bot);
 	}
 
@@ -378,17 +369,17 @@ public final class MovementController {
 		}
 		AABB moved = bot.getBoundingBox().move(nx - bot.getX(), 0, nz - bot.getZ());
 		boolean grounded = !bot.level().noCollision(bot, moved.move(0, -0.03, 0));
-		if (!bot.level().noCollision(bot, moved) || (!grounded && !isInWater())) {
+		if (!bot.level().noCollision(bot, moved) || (!grounded && !body.isInWater())) {
 			return false;
 		}
-		face(dx, dz);
-		setPosition(nx, bot.getY(), nz);
+		body.face(dx, dz);
+		body.setPosition(nx, bot.getY(), nz);
 		return true;
 	}
 
 	/** Standing (or floating) between steps, so it's safe to pause, e.g. to eat. */
 	public boolean atRest() {
-		return !stepStarted && hands.breaking() == null && isSupported();
+		return !stepStarted && hands.breaking() == null && body.isSupported();
 	}
 
 	public BlockPos feet() {
@@ -506,7 +497,7 @@ public final class MovementController {
 		// (the goal sees the world as it is now, not as the path will leave it).
 		engage((w, p) -> Air.breathable(w, p)
 				&& (LocalPathfinder.isPassable(w, p.above()) || !Escape.floodsWhenDug(w, p.above())),
-				f.above(Math.max(2, waterAbove())), "去换气");
+				f.above(Math.max(2, body.waterAbove())), "去换气");
 	}
 
 	/** Back to what the task was doing before the chase (re-planning from here if it was walking). */
@@ -531,9 +522,9 @@ public final class MovementController {
 	void tick() {
 		if (paused) {
 			bot.setSprinting(false);
-			fall();
-			trackFallDamage();
-			bot.setOnGround(isGrounded());
+			body.fall(status == Status.ARRIVED);
+			body.trackFallDamage();
+			bot.setOnGround(body.isGrounded());
 			return;
 		}
 		if (status == Status.MOVING) {
@@ -546,23 +537,23 @@ public final class MovementController {
 			}
 		} else {
 			bot.setSprinting(false);
-			fall();
+			body.fall(status == Status.ARRIVED);
 		}
-		trackFallDamage();
+		body.trackFallDamage();
 		// Vanilla mines 5x slower when not on the ground, so this flag must be right even while
 		// standing still (it used to only update on movement and could stay stale).
-		bot.setOnGround(isGrounded());
+		bot.setOnGround(body.isGrounded());
 	}
 
 	private void tickMoving() {
 		// Gravity first, whatever it's busy with (mining, gathering, thinking): only the movement
 		// part of a step moves it vertically itself. If the floor went (e.g. a player dug it out
 		// mid-mining), drop what it was doing and re-plan from wherever it lands.
-		if (!stepStarted && !isSupported()) {
+		if (!stepStarted && !body.isSupported()) {
 			if (hands.breaking() != null || breakIndex > 0 || placed) {
 				replan("脚下的方块没了，先掉下去");
 			}
-			fall();
+			body.fall(status == Status.ARRIVED);
 			return;
 		}
 		if (gathering) {
@@ -588,7 +579,7 @@ public final class MovementController {
 				// Arrived means at the middle of the cell, which is where plans and goals take it to
 				// stand (what it sees and reaches from there). Pushed or shuffled off it (after picking
 				// something up, say), it saw a block from the middle that was hidden from where it was.
-				if (offCentre(feet()) && recentre(feet())) {
+				if (body.offCentre(feet()) && body.recentre(feet())) {
 					return;
 				}
 				status = Status.ARRIVED;
@@ -815,7 +806,7 @@ public final class MovementController {
 		if (startZoneSearch()) {
 			return;
 		}
-		if (Rules.open() && emptyPlans == 0 && BuildingBlocks.count(bot.getInventory()) < LOW_BLOCKS && !isInWater()) {
+		if (Rules.open() && emptyPlans == 0 && BuildingBlocks.count(bot.getInventory()) < LOW_BLOCKS && !body.isInWater()) {
 			// Maybe a bridge or pillar would work: get some blocks first.
 			emptyPlans++;
 			gathering = true;
@@ -1132,7 +1123,7 @@ public final class MovementController {
 			airRequested = true;
 			return;
 		}
-		if (Rules.open() && BuildingBlocks.count(bot.getInventory()) < LOW_BLOCKS && !isInWater()) {
+		if (Rules.open() && BuildingBlocks.count(bot.getInventory()) < LOW_BLOCKS && !body.isInWater()) {
 			// Maybe a bridge or pillar would work: get some blocks first.
 			gathering = true;
 			gatherRejected.clear();
@@ -1214,7 +1205,7 @@ public final class MovementController {
 			return;
 		}
 		replan("原地 2 秒没动，自我恢复");
-		settleToGround();
+		body.settleToGround();
 	}
 
 	private void fail(String reason) {
@@ -1234,7 +1225,7 @@ public final class MovementController {
 		stepStarted = false;
 		placed = false;
 		centered = false;
-		verticalVelocity = 0;
+		body.verticalVelocity = 0;
 		pillarJumps = 0;
 		blockedTicks = 0;
 	}
@@ -1477,7 +1468,7 @@ public final class MovementController {
 		ServerLevel level = bot.level();
 		// Dropped below both ends of this step (the floor was dug out from under us): re-plan
 		// from where we are instead of jumping at a ledge that's no longer within reach.
-		if (bot.getY() < Math.min(step.from().getY(), step.to().getY()) - 0.6 && !isInWater()) {
+		if (bot.getY() < Math.min(step.from().getY(), step.to().getY()) - 0.6 && !body.isInWater()) {
 			replan("掉到了这一步的起点和终点下面");
 			return;
 		}
@@ -1525,7 +1516,7 @@ public final class MovementController {
 		// Up through a roof into the water (see DigMove#digOutUnder): the way on is the water that's
 		// coming down. Going on before it's here, the step has nowhere to land, and it would set about
 		// another bit of the roof.
-		if (!stepStarted && step.to().getY() - step.from().getY() == 2 && !step.toBreak().isEmpty() && !isInWater()
+		if (!stepStarted && step.to().getY() - step.from().getY() == 2 && !step.toBreak().isEmpty() && !body.isInWater()
 				&& LocalPathfinder.isWater(bot.level(), step.to().above())) {
 			return;
 		}
@@ -1544,8 +1535,8 @@ public final class MovementController {
 		// Steps that go straight up or down were planned for the middle of the cell. Off-centre
 		// (after shuffling for an item, being pushed...) half the body is under the next column,
 		// whose ceiling may be lower: jumping there just bumps the head. Step back to the middle.
-		if (!centered && needsCentre(step) && !isInWater()) {
-			if (recentre(step.from())) {
+		if (!centered && needsCentre(step) && !body.isInWater()) {
+			if (body.recentre(step.from())) {
 				return;
 			}
 			centered = true;
@@ -1555,7 +1546,7 @@ public final class MovementController {
 		double tz = to.getZ() + 0.5;
 		double ty = stepFloor;
 
-		if (step.type() != PathStep.Type.WAIT && isInWater() && LocalPathfinder.isWater(bot.level(), to)) {
+		if (step.type() != PathStep.Type.WAIT && body.isInWater() && LocalPathfinder.isWater(bot.level(), to)) {
 			swimTowards(tx, ty, tz);
 			return;
 		}
@@ -1579,23 +1570,6 @@ public final class MovementController {
 		return step.type().startsCentred || vertical;
 	}
 
-	boolean offCentre(BlockPos cell) {
-		double dx = cell.getX() + 0.5 - bot.getX(), dz = cell.getZ() + 0.5 - bot.getZ();
-		return dx * dx + dz * dz > 0.05 * 0.05 && feet().getX() == cell.getX() && feet().getZ() == cell.getZ();
-	}
-
-	/** Walk towards the centre of {@code cell}. True while still on the way there. */
-	boolean recentre(BlockPos cell) {
-		double dx = cell.getX() + 0.5 - bot.getX(), dz = cell.getZ() + 0.5 - bot.getZ();
-		double len = Math.sqrt(dx * dx + dz * dz);
-		if (len < 1e-3) {
-			return false;
-		}
-		double s = Math.min(Mode.WALK_SPEED, len);
-		// Blocked (shouldn't happen, the cell's centre is where we planned to stand): go on as is.
-		return tryMove(dx / len * s, 0, dz / len * s) && len > s;
-	}
-
 	/** Water to water: a straight 3D line at swimming speed (rising and sinking a bit slower). */
 	private void swimTowards(double tx, double ty, double tz) {
 		double dx = tx - bot.getX(), dy = ty - bot.getY(), dz = tz - bot.getZ();
@@ -1606,22 +1580,22 @@ public final class MovementController {
 		BlockPos there = BlockPos.containing(tx, ty + 0.01, tz);
 		boolean sprint = canSprintSwim() && Air.submerged(bot.level(), here) && Air.submerged(bot.level(), there);
 		bot.setSprinting(sprint);
-		if (len > EPS) {
+		if (len > Body.EPS) {
 			double speed = sprint ? Air.SPRINT_SWIM_SPEED : LocalPathfinder.SWIM_SPEED;
-			double vertical = sprint ? Air.SPRINT_SWIM_SPEED : SWIM_VERTICAL_SPEED;
+			double vertical = sprint ? Air.SPRINT_SWIM_SPEED : Air.SWIM_UP_SPEED;
 			double s = Math.min(speed, len) / len;
 			double mx = dx * s, my = Math.max(-vertical, Math.min(vertical, dy * s)), mz = dz * s;
-			if (Math.abs(dx) > EPS || Math.abs(dz) > EPS) {
-				face(dx, dz);
+			if (Math.abs(dx) > Body.EPS || Math.abs(dz) > Body.EPS) {
+				body.face(dx, dz);
 			}
 			// Same safety net as walking: slide along whatever is free, and if nothing moves at all
 			// for a while, remember the obstacle and plan around it.
-			boolean moved = tryMove(mx, my, mz);
+			boolean moved = body.tryMove(mx, my, mz);
 			if (!moved) {
-				boolean across = Math.abs(mx) > EPS || Math.abs(mz) > EPS;
-				moved |= Math.abs(my) > EPS && tryMove(0, my, 0);
-				moved |= across && (tryMove(mx, 0, mz) || (Math.abs(mx) > EPS && tryMove(mx, 0, 0))
-						|| (Math.abs(mz) > EPS && tryMove(0, 0, mz)));
+				boolean across = Math.abs(mx) > Body.EPS || Math.abs(mz) > Body.EPS;
+				moved |= Math.abs(my) > Body.EPS && body.tryMove(0, my, 0);
+				moved |= across && (body.tryMove(mx, 0, mz) || (Math.abs(mx) > Body.EPS && body.tryMove(mx, 0, 0))
+						|| (Math.abs(mz) > Body.EPS && body.tryMove(0, 0, mz)));
 			}
 			if (moved) {
 				blockedTicks = 0;
@@ -1638,228 +1612,18 @@ public final class MovementController {
 		}
 	}
 
-	boolean tryMove(double dx, double dy, double dz) {
-		if (dx == 0 && dy == 0 && dz == 0) {
-			return true;
-		}
-		AABB box = bot.getBoundingBox().move(dx, dy, dz);
-		if (collides(box)) {
-			return false;
-		}
-		setPosition(bot.getX() + dx, bot.getY() + dy, bot.getZ() + dz);
-		return true;
-	}
-
-	/**
-	 * Would the body at {@code box} run into something? Like vanilla, a block the body is already
-	 * inside doesn't count: sand that fell onto its legs mustn't freeze it in place (it used to,
-	 * and it drowned there), it can still swim up out of it.
-	 */
-	private boolean collides(AABB box) {
-		AABB now = bot.getBoundingBox();
-		for (VoxelShape shape : bot.level().getBlockCollisions(bot, box)) {
-			for (AABB part : shape.toAabbs()) {
-				if (part.intersects(box) && !part.intersects(now)) {
-					return true;
-				}
-			}
-		}
-		return !bot.level().getEntityCollisions(bot, box).isEmpty();
-	}
-
-	/**
-	 * Moves down by {@code dy} (negative), or as far as possible if something is in the way.
-	 * Returns false if it landed on something before covering the full distance.
-	 */
-	boolean moveDown(double dy) {
-		if (tryMove(0, dy, 0)) {
-			return true;
-		}
-		double lo = 0, hi = dy;
-		for (int i = 0; i < 12; i++) {
-			double mid = (lo + hi) / 2;
-			if (!collides(bot.getBoundingBox().move(0, mid, 0))) {
-				lo = mid;
-			} else {
-				hi = mid;
-			}
-		}
-		if (lo < 0) {
-			setPosition(bot.getX(), bot.getY() + lo, bot.getZ());
-		}
-		return false;
-	}
-
-	private void setPosition(double x, double y, double z) {
-		bot.setPos(x, y, z);
-		bot.setDeltaMovement(Vec3.ZERO);
-		bot.setOnGround(isGrounded());
-		bot.resetFallDistance();
-	}
-
-	/**
-	 * Face the walking direction, eyes slightly down like a player watching their footing. A dead
-	 * level gaze lines up with distant endermen's heads, which counts as staring and angers them.
-	 */
-	void face(double dx, double dz) {
-		float yaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0);
-		bot.setYRot(yaw);
-		bot.setYHeadRot(yaw);
-		bot.setXRot(WALK_PITCH);
-	}
-
-	boolean isGrounded() {
-		return !bot.level().noCollision(bot, bot.getBoundingBox().move(0, -0.03, 0));
+	/** See {@link Body#fall}. */
+	void fall() {
+		body.fall(status == Status.ARRIVED);
 	}
 
 	public boolean isInWater() {
-		return LocalPathfinder.isWater(bot.level(), feet());
+		return body.isInWater();
 	}
 
-	/** Standing, or in water (where it can hover between steps, like a player treading water). */
-	boolean isSupported() {
-		return isGrounded() || isInWater();
-	}
-
-	/** Gravity when not following a step: land exactly on the surface, or float up in water. */
-	void fall() {
-		if (isGrounded()) {
-			verticalVelocity = 0;
-			return;
-		}
-		BlockPos f = feet();
-		if (LocalPathfinder.isWater(bot.level(), f)) {
-			verticalVelocity = 0;
-			if (LocalPathfinder.isWater(bot.level(), f.above())) {
-				// Fully under water and idle: sink slowly to the bottom, like a player not swimming.
-				// (Floating up used to lift it away from whatever it was mining, over and over.)
-				// Running out of air is handled separately, see BotPlayer#breathe.
-				// While working at a spot (e.g. mining), only settle if the bottom is right there:
-				// sinking further could take it out of reach of the work, and back up again, forever.
-				boolean bottomClose = !bot.level().noCollision(bot, bot.getBoundingBox().move(0, -1.0, 0));
-				if (status != Status.ARRIVED || bottomClose) {
-					moveDown(-SINK_SPEED);
-				}
-				return;
-			}
-			double surface = f.getY() + LocalPathfinder.SWIM_FLOOR;
-			double dy = Math.max(-SWIM_UP_SPEED, Math.min(SWIM_UP_SPEED, surface - bot.getY()));
-			if (dy < 0) {
-				moveDown(dy);
-			} else {
-				tryMove(0, dy, 0);
-			}
-			return;
-		}
-		verticalVelocity = Math.min(verticalVelocity, 0);
-		verticalVelocity = (verticalVelocity - GRAVITY) * DRAG;
-		if (!moveDown(verticalVelocity)) {
-			verticalVelocity = 0;
-		}
-	}
-
-	/** Water cells straight above the head, up to 64: how far it is to air. */
-	public int waterAbove() {
-		BlockPos head = BlockPos.containing(bot.getEyePosition());
-		int n = 0;
-		while (n < 64 && LocalPathfinder.isWater(bot.level(), head.above(n))) {
-			n++;
-		}
-		return n;
-	}
-
-	/** Off a column's centre by at most this (per axis), the 0.6 wide body fits inside it. */
-	private static final double IN_COLUMN = 0.18;
-
-	/**
-	 * One tick of getting to air: swim straight up; under a ceiling, sidestep towards the nearest
-	 * column that's open upwards (its own one too: off its centre, the body is partly under the
-	 * next column's ceiling, e.g. the ice beside the hole it just made); with none, dig through
-	 * the ceiling. Works while paused. Returns true once the head is out of the water (then it
-	 * just floats at the surface).
-	 */
+	/** One tick of getting to air (see {@link Body#ascendStep}). */
 	public boolean ascendStep() {
-		ServerLevel level = bot.level();
-		if (!bot.isEyeInFluid(FluidTags.WATER)) {
-			fall();
-			return true;
-		}
-		// As fast as the plan reckons (see Escape), or its way up takes longer than the air was kept for.
-		BlockPos f = feet();
-		boolean sprint = canSprintSwim() && Air.submerged(level, f) && Air.submerged(level, f.above());
-		bot.setSprinting(sprint);
-		if (tryMove(0, sprint ? Air.SPRINT_SWIM_SPEED : SWIM_VERTICAL_SPEED, 0)) {
-			return false;
-		}
-		BlockPos best = null;
-		for (int r = 0; r <= 4 && best == null; r++) {
-			for (int dx = -r; dx <= r; dx++) {
-				for (int dz = -r; dz <= r; dz++) {
-					if (Math.max(Math.abs(dx), Math.abs(dz)) != r) {
-						continue;
-					}
-					BlockPos c = f.offset(dx, 0, dz);
-					if (swimmable(level, c) && swimmable(level, c.above()) && swimmable(level, c.above(2))
-							&& (best == null || c.distSqr(f) < best.distSqr(f))) {
-						best = c;
-					}
-				}
-			}
-		}
-		if (best != null) {
-			double dx = best.getX() + 0.5 - bot.getX(), dz = best.getZ() + 0.5 - bot.getZ();
-			double len = Math.sqrt(dx * dx + dz * dz);
-			if (Math.abs(dx) > IN_COLUMN || Math.abs(dz) > IN_COLUMN) {
-				double s = Math.min(LocalPathfinder.SWIM_SPEED, len);
-				// Can't get over there (something in between): dig up instead of trying forever.
-				if (tryMove(dx / len * s, 0, dz / len * s) || tryMove(dx / len * s, 0, 0) || tryMove(0, 0, dz / len * s)) {
-					return false;
-				}
-			}
-		}
-		// The ceiling over its own column: the first cell above the head that isn't open.
-		for (int k = 1; k <= 3; k++) {
-			BlockPos c = f.above(k);
-			if (!swimmable(level, c)) {
-				hands.mineTarget(c, level.getBlockState(c).getBlock(), Hands.AUTO_TOOL, true);
-				return false;
-			}
-		}
-		return false;
-	}
-
-	private static boolean swimmable(ServerLevel level, BlockPos pos) {
-		return LocalPathfinder.isOpenWater(level, pos) || LocalPathfinder.isPassable(level, pos);
-	}
-
-	private void settleToGround() {
-		for (int i = 0; i < 40 && !isSupported(); i++) {
-			if (LocalPathfinder.isWater(bot.level(), feet())) {
-				fall();
-			} else {
-				moveDown(-0.5);
-			}
-		}
-	}
-
-	/** Vanilla-style fall damage, measured from the highest point since leaving the ground. Water breaks the fall. */
-	private void trackFallDamage() {
-		double y = bot.getY();
-		if (LocalPathfinder.isWater(bot.level(), feet())) {
-			airborneFromY = Double.NaN;
-			return;
-		}
-		if (!isGrounded()) {
-			airborneFromY = Double.isNaN(airborneFromY) ? y : Math.max(airborneFromY, y);
-			return;
-		}
-		if (!Double.isNaN(airborneFromY)) {
-			double fallen = airborneFromY - y;
-			if (fallen > 3.0) {
-				bot.hurtServer(bot.level(), bot.damageSources().fall(), (float) Math.ceil(fallen - 3.0));
-			}
-		}
-		airborneFromY = Double.NaN;
+		return body.ascendStep(canSprintSwim(), hands);
 	}
 
 	private void showPath() {

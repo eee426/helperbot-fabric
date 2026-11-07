@@ -25,22 +25,22 @@ final class PillarStep implements StepExecutor {
 	public void tick(MovementController m, PathStep step, double ty) {
 		BotPlayer bot = m.bot;
 		if (!m.placed) {
-			if (m.verticalVelocity <= 0 && m.isSupported()) {
+			if (m.body.verticalVelocity <= 0 && m.body.isSupported()) {
 				if (++m.pillarJumps > MovementController.MAX_PILLAR_JUMPS) {
 					m.replan("垫柱子连跳 3 次都没放上");
 					return;
 				}
-				m.verticalVelocity = MovementController.JUMP_VELOCITY;
+				m.body.verticalVelocity = Body.JUMP_VELOCITY;
 				bot.causeFoodExhaustion(0.05f);
 			}
-			if (m.verticalVelocity > 0) {
-				if (!m.tryMove(0, m.verticalVelocity, 0)) {
+			if (m.body.verticalVelocity > 0) {
+				if (!m.body.tryMove(0, m.body.verticalVelocity, 0)) {
 					// Bumped our head on something the plan thought was open: remember it.
-					m.learnObstacle(bot.getBoundingBox().move(0, m.verticalVelocity, 0));
+					m.learnObstacle(bot.getBoundingBox().move(0, m.body.verticalVelocity, 0));
 					m.replan("垫柱子时头顶被挡住");
 					return;
 				} else {
-					m.verticalVelocity = (m.verticalVelocity - MovementController.GRAVITY) * MovementController.DRAG;
+					m.body.verticalVelocity = (m.body.verticalVelocity - Body.GRAVITY) * Body.DRAG;
 				}
 			} else {
 				m.fall();
@@ -56,16 +56,16 @@ final class PillarStep implements StepExecutor {
 			return;
 		}
 		// Block is in: finish the jump arc and land on it.
-		if (m.verticalVelocity > 0) {
-			m.tryMove(0, m.verticalVelocity, 0);
-			m.verticalVelocity = (m.verticalVelocity - MovementController.GRAVITY) * MovementController.DRAG;
-		} else if (bot.getY() > ty + MovementController.EPS) {
-			m.verticalVelocity = (m.verticalVelocity - MovementController.GRAVITY) * MovementController.DRAG;
-			if (!m.moveDown(Math.max(m.verticalVelocity, ty - bot.getY()))) {
-				m.verticalVelocity = 0;
+		if (m.body.verticalVelocity > 0) {
+			m.body.tryMove(0, m.body.verticalVelocity, 0);
+			m.body.verticalVelocity = (m.body.verticalVelocity - Body.GRAVITY) * Body.DRAG;
+		} else if (bot.getY() > ty + Body.EPS) {
+			m.body.verticalVelocity = (m.body.verticalVelocity - Body.GRAVITY) * Body.DRAG;
+			if (!m.body.moveDown(Math.max(m.body.verticalVelocity, ty - bot.getY()))) {
+				m.body.verticalVelocity = 0;
 			}
 		}
-		if (Math.abs(bot.getY() - ty) < 1e-3 && m.isGrounded()) {
+		if (Math.abs(bot.getY() - ty) < 1e-3 && m.body.isGrounded()) {
 			m.pillarJumps = 0;
 			m.nextStep();
 		}
