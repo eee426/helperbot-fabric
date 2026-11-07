@@ -1,7 +1,6 @@
 package com.vale.helperbot.path;
 
 import net.minecraft.world.level.BlockGetter;
-import com.vale.helperbot.knowledge.Habitat;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;

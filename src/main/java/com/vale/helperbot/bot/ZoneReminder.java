@@ -1,6 +1,6 @@
-package com.vale.helperbot.guard;
+package com.vale.helperbot.bot;
 
-import com.vale.helperbot.bot.BotManager;
+import com.vale.helperbot.guard.ProtectionZones;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;

@@ -3,6 +3,7 @@ package com.vale.helperbot.task;
 import com.mojang.datafixers.util.Pair;
 import com.vale.helperbot.HelperBot;
 import com.vale.helperbot.bot.BotPlayer;
+import com.vale.helperbot.bot.BotTask;
 import com.vale.helperbot.bot.Hands;
 import com.vale.helperbot.bot.MovementController;
 import com.vale.helperbot.guard.Guard;
@@ -14,6 +15,7 @@ import com.vale.helperbot.path.Air;
 import com.vale.helperbot.path.Escape;
 import com.vale.helperbot.knowledge.DropAnalysis;
 import com.vale.helperbot.knowledge.Obtainability;
+import com.vale.helperbot.path.MineSpot;
 import com.vale.helperbot.path.Mode;
 import com.vale.helperbot.path.PathGoal;
 import net.minecraft.core.BlockPos;
@@ -336,7 +338,7 @@ public class GatherTask implements BotTask {
 			if (!wet) {
 				dryChecked++;
 			}
-			double cost = MineSpot.cost(bot, p, item, toolFor.getOrDefault(level.getBlockState(p).getBlock(), Hands.HAND), wanted - collected(bot), escape);
+			double cost = MineCost.cost(bot, p, item, toolFor.getOrDefault(level.getBlockState(p).getBlock(), Hands.HAND), wanted - collected(bot), escape);
 			if (Double.isNaN(cost)) {
 				it.remove();
 				unreachable.judged(p, Air.fullBudget(bot));

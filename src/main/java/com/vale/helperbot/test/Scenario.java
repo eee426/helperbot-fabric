@@ -1,7 +1,7 @@
 package com.vale.helperbot.test;
 
 import com.vale.helperbot.bot.BotPlayer;
-import com.vale.helperbot.task.BotTask;
+import com.vale.helperbot.bot.BotTask;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;

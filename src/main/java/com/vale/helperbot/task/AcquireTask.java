@@ -1,6 +1,7 @@
 package com.vale.helperbot.task;
 
 import com.vale.helperbot.bot.BotPlayer;
+import com.vale.helperbot.bot.BotTask;
 import com.vale.helperbot.bot.MovementController;
 import com.vale.helperbot.guard.ZoneExit;
 import com.vale.helperbot.knowledge.CraftPlanner;

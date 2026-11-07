@@ -3,6 +3,7 @@ package com.vale.helperbot.task;
 import com.mojang.datafixers.util.Pair;
 import com.vale.helperbot.HelperBot;
 import com.vale.helperbot.bot.BotPlayer;
+import com.vale.helperbot.bot.BotTask;
 import com.vale.helperbot.bot.MovementController;
 import com.vale.helperbot.guard.ProtectionZones;
 import com.vale.helperbot.path.Mode;

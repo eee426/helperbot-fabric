@@ -31,6 +31,18 @@
                             └──────────────┘  └──────────────┘
 ```
 
+依赖只能往下走，同层之间也不能绕回来：
+
+| 这一层 | 可以用 | 不能用 |
+|---|---|---|
+| `guard` | 只用游戏本身 | 其他所有层 |
+| `path` | `guard` | `knowledge`、`bot`、`task` |
+| `knowledge` | `path`、`guard` | `bot`、`task` |
+| `bot` | `path`、`guard` | `knowledge`、`task` |
+| `task` | 以上全部 | |
+
+下层要用上层的东西时，把它放到下层：`bot/BotTask` 是身体层定的接口，任务层来实现；`guard/InDimension` 是规则层定的接口，`path/Snapshot` 来实现。各层都可以用 `HelperBot.LOGGER`，它只是日志，不算依赖。
+
 ## ① 入口层：听玩家说什么
 
 | 文件 | 作用 |
@@ -40,6 +52,7 @@
 | `bot/BotManager` | 生成、删除机器人，加载它的存档数据 |
 | `bot/BotInventoryMenu` | 右键打开的背包界面 |
 | `bot/FakeConnection` | 假的网络连接（机器人没有客户端） |
+| `bot/NameGuard`, `bot/ZoneReminder` | 每秒看一次：有人冒用机器人的名字；机器人在场但一个保护区块都没有 |
 
 ## ② 任务层：要做什么
 
@@ -53,6 +66,7 @@
 | `CraftStep` / `SmeltStep` / `Station` | 合成、熔炼；需要时自己放工作台/熔炉，用完收回 |
 | `FetchWaterTask` | 打一桶水（特殊：要找水面） |
 | `ComeTask` | `/bot come`：走到玩家身边 |
+| `MineCost` | 这只机器人挖这一块要花多少：用它手里的工具和气，给采集目标排序 |
 
 ## ③ 知识层：东西从哪来（不动世界，只读游戏数据）
 
@@ -98,6 +112,7 @@
 |---|---|
 | `path/LocalPathfinder` | A* 寻路：在一块范围内找一串"走/跳/挖/搭桥/垫柱/游泳"的步骤；水下每个节点还带着"剩余空气" |
 | `path/Air`, `path/Escape` | **水下的气量规则**：空气预算（剩余空气 + 允许扣的血）必须够它从当前位置出水；`Escape` 算"从这格游到能呼吸要多少刻"，不算挖。寻路、换气、选目标都用它 |
+| `path/MineSpot` | **站在哪能挖到这一块**：选目标、规划器、走过去都问它，所以说法不会不一致 |
 | `path/Mode` | 安全 / 普通 / 激进三种模式的参数 |
 | `path/BreakTimes`, `BuildingBlocks` | 挖一块要多久；哪些方块可以拿来搭路 |
 | `guard/Guard` | **能不能挖、能不能放**（所有挖和放都要先问它）。`ofTheSea` 是全局总闸的判断：头在水下只能挖这些，见 `UNDERWATER_PLAN.md` 最后一节 |

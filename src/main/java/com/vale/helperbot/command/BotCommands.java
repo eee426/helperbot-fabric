@@ -14,7 +14,7 @@ import com.vale.helperbot.guard.ZoneDisplay;
 import net.minecraft.world.level.ChunkPos;
 import com.vale.helperbot.knowledge.Obtainability;
 import com.vale.helperbot.path.Mode;
-import com.vale.helperbot.task.BotTask;
+import com.vale.helperbot.bot.BotTask;
 import com.vale.helperbot.task.ComeTask;
 import com.vale.helperbot.task.FetchWaterTask;
 import com.vale.helperbot.task.AcquireTask;

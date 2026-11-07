@@ -71,8 +71,8 @@ public class HelperBot implements ModInitializer {
 			}
 		});
 		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(com.vale.helperbot.guard.ZoneDisplay::tick);
-		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(com.vale.helperbot.guard.ZoneReminder::tick);
-		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(com.vale.helperbot.guard.NameGuard::tick);
+		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(com.vale.helperbot.bot.ZoneReminder::tick);
+		net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(com.vale.helperbot.bot.NameGuard::tick);
 
 		// Right-click the bot to edit its inventory.
 		UseEntityCallback.EVENT.register((player, level, hand, entity, hitResult) -> {

@@ -3,7 +3,7 @@ package com.vale.helperbot.test;
 import com.vale.helperbot.HelperBot;
 import com.vale.helperbot.bot.BotManager;
 import com.vale.helperbot.bot.BotPlayer;
-import com.vale.helperbot.task.BotTask;
+import com.vale.helperbot.bot.BotTask;
 import net.fabricmc.fabric.api.entity.FakePlayer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.core.BlockPos;

@@ -1,11 +1,11 @@
 package com.vale.helperbot.knowledge;
 
 import net.minecraft.core.BlockPos;
-import com.vale.helperbot.task.MineSpot;
 import com.vale.helperbot.path.Air;
 import com.vale.helperbot.path.BreakTimes;
 import com.vale.helperbot.path.Escape;
 import com.vale.helperbot.path.LocalPathfinder;
+import com.vale.helperbot.path.MineSpot;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
@@ -643,7 +643,7 @@ public final class CraftPlanner {
 		}
 		int dig = BreakTimes.estimateTicks(realInventory, level, p, level.getBlockState(p));
 		double work = dry + (dig == Integer.MAX_VALUE ? 0 : dig - MINE_PER_BLOCK);
-		// (Out of reach, by the estimate? A way round it is the search's to find: see MineSpot#cost.)
+		// (Out of reach, by the estimate? A way round it is the search's to find: see MineCost#cost.)
 		double up = escape.ticks(feet);
 		return Air.diving(air, blocks, Air.workUnderWater(work, Air.digPenalty(level, feet)), Double.isInfinite(up) ? 0 : up) / blocks;
 	}

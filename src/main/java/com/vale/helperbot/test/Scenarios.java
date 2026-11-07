@@ -1425,7 +1425,7 @@ public final class Scenarios {
 
 	/** Is there really nowhere to mine it from? Null if so, otherwise where. */
 	private static String verdictOn(Arena a, BotPlayer bot, BlockPos block, BlockPos from, int air, int full) {
-		var goal = com.vale.helperbot.task.MineSpot.reachGoal(block, bot.blockInteractionRange() - 0.3, bot.getEyeHeight(), true, false);
+		var goal = com.vale.helperbot.path.MineSpot.reachGoal(block, bot.blockInteractionRange() - 0.3, bot.getEyeHeight(), true, false);
 		for (BlockPos p : BlockPos.betweenClosed(block.offset(-5, -5, -5), block.offset(5, 5, 5))) {
 			if (!Double.isNaN(com.vale.helperbot.path.LocalPathfinder.floorHeight(a.level, p)) && goal.test(a.level, p)) {
 				return "能站在 " + p.toShortString() + " 挖到";

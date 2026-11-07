@@ -182,13 +182,14 @@ public final class ProtectionZones {
 		return out;
 	}
 
-	/** Also takes a path search's copy of the world (see com.vale.helperbot.path.Snapshot). */
+	/** Also takes a copy of the world that a path search works on (see {@link InDimension}). */
 	public static boolean isProtected(BlockGetter level, BlockPos pos) {
 		Map<String, Long2IntOpenHashMap> all = published;
 		if (all.isEmpty()) {
 			return false;
 		}
-		Long2IntOpenHashMap m = all.get(com.vale.helperbot.path.Worlds.dimension(level).identifier().toString());
+		var dimension = level instanceof InDimension copy ? copy.dimension() : ((Level) level).dimension();
+		Long2IntOpenHashMap m = all.get(dimension.identifier().toString());
 		return m != null && m.get(ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4)) != 0;
 	}
 

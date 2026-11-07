@@ -74,7 +74,7 @@ final class DropFetch {
 	}
 
 	/**
-	 * What getting it takes, per item, on the scale of a block's cost (MineSpot#cost): the way there.
+	 * What getting it takes, per item, on the scale of a block's cost (MineCost#cost): the way there.
 	 * Under water, it used to be a whole dive from the surface, with the bot right next to it: a squid
 	 * ten blocks off won over the ink at its feet. Whether the breath lasts is for the planner to say.
 	 */

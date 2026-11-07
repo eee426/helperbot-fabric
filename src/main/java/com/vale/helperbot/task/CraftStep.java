@@ -1,6 +1,7 @@
 package com.vale.helperbot.task;
 
 import com.vale.helperbot.bot.BotPlayer;
+import com.vale.helperbot.bot.BotTask;
 import com.vale.helperbot.knowledge.CraftPlanner;
 import com.vale.helperbot.knowledge.RecipeIndex;
 import net.minecraft.network.chat.Component;

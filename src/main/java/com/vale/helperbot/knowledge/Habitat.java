@@ -61,22 +61,9 @@ public final class Habitat {
 		return result == null ? Layer.ANY : result;
 	}
 
-	/**
-	 * Height of the ground's top (where you'd stand) at x/z: read from the world if that chunk is
-	 * loaded, otherwise worked out from world generation without loading anything (like the biome
-	 * search does).
-	 */
-	public static int surfaceY(ServerLevel level, int x, int z) {
-		if (level.hasChunkAt(new BlockPos(x, level.getMinY(), z))) {
-			return level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-		}
-		return level.getChunkSource().getGenerator().getBaseHeight(x, z, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
-				level, level.getChunkSource().randomState());
-	}
-
 	/** Where to head for {@code xz}: on the surface there for surface things, else at the bot's own height. */
 	public static BlockPos target(ServerLevel level, BlockPos xz, Layer layer, BlockPos bot) {
-		return layer == Layer.SURFACE ? new BlockPos(xz.getX(), surfaceY(level, xz.getX(), xz.getZ()), xz.getZ())
+		return layer == Layer.SURFACE ? new BlockPos(xz.getX(), com.vale.helperbot.path.Worlds.surfaceY(level, xz.getX(), xz.getZ()), xz.getZ())
 				: xz.atY(bot.getY());
 	}
 

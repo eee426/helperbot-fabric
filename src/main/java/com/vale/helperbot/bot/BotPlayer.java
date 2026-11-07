@@ -3,7 +3,6 @@ package com.vale.helperbot.bot;
 import com.mojang.authlib.GameProfile;
 import com.vale.helperbot.guard.Rules;
 import com.vale.helperbot.path.Air;
-import com.vale.helperbot.task.BotTask;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Inventory;

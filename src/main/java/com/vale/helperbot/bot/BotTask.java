@@ -1,6 +1,5 @@
-package com.vale.helperbot.task;
+package com.vale.helperbot.bot;
 
-import com.vale.helperbot.bot.BotPlayer;
 import net.minecraft.world.item.ItemStack;
 
 public interface BotTask {

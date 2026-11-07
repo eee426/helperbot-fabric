@@ -1,5 +1,6 @@
 package com.vale.helperbot.path;
 
+import com.vale.helperbot.guard.InDimension;
 import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
@@ -25,7 +26,7 @@ import net.minecraft.world.level.material.FluidState;
  * Outside the copied box it reads like an unloaded chunk (nothing there, can't go). Block
  * entities aren't copied: nothing a search asks needs them.
  */
-public final class Snapshot implements BlockGetter {
+public final class Snapshot implements BlockGetter, InDimension {
 	private static final BlockState VOID = Blocks.VOID_AIR.defaultBlockState();
 
 	private final ResourceKey<Level> dimension;
@@ -119,6 +120,7 @@ public final class Snapshot implements BlockGetter {
 				+ (minSection * 16) + "~" + ((minSection + sections) * 16 - 1);
 	}
 
+	@Override
 	public ResourceKey<Level> dimension() {
 		return dimension;
 	}
