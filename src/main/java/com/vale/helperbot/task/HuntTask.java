@@ -575,7 +575,7 @@ final class HuntTask {
 		}
 		if (bot.isWithinEntityInteractionRange(target, 0) && bot.hasLineOfSight(target)) {
 			bot.movement().stop();
-			bot.movement().lookAt(target.getBoundingBox().getCenter());
+			bot.movement().hands().lookAt(target.getBoundingBox().getCenter());
 			if (bot.getAttackStrengthScale(0.5f) >= 0.95f) {
 				bot.holdWeapon();
 				bot.attack(target);

@@ -85,6 +85,8 @@ public final class MovementController {
 	private static final int GATHER_TARGET = 32;
 
 	final BotPlayer bot;
+	/** Mining and placing, the hands of the bot (see Hands). */
+	final Hands hands;
 	private Status status = Status.IDLE;
 	private String failReason = "";
 	private PathGoal goal;
@@ -110,9 +112,6 @@ public final class MovementController {
 	private int ticksWithoutProgress;
 
 	private int breakIndex;
-	private BlockPos breakingPos;
-	private float breakProgress;
-	private int breakAttempts;
 	private boolean stepStarted;
 	boolean placed;
 	private double stepFloor;
@@ -130,6 +129,7 @@ public final class MovementController {
 
 	MovementController(BotPlayer bot) {
 		this.bot = bot;
+		this.hands = new Hands(bot);
 	}
 
 	public void goTo(PathGoal goal, BlockPos target, Mode mode) {
@@ -305,7 +305,7 @@ public final class MovementController {
 	}
 
 	public void stop() {
-		abortBreaking();
+		hands.abortBreaking();
 		paused = false;
 		locked = false;
 		engaged = false;
@@ -324,7 +324,12 @@ public final class MovementController {
 	}
 
 	public boolean isMining() {
-		return breakingPos != null;
+		return hands.breaking() != null;
+	}
+
+	/** Mining and placing. */
+	public Hands hands() {
+		return hands;
 	}
 
 	public Status status() {
@@ -342,7 +347,7 @@ public final class MovementController {
 			case FAILED -> "失败：" + failReason;
 			case MOVING -> search != null ? "思考中（搜索范围 ±" + search.limits().radiusXZ() + " 格）"
 					: gathering ? "方块不够，正在就地收集（现有 " + BuildingBlocks.count(bot.getInventory()) + "）"
-					: breakingPos != null ? "正在挖 " + breakingPos.toShortString()
+					: hands.breaking() != null ? "正在挖 " + hands.breaking().toShortString()
 					: path == null ? "规划路线中" : "移动中（第 " + (index + 1) + "/" + path.size() + " 步）";
 		};
 	}
@@ -383,7 +388,7 @@ public final class MovementController {
 
 	/** Standing (or floating) between steps, so it's safe to pause, e.g. to eat. */
 	public boolean atRest() {
-		return !stepStarted && breakingPos == null && isSupported();
+		return !stepStarted && hands.breaking() == null && isSupported();
 	}
 
 	public BlockPos feet() {
@@ -399,8 +404,8 @@ public final class MovementController {
 	public void pause() {
 		if (!paused) {
 			paused = true;
-			abortBreaking();
-			harvestTarget = null;
+			hands.abortBreaking();
+			hands.forgetTarget();
 		}
 	}
 
@@ -474,14 +479,6 @@ public final class MovementController {
 	/** The planner found nowhere to go on the air left: the breathing layer should take over. */
 	private boolean airRequested;
 
-	/** No way out by swimming: the one time it may dig with its head under water. */
-	private boolean digOut;
-
-	/** See {@link #digOut}: only the breathing layer sets this, and no plan counts on it. */
-	public void digOut(boolean allowed) {
-		digOut = allowed;
-	}
-
 	/** Ticks from here until the head is out of the water (see {@link Escape}). */
 	public double escapeTicks() {
 		return newEscape().ticks(feet());
@@ -496,11 +493,6 @@ public final class MovementController {
 		boolean r = airRequested;
 		airRequested = false;
 		return r;
-	}
-
-	/** Already hitting this block (some progress made), as opposed to about to start on it. */
-	public boolean isBreaking(BlockPos pos) {
-		return pos.equals(breakingPos);
 	}
 
 	/**
@@ -567,7 +559,7 @@ public final class MovementController {
 		// part of a step moves it vertically itself. If the floor went (e.g. a player dug it out
 		// mid-mining), drop what it was doing and re-plan from wherever it lands.
 		if (!stepStarted && !isSupported()) {
-			if (breakingPos != null || breakIndex > 0 || placed) {
+			if (hands.breaking() != null || breakIndex > 0 || placed) {
 				replan("脚下的方块没了，先掉下去");
 			}
 			fall();
@@ -590,7 +582,7 @@ public final class MovementController {
 			continuePlanning();
 			return;
 		}
-		boolean atStepBoundary = !stepStarted && breakIndex == 0 && breakingPos == null;
+		boolean atStepBoundary = !stepStarted && breakIndex == 0 && hands.breaking() == null;
 		if (atStepBoundary) {
 			if (goal.test(bot.level(), feet())) {
 				// Arrived means at the middle of the cell, which is where plans and goals take it to
@@ -614,7 +606,7 @@ public final class MovementController {
 			// there changes fast (sand, flowing water, kelp) and nothing matters more, so again and
 			// again from what's there now, quietly, it's routine.
 			if (path != null && headUnderwater() && (ignoreAir ? bot.tickCount - plannedAt > WATER_REPLAN_TICKS : shortOfBreath())) {
-				abortBreaking();
+				hands.abortBreaking();
 				path = null;
 				cancelLookahead();
 			}
@@ -1157,7 +1149,7 @@ public final class MovementController {
 
 	private void checkProgress() {
 		// (A way that's known may lead off from the target for a while: to the shore, say.)
-		if (target == null || status != Status.MOVING || breakingPos != null || zoneRoute || locked) {
+		if (target == null || status != Status.MOVING || hands.breaking() != null || zoneRoute || locked) {
 			return;
 		}
 		BlockPos here = bot.blockPosition();
@@ -1208,7 +1200,7 @@ public final class MovementController {
 	/** If the bot hasn't moved at all (and isn't mining), drop to the ground and plan again. */
 	private void watchdog() {
 		Vec3 now = bot.position();
-		if (breakingPos != null || now.distanceToSqr(lastPosition) > 1e-6) {
+		if (hands.breaking() != null || now.distanceToSqr(lastPosition) > 1e-6) {
 			lastPosition = now;
 			frozenTicks = 0;
 			return;
@@ -1227,7 +1219,7 @@ public final class MovementController {
 
 	private void fail(String reason) {
 		bot.log("移动失败：" + reason);
-		abortBreaking();
+		hands.abortBreaking();
 		failReason = reason;
 		status = Status.FAILED;
 		path = null;
@@ -1238,7 +1230,7 @@ public final class MovementController {
 	private void resetStep() {
 		stepTicks = 0;
 		breakIndex = 0;
-		breakAttempts = 0;
+		hands.resetAttempts();
 		stepStarted = false;
 		placed = false;
 		centered = false;
@@ -1424,7 +1416,7 @@ public final class MovementController {
 				failedStepCount = 0;
 			}
 		}
-		abortBreaking();
+		hands.abortBreaking();
 		path = null;
 		cancelSearches();
 		replanRequested = false;
@@ -1435,9 +1427,9 @@ public final class MovementController {
 
 	/** Mine solid blocks right around the body (so the drops land on us) until we have enough. */
 	private void gatherTick() {
-		if (breakingPos != null) {
-			mine(breakingPos, bot.level().getBlockState(breakingPos));
-			if (breakingPos == null) {
+		if (hands.breaking() != null) {
+			mine(hands.breaking(), bot.level().getBlockState(hands.breaking()));
+			if (hands.breaking() == null) {
 				gatherWait = 15; // item pickup delay
 			}
 			return;
@@ -1459,7 +1451,7 @@ public final class MovementController {
 			}
 			return;
 		}
-		breakAttempts = 0;
+		hands.resetAttempts();
 		mine(next, bot.level().getBlockState(next));
 	}
 
@@ -1492,9 +1484,9 @@ public final class MovementController {
 		while (breakIndex < step.toBreak().size()) {
 			BlockPos pos = step.toBreak().get(breakIndex);
 			if (LocalPathfinder.isPassable(level, pos)) {
-				abortBreaking();
+				hands.abortBreaking();
 				breakIndex++;
-				breakAttempts = 0;
+				hands.resetAttempts();
 				continue;
 			}
 			BlockState state = level.getBlockState(pos);
@@ -1506,7 +1498,7 @@ public final class MovementController {
 			return;
 		}
 		if (step.place() != null && !step.type().placesWhileMoving && !placed) {
-			Placement.Refusal refused = placeBlock(step.place());
+			Placement.Refusal refused = hands.placeBlock(step.place());
 			if (refused != null) {
 				replan("搭桥放方块失败：" + refused.why);
 				return;
@@ -1517,314 +1509,10 @@ public final class MovementController {
 		move(step);
 	}
 
-	/**
-	 * DONE: it broke the block itself. GONE: the block changed or went without it breaking it (a
-	 * kelp stalk falling off when its root went, a kelp stalk turning into a kelp tip, another
-	 * player): nothing of its doing, so nothing to collect or check from it.
-	 */
-	public enum MineResult {
-		RUNNING, DONE, GONE, FAILED,
-		/** The hand check passed to {@link #mineTarget} said no: nothing was hit. */
-		WRONG_HAND
-	}
-
-	/** The last block this bot broke itself (the server accepted its break), and the tick it broke. */
-	private BlockPos brokeLast;
-	private int brokeAt;
-
-	/**
-	 * The tick the block last reported DONE actually broke. The task may only notice a tick or
-	 * many later (other layers can run first), and what dropped is told apart by that moment.
-	 */
-	public int lastBreakTick() {
-		return brokeAt;
-	}
-
-	private MineResult finished(BlockPos pos) {
-		breakingPos = null;
-		harvestTarget = null;
-		boolean mine = pos.equals(brokeLast);
-		brokeLast = null;
-		return mine ? MineResult.DONE : MineResult.GONE;
-	}
-
-	/** Tool choice for {@link #mine}: pick the fastest tool automatically. */
-	public static final int AUTO_TOOL = -3;
-	/** Tool choice for {@link #mine}: bare hand (an empty hotbar slot). */
-	public static final int HAND = -1;
-
-	private BlockPos harvestTarget;
-
-	/**
-	 * Mines the block a task wants, with a specific tool (inventory slot, or {@link #HAND}), going
-	 * through the normal survival break flow. Call every tick until it returns something other
-	 * than RUNNING: DONE once it has broken the block, GONE if the block stopped being
-	 * {@code expected} some other way.
-	 */
-	public MineResult mineTarget(BlockPos pos, net.minecraft.world.level.block.Block expected, int toolSlot) {
-		return mineTarget(pos, expected, toolSlot, false);
-	}
-
-	/**
-	 * @param obstacle the block is in the way (e.g. hiding the target), not the thing being
-	 *                 collected: checked against the stricter {@link Guard#canBreak} rules
-	 */
-	public MineResult mineTarget(BlockPos pos, net.minecraft.world.level.block.Block expected, int toolSlot, boolean obstacle) {
-		return mineTarget(pos, expected, toolSlot, obstacle, null);
-	}
-
-	/**
-	 * @param handOk checked on exactly what is in hand once the tool has been taken out, right
-	 *               before the first hit (taking a tool out of the bag swaps it with the hand, so
-	 *               checking anywhere else may look at a different item); null: no check
-	 */
-	public MineResult mineTarget(BlockPos pos, net.minecraft.world.level.block.Block expected, int toolSlot, boolean obstacle,
-								 Predicate<ItemStack> handOk) {
-		if (!pos.equals(harvestTarget)) {
-			abortBreaking();
-			harvestTarget = pos;
-			breakAttempts = 0;
-		}
-		BlockState state = bot.level().getBlockState(pos);
-		if (!state.is(expected)) {
-			return finished(pos);
-		}
-		boolean allowed = obstacle ? Guard.canBreak(bot.level(), pos, state) : Guard.canHarvest(bot.level(), pos, state);
-		if (!allowed) {
-			return MineResult.FAILED;
-		}
-		return mine(pos, state, toolSlot, handOk);
-	}
-
-	/**
-	 * Breaks a block the bot placed itself (its crafting table or furnace) to take it back. Skips
-	 * the terrain rules, which would forbid it under strict rules; protection zones still apply.
-	 */
-	public MineResult mineOwnBlock(BlockPos pos, net.minecraft.world.level.block.Block expected) {
-		if (!pos.equals(harvestTarget)) {
-			abortBreaking();
-			harvestTarget = pos;
-			breakAttempts = 0;
-		}
-		BlockState state = bot.level().getBlockState(pos);
-		if (!state.is(expected)) {
-			return finished(pos);
-		}
-		if (com.vale.helperbot.guard.ProtectionZones.isProtected(bot.level(), pos)) {
-			return MineResult.FAILED;
-		}
-		return mine(pos, state, AUTO_TOOL);
-	}
-
 	private void mine(BlockPos pos, BlockState state) {
-		if (mine(pos, state, AUTO_TOOL) == MineResult.FAILED && !gathering) {
+		if (hands.mine(pos, state, Hands.AUTO_TOOL) == Hands.MineResult.FAILED && !gathering) {
 			replan("挖不动 " + pos.toShortString());
 		}
-	}
-
-	private MineResult mine(BlockPos pos, BlockState state, int tool) {
-		return mine(pos, state, tool, null);
-	}
-
-	private MineResult mine(BlockPos pos, BlockState state, int tool, Predicate<ItemStack> handOk) {
-		ServerLevel level = bot.level();
-		if (bot.isGhost()) {
-			return MineResult.FAILED; // in a protected chunk it touches nothing (plans shouldn't ask)
-		}
-		// Checked every tick: water may come in halfway through. Plans never get here (see
-		// LocalPathfinder#clearCost): it's for what they couldn't know.
-		if (headUnderwater() && !Guard.ofTheSea(state) && !digOut) {
-			abortBreaking();
-			return MineResult.FAILED;
-		}
-		if (!pos.equals(breakingPos)) {
-			abortBreaking();
-			if (++breakAttempts > 3) {
-				return MineResult.FAILED;
-			}
-			holdForMining(tool, state);
-			if (handOk != null && !handOk.test(bot.getMainHandItem())) {
-				breakAttempts--;
-				return MineResult.WRONG_HAND;
-			}
-			lookAt(Vec3.atCenterOf(pos));
-			breakingPos = pos;
-			breakProgress = 0;
-			bot.gameMode.handleBlockBreakAction(pos, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK,
-					faceToward(pos), level.getMaxY(), 0);
-			bot.swing(InteractionHand.MAIN_HAND);
-			// Instant break (kelp, grass...): it's gone already. Not just "is it air": under water
-			// a broken block turns into water.
-			if (level.getBlockState(pos) != state) {
-				breakingPos = null;
-				brokeLast = pos;
-				brokeAt = bot.tickCount;
-			}
-			return MineResult.RUNNING;
-		}
-		lookAt(Vec3.atCenterOf(pos));
-		breakProgress += state.getDestroyProgress(bot, level, pos);
-		bot.swing(InteractionHand.MAIN_HAND);
-		if (breakProgress >= 1f) {
-			bot.gameMode.handleBlockBreakAction(pos, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK,
-					faceToward(pos), level.getMaxY(), 0);
-			level.destroyBlockProgress(bot.getId(), pos, -1);
-			// If the server didn't accept it, the next attempt starts over (counted by breakAttempts).
-			// If it did, whatever is there next (sand falling in from above) is a fresh block.
-			if (level.getBlockState(pos) != state) {
-				breakAttempts = 0;
-				brokeLast = pos;
-				brokeAt = bot.tickCount;
-			}
-			breakingPos = null;
-		} else {
-			level.destroyBlockProgress(bot.getId(), pos, (int) (breakProgress * 10));
-		}
-		return MineResult.RUNNING;
-	}
-
-	/**
-	 * Bare hand. It matters for drops (clay with a silk-touch pickaxe in hand gives the block, not
-	 * the balls), so with a full hotbar it really empties the hand instead of keeping whatever is
-	 * held: put that away in the bag, or failing that hold something that acts like a hand.
-	 */
-	/** Takes out what {@link #mineTarget} would use for this block: {@link #AUTO_TOOL}, {@link #HAND} or a slot. */
-	public void holdForMining(int tool, BlockState state) {
-		if (tool == AUTO_TOOL) {
-			selectTool(state);
-		} else if (tool == HAND) {
-			selectEmptyHand();
-		} else {
-			selectSlot(tool);
-		}
-	}
-
-	private void selectEmptyHand() {
-		Inventory inv = bot.getInventory();
-		for (int i = 0; i < Inventory.getSelectionSize(); i++) {
-			if (inv.getItem(i).isEmpty()) {
-				inv.setSelectedSlot(i);
-				return;
-			}
-		}
-		int selected = inv.getSelectedSlot();
-		for (int i = Inventory.getSelectionSize(); i < Inventory.INVENTORY_SIZE; i++) {
-			if (inv.getItem(i).isEmpty()) {
-				inv.setItem(i, inv.getItem(selected));
-				inv.setItem(selected, ItemStack.EMPTY);
-				return;
-			}
-		}
-		// Bag full too: a plain item (no enchantment, not a tool) breaks blocks like a bare hand.
-		for (int i = 0; i < Inventory.getSelectionSize(); i++) {
-			ItemStack stack = inv.getItem(i);
-			if (!stack.isEnchanted() && !stack.isDamageableItem()) {
-				inv.setSelectedSlot(i);
-				return;
-			}
-		}
-	}
-
-	private void abortBreaking() {
-		if (breakingPos != null) {
-			bot.gameMode.handleBlockBreakAction(breakingPos, ServerboundPlayerActionPacket.Action.ABORT_DESTROY_BLOCK,
-					Direction.UP, bot.level().getMaxY(), 0);
-			bot.level().destroyBlockProgress(bot.getId(), breakingPos, -1);
-			breakingPos = null;
-		}
-	}
-
-	/** Places a building block at {@code pos} through the normal survival "use item on block" flow. */
-	Placement.Refusal placeBlock(BlockPos pos) {
-		ServerLevel level = bot.level();
-		if (!level.getBlockState(pos).getCollisionShape(level, pos).isEmpty()) {
-			return null; // something solid is there already: what the step wanted
-		}
-		Placement.Refusal refused = Placement.check(level, pos, Placement.Kind.BUILD);
-		return refused != null ? refused : place(pos, BuildingBlocks.bestSlot(bot.getInventory()));
-	}
-
-	/**
-	 * Places the block item in inventory {@code slot} at {@code pos}, against any solid neighbour,
-	 * through the normal survival "use item on block" flow: every block it ever puts down comes
-	 * through here. The caller has asked {@link Placement#check}; this adds what only the live world
-	 * can tell. Null if it's there now, otherwise why not.
-	 */
-	public Placement.Refusal place(BlockPos pos, int slot) {
-		ServerLevel level = bot.level();
-		if (slot < 0) {
-			return Placement.Refusal.NO_BLOCKS;
-		}
-		if (bot.isGhost()) {
-			return Placement.Refusal.GHOST;
-		}
-		ItemStack stack = bot.getInventory().getItem(slot);
-		if (com.vale.helperbot.guard.Restrictions.isBlocked(stack.getItem())) {
-			return Placement.Refusal.BANNED_ITEM;
-		}
-		if (stack.getItem() instanceof net.minecraft.world.item.BlockItem item
-				&& !level.isUnobstructed(item.getBlock().defaultBlockState(), pos, net.minecraft.world.phys.shapes.CollisionContext.empty())) {
-			return Placement.Refusal.IN_THE_WAY;
-		}
-		Direction[] order = {Direction.DOWN, Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST, Direction.UP};
-		for (Direction dir : order) {
-			BlockPos against = pos.relative(dir);
-			if (level.getBlockState(against).getCollisionShape(level, against).isEmpty()) {
-				continue;
-			}
-			Direction face = dir.getOpposite();
-			Vec3 hit = Vec3.atCenterOf(against).add(face.getStepX() * 0.5, face.getStepY() * 0.5, face.getStepZ() * 0.5);
-			selectSlot(slot);
-			lookAt(hit);
-			// Sneak so clicking a chest or door places against it instead of using it.
-			bot.setShiftKeyDown(true);
-			bot.gameMode.useItemOn(bot, level, bot.getMainHandItem(), InteractionHand.MAIN_HAND,
-					new BlockHitResult(hit, face, against, false));
-			bot.setShiftKeyDown(false);
-			bot.swing(InteractionHand.MAIN_HAND);
-			return level.getBlockState(pos).getCollisionShape(level, pos).isEmpty() ? Placement.Refusal.NOT_PLACED : null;
-		}
-		return Placement.Refusal.NOTHING_BESIDE;
-	}
-
-	private void selectTool(BlockState state) {
-		Inventory inv = bot.getInventory();
-		int slot = BreakTimes.bestToolSlot(inv, state);
-		if (slot < 0) {
-			selectEmptyHand();
-			return;
-		}
-		selectSlot(slot);
-	}
-
-	/** Puts the item in {@code slot} into the main hand, swapping it into the hotbar if needed. */
-	public void selectSlot(int slot) {
-		Inventory inv = bot.getInventory();
-		if (Inventory.isHotbarSlot(slot)) {
-			inv.setSelectedSlot(slot);
-			return;
-		}
-		int selected = inv.getSelectedSlot();
-		ItemStack held = inv.getItem(selected);
-		inv.setItem(selected, inv.getItem(slot));
-		inv.setItem(slot, held);
-	}
-
-	private Direction faceToward(BlockPos pos) {
-		Vec3 d = bot.getEyePosition().subtract(Vec3.atCenterOf(pos));
-		double ax = Math.abs(d.x), ay = Math.abs(d.y), az = Math.abs(d.z);
-		if (ay >= ax && ay >= az) {
-			return d.y > 0 ? Direction.UP : Direction.DOWN;
-		}
-		if (ax >= az) {
-			return d.x > 0 ? Direction.EAST : Direction.WEST;
-		}
-		return d.z > 0 ? Direction.SOUTH : Direction.NORTH;
-	}
-
-	public void lookAt(Vec3 point) {
-		bot.lookAt(EntityAnchorArgument.Anchor.EYES, point);
-		bot.setYHeadRot(bot.getYRot());
 	}
 
 	// ---- movement -----------------------------------------------------------------------
@@ -2133,7 +1821,7 @@ public final class MovementController {
 		for (int k = 1; k <= 3; k++) {
 			BlockPos c = f.above(k);
 			if (!swimmable(level, c)) {
-				mineTarget(c, level.getBlockState(c).getBlock(), AUTO_TOOL, true);
+				hands.mineTarget(c, level.getBlockState(c).getBlock(), Hands.AUTO_TOOL, true);
 				return false;
 			}
 		}

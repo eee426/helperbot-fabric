@@ -98,7 +98,7 @@ final class SmeltStep {
 			return BotTask.Status.FAILED;
 		}
 		Inventory inv = bot.getInventory();
-		bot.movement().lookAt(net.minecraft.world.phys.Vec3.atCenterOf(furnace.pos()));
+		bot.movement().hands().lookAt(net.minecraft.world.phys.Vec3.atCenterOf(furnace.pos()));
 		if (entity.getItem(INPUT).isEmpty()) {
 			ItemStack batch = take(inv, s -> recipe.input().test(s), Math.min(64, total - loaded));
 			if (batch.isEmpty()) {

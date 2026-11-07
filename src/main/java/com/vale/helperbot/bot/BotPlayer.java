@@ -325,7 +325,7 @@ public class BotPlayer extends ServerPlayer {
 					movement.pause();
 				}
 			} else {
-				movement.digOut(digOut || Double.isInfinite(movement.escapeTicks()));
+				movement.hands().digOut(digOut || Double.isInfinite(movement.escapeTicks()));
 				movement.ascendStep();
 			}
 			return true;
@@ -342,7 +342,7 @@ public class BotPlayer extends ServerPlayer {
 		log("换好气了，继续");
 		breath = Breath.NONE;
 		digOut = false;
-		movement.digOut(false);
+		movement.hands().digOut(false);
 		movement.disengage();
 		movement.resume();
 		return false;
@@ -401,7 +401,7 @@ public class BotPlayer extends ServerPlayer {
 			holdWeapon();
 		}
 		calmTicks = CALM_TICKS;
-		movement.lookAt(threat.getBoundingBox().getCenter());
+		movement.hands().lookAt(threat.getBoundingBox().getCenter());
 		if (isWithinEntityInteractionRange(threat, 0) && hasLineOfSight(threat)) {
 			movement.pause();
 			chaseTicks = 0;
@@ -490,7 +490,7 @@ public class BotPlayer extends ServerPlayer {
 		if (held.is(ItemTags.SWORDS) || (!swordBest && held.is(ItemTags.AXES))) {
 			return;
 		}
-		movement.selectSlot(weapon);
+		movement.hands().selectSlot(weapon);
 	}
 
 	private int bestWeaponSlot() {
@@ -545,7 +545,7 @@ public class BotPlayer extends ServerPlayer {
 		if (slot < 0) {
 			return false;
 		}
-		movement.selectSlot(slot);
+		movement.hands().selectSlot(slot);
 		gameMode.useItem(this, level(), getMainHandItem(), InteractionHand.MAIN_HAND);
 		if (isUsingItem()) {
 			log("吃 " + getMainHandItem().getHoverName().getString() + "（饥饿值 " + food + "）");

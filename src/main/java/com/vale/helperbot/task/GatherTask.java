@@ -3,6 +3,7 @@ package com.vale.helperbot.task;
 import com.mojang.datafixers.util.Pair;
 import com.vale.helperbot.HelperBot;
 import com.vale.helperbot.bot.BotPlayer;
+import com.vale.helperbot.bot.Hands;
 import com.vale.helperbot.bot.MovementController;
 import com.vale.helperbot.guard.Guard;
 import com.vale.helperbot.guard.ProtectionZones;
@@ -247,7 +248,7 @@ public class GatherTask implements BotTask {
 		for (Block block : blocks) {
 			int slot = DropAnalysis.toolSlotFor(bot.level(), bot, bot.getInventory(), block, item);
 			if (slot != DropAnalysis.NONE) {
-				toolFor.put(block, slot == DropAnalysis.HAND ? MovementController.HAND : slot);
+				toolFor.put(block, slot == DropAnalysis.HAND ? Hands.HAND : slot);
 				if (slot >= 0) {
 					toolItems.put(block, bot.getInventory().getItem(slot).getItem());
 				}
@@ -335,7 +336,7 @@ public class GatherTask implements BotTask {
 			if (!wet) {
 				dryChecked++;
 			}
-			double cost = MineSpot.cost(bot, p, item, toolFor.getOrDefault(level.getBlockState(p).getBlock(), MovementController.HAND), wanted - collected(bot), escape);
+			double cost = MineSpot.cost(bot, p, item, toolFor.getOrDefault(level.getBlockState(p).getBlock(), Hands.HAND), wanted - collected(bot), escape);
 			if (Double.isNaN(cost)) {
 				it.remove();
 				unreachable.judged(p, Air.fullBudget(bot));
@@ -646,7 +647,7 @@ public class GatherTask implements BotTask {
 		boolean obstacle = behind != null;
 		BlockPos aim = current;
 		Block aimBlock = currentBlock;
-		int tool = obstacle ? MovementController.AUTO_TOOL : toolFor.getOrDefault(currentBlock, MovementController.HAND);
+		int tool = obstacle ? Hands.AUTO_TOOL : toolFor.getOrDefault(currentBlock, Hands.HAND);
 		// The slot was worked out earlier; the player may have rearranged the bag since.
 		if (tool >= 0 && bot.getInventory().getItem(tool).getItem() != toolItems.get(currentBlock)) {
 			return toolMoved(bot);
@@ -658,7 +659,7 @@ public class GatherTask implements BotTask {
 		BlockState targetState = level.getBlockState(current);
 		int plannedTool = tool;
 		java.util.function.Predicate<ItemStack> handOk = obstacle ? null : held -> handFits(bot, targetState, held, plannedTool);
-		MovementController.MineResult result = bot.movement().mineTarget(aim, aimBlock, tool, obstacle, handOk);
+		Hands.MineResult result = bot.movement().hands().mineTarget(aim, aimBlock, tool, obstacle, handOk);
 		return afterHit(bot, result, aim, aimBlock, tool, obstacle, targetState);
 	}
 
@@ -714,9 +715,9 @@ public class GatherTask implements BotTask {
 	}
 
 	/** What came of this tick's mining. */
-	private Status afterHit(BotPlayer bot, MovementController.MineResult result, BlockPos aim, Block aimBlock, int tool,
+	private Status afterHit(BotPlayer bot, Hands.MineResult result, BlockPos aim, Block aimBlock, int tool,
 							boolean obstacle, BlockState targetState) {
-		if (result == MovementController.MineResult.WRONG_HAND) {
+		if (result == Hands.MineResult.WRONG_HAND) {
 			ItemStack held = bot.getMainHandItem();
 			bot.log("手里的东西挖不出" + itemName().getString() + "：计划用 " + toolName(bot, tool) + "，手里是 "
 					+ (held.isEmpty() ? "空手" : held.getHoverName().getString()) + "，方块 " + targetState + "；重新选工具");
@@ -729,28 +730,28 @@ public class GatherTask implements BotTask {
 			}
 			return Status.RUNNING;
 		}
-		if (result == MovementController.MineResult.RUNNING) {
+		if (result == Hands.MineResult.RUNNING) {
 			handFixes = 0;
 		}
-		if (result == MovementController.MineResult.FAILED) {
+		if (result == Hands.MineResult.FAILED) {
 			bot.log("挖不了 " + aim.toShortString() + "（" + aimBlock.getName().getString() + "），换下一个目标");
 			dropTarget(bot);
 			return nextTarget(bot);
 		}
-		if (obstacle && (result == MovementController.MineResult.DONE || result == MovementController.MineResult.GONE)) {
+		if (obstacle && (result == Hands.MineResult.DONE || result == Hands.MineResult.GONE)) {
 			return backToTarget(bot); // out of the way
 		}
-		if (result == MovementController.MineResult.GONE) {
+		if (result == Hands.MineResult.GONE) {
 			// Changed or went by itself (fell off with its root, turned into another block,
 			// someone else took it): not its break, so nothing to record or check.
 			bot.log(current.toShortString() + " 的方块自己变了/没了，换下一个");
 			return nextTarget(bot);
 		}
-		if (result == MovementController.MineResult.DONE) {
+		if (result == Hands.MineResult.DONE) {
 			blocksMined++;
 			// Noted to check it dropped what it should (see checkDrop); what came out is a source
 			// like any other now, and the nearest, so usually picked up next.
-			int brokeAt = bot.movement().lastBreakTick();
+			int brokeAt = bot.movement().hands().lastBreakTick();
 			bot.loot().onBreak(current, brokeAt);
 			lastBreak = current;
 			lastBreakBlock = currentBlock;
@@ -786,17 +787,17 @@ public class GatherTask implements BotTask {
 			return dropCheck.computeIfAbsent(HandKey.of(state, held),
 					k -> DropAnalysis.wouldDrop(bot.level(), bot, state, held, item));
 		}
-		if (tool == MovementController.HAND) {
+		if (tool == Hands.HAND) {
 			return !held.isDamageableItem() && !held.isEnchanted();
 		}
 		return held.getItem() == toolItems.get(currentBlock);
 	}
 
 	private String toolName(BotPlayer bot, int tool) {
-		if (tool == MovementController.HAND) {
+		if (tool == Hands.HAND) {
 			return "空手";
 		}
-		if (tool == MovementController.AUTO_TOOL) {
+		if (tool == Hands.AUTO_TOOL) {
 			return "自动选择";
 		}
 		return bot.getInventory().getItem(tool).getHoverName().getString();

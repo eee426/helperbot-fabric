@@ -240,7 +240,7 @@ final class Station {
 	}
 
 	private boolean tryPlace(BotPlayer bot, BlockPos spot, int slot) {
-		Placement.Refusal refused = bot.movement().place(spot, slot);
+		Placement.Refusal refused = bot.movement().hands().place(spot, slot);
 		if (refused == null && bot.level().getBlockState(spot).is(block)) {
 			pos = spot;
 			return true;
@@ -268,8 +268,8 @@ final class Station {
 				pos = null;
 				return BotTask.Status.DONE;
 			}
-			MovementController.MineResult result = bot.movement().mineOwnBlock(pos, block);
-			if (result == MovementController.MineResult.FAILED) {
+			com.vale.helperbot.bot.Hands.MineResult result = bot.movement().hands().mineOwnBlock(pos, block);
+			if (result == com.vale.helperbot.bot.Hands.MineResult.FAILED) {
 				bot.say(requester, Component.literal("收不回").append(state.getBlock().getName())
 						.append("，留在了 " + pos.toShortString() + "。"));
 				pos = null;

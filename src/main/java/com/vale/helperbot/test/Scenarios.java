@@ -1408,12 +1408,12 @@ public final class Scenarios {
 		int slot = com.vale.helperbot.path.BuildingBlocks.bestSlot(c.bot().getInventory());
 		var kind = com.vale.helperbot.guard.Placement.Kind.BUILD;
 		Object[][] cases = {
-				{m.place(c.bot().blockPosition(), slot), com.vale.helperbot.guard.Placement.Refusal.IN_THE_WAY},
-				{m.place(a.at(5, 70, 0), slot), com.vale.helperbot.guard.Placement.Refusal.NOTHING_BESIDE},
-				{m.place(a.at(2, 41, 0), -1), com.vale.helperbot.guard.Placement.Refusal.NO_BLOCKS},
+				{m.hands().place(c.bot().blockPosition(), slot), com.vale.helperbot.guard.Placement.Refusal.IN_THE_WAY},
+				{m.hands().place(a.at(5, 70, 0), slot), com.vale.helperbot.guard.Placement.Refusal.NOTHING_BESIDE},
+				{m.hands().place(a.at(2, 41, 0), -1), com.vale.helperbot.guard.Placement.Refusal.NO_BLOCKS},
 				{com.vale.helperbot.guard.Placement.check(a.level, a.at(2, 40, 0), kind), com.vale.helperbot.guard.Placement.Refusal.TAKEN},
 				{com.vale.helperbot.guard.Placement.check(a.level, a.at(32, 41, 0), kind), com.vale.helperbot.guard.Placement.Refusal.PROTECTED},
-				{m.place(a.at(2, 41, 0), slot), null},
+				{m.hands().place(a.at(2, 41, 0), slot), null},
 		};
 		for (Object[] e : cases) {
 			if (e[0] != e[1]) {

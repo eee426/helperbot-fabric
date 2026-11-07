@@ -200,7 +200,7 @@ public class FetchWaterTask implements BotTask {
 		ServerLevel level = bot.level();
 		Inventory inv = bot.getInventory();
 		Vec3 aim = new Vec3(water.getX() + 0.5, water.getY() + 0.5, water.getZ() + 0.5);
-		bot.movement().lookAt(aim);
+		bot.movement().hands().lookAt(aim);
 
 		Vec3 eye = bot.getEyePosition();
 		Vec3 end = eye.add(aim.subtract(eye).normalize().scale(bot.blockInteractionRange()));
@@ -221,7 +221,7 @@ public class FetchWaterTask implements BotTask {
 			bot.say(requester, "空桶不见了。");
 			return Status.FAILED;
 		}
-		bot.movement().selectSlot(bucketSlot);
+		bot.movement().hands().selectSlot(bucketSlot);
 		int before = countWaterBuckets(inv);
 		bot.gameMode.useItem(bot, level, inv.getSelectedItem(), InteractionHand.MAIN_HAND);
 		if (countWaterBuckets(inv) <= before) {

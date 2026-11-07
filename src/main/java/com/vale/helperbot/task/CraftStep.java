@@ -79,7 +79,7 @@ final class CraftStep {
 					: bot.inventoryMenu;
 		}
 		int before = count(inv);
-		bot.movement().lookAt(table.pos() != null
+		bot.movement().hands().lookAt(table.pos() != null
 				? net.minecraft.world.phys.Vec3.atCenterOf(table.pos()) : bot.getEyePosition().add(bot.getLookAngle()));
 		menu.handlePlacement(false, false, recipe.holder(), bot.level(), inv);
 		menu.quickMoveStack(bot, RESULT_SLOT);
