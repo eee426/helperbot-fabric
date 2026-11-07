@@ -449,9 +449,17 @@ public class GatherTask implements BotTask {
 			biomes = BiomeHints.biomesFor(level, toolFor.keySet());
 		}
 		if (biomes.isEmpty()) {
-			// No biome generates it (e.g. only found in villages and other structures): wandering
-			// around at random almost never finds such things, so say so instead of pretending.
-			return giveUp(bot, "附近已加载的区域里没有，也不知道该去哪找（它可能只出现在村庄等结构里）");
+			// No biome generates it: the structures built with it, nearest first.
+			var built = com.vale.helperbot.knowledge.StructureIndex.holding(level, toolFor.keySet());
+			BlockPos at = structuresSeen.size() >= MAX_STRUCTURES ? null
+					: com.vale.helperbot.knowledge.StructureIndex.nearest(level, built, bot.blockPosition(), structuresSeen);
+			if (at == null) {
+				return giveUp(bot, built.isEmpty() ? "附近已加载的区域里没有，也不知道该去哪找" : "去过的结构里都没找到");
+			}
+			structuresSeen.add(at);
+			bot.say(requester, Component.literal("它在结构里才有，去 " + at.getX() + ", " + at.getZ() + " 找。"));
+			startTravel(bot, at);
+			return Status.RUNNING;
 		}
 		Explorer explorer = explorers.computeIfAbsent(item, i -> {
 			Map<Holder<Biome>, Double> worth = new HashMap<>();
@@ -489,6 +497,10 @@ public class GatherTask implements BotTask {
 	private boolean seaOnly() {
 		return toolFor.keySet().stream().allMatch(b -> Guard.ofTheSea(b.defaultBlockState()));
 	}
+
+	/** Structures tried for what no biome has, and how many it tries. */
+	private final List<BlockPos> structuresSeen = new java.util.ArrayList<>();
+	private static final int MAX_STRUCTURES = 3;
 
 	private boolean announcedExplore;
 	/** Set while on the way to one of the explorer's places (not the one trip further off). */

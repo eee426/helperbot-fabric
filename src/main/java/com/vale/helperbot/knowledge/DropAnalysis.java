@@ -144,8 +144,15 @@ public final class DropAnalysis {
 			for (BlockState state : variants(block, checked)) {
 				for (ProbeTool probe : probes) {
 					Map<Item, Integer> counts = rollDrops(level, state, probe.stack(), TRIALS);
+					// A chance drop: a few rolls only say it's there. One hit in four read as 25% for
+					// flint (10%) and for sticks from leaves (2%), and came out differently every start.
+					int rolled = TRIALS;
+					if (counts.values().stream().anyMatch(c -> c % TRIALS != 0)) {
+						rolled = RARE_TRIALS;
+						counts = rollDrops(level, state, probe.stack(), rolled);
+					}
 					for (Map.Entry<Item, Integer> e : counts.entrySet()) {
-						record(built, builtRates, e.getKey(), block, probe.description(), (double) e.getValue() / TRIALS);
+						record(built, builtRates, e.getKey(), block, probe.description(), (double) e.getValue() / rolled);
 						droppedBy.computeIfAbsent(e.getKey(), k -> new java.util.HashSet<>()).add(state);
 					}
 				}

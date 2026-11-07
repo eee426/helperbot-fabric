@@ -8,6 +8,7 @@ import com.vale.helperbot.path.BreakTimes;
 import com.vale.helperbot.path.Escape;
 import com.vale.helperbot.path.LocalPathfinder;
 import com.vale.helperbot.path.MineSpot;
+import com.vale.helperbot.path.Mode;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
@@ -95,7 +96,7 @@ final class MineCost {
 		}
 		// Per item it gives, not per block: a dead bush (about a stick each) before leaves (1 in 50).
 		double perBlock = Math.max(0.01, Math.min(1.0, DropAnalysis.rate(item, state.getBlock())));
-		return (Math.sqrt(p.distSqr(bot.blockPosition())) * 5 + bestNeed) / perBlock;
+		return (Math.sqrt(p.distSqr(bot.blockPosition())) / Mode.DEFAULT.speed() + bestNeed) / perBlock;
 	}
 
 	/** Most cells looked at along a tunnel (beyond that it's too far to dig anyway). */

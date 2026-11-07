@@ -64,9 +64,11 @@ final class HuntTask {
 	private static final float LOW_HEALTH = 8;
 	private static final float RESUME_HEALTH = 10;
 	private static final int HEAL_MAX_TICKS = 600;
+	/** After a wait that didn't work: on with the hunt for this long, or it would only wait again. */
+	private static final int HEAL_RETRY_TICKS = 1200;
 
 	private enum Phase {
-		FIND, LOCATE, EXPLORE, WAIT, WAY, CHASE, FETCH, HEAL
+		FIND, LOCATE, EXPLORE, STRUCTURE, WAIT, WAY, CHASE, FETCH, HEAL
 	}
 
 	private final ServerPlayer requester;
@@ -130,7 +132,10 @@ final class HuntTask {
 		phaseTicks++;
 		// Only stop to heal when health can come back (food at 18+, or something to eat): without
 		// food it just stood there doing nothing, for nothing.
-		if (phase != Phase.HEAL && bot.getHealth() < LOW_HEALTH) {
+		if (healLater > 0) {
+			healLater--;
+		}
+		if (phase != Phase.HEAL && bot.getHealth() < LOW_HEALTH && healLater == 0) {
 			if (bot.canRegenerate()) {
 				bot.log("血量太低，先停下回血");
 				bot.movement().stop();
@@ -144,6 +149,7 @@ final class HuntTask {
 			case FIND -> find(bot);
 			case LOCATE -> locate(bot);
 			case EXPLORE -> explore(bot);
+			case STRUCTURE -> toStructure(bot);
 			case WAIT -> waitForSpawns(bot);
 			case WAY -> way(bot);
 			case CHASE -> chase(bot);
@@ -154,7 +160,11 @@ final class HuntTask {
 				yield BotTask.Status.RUNNING;
 			}
 			case HEAL -> {
-				if (bot.getHealth() >= RESUME_HEALTH || phaseTicks > HEAL_MAX_TICKS || !bot.canRegenerate()) {
+				if (phaseTicks > HEAL_MAX_TICKS) {
+					bot.log("等了 " + HEAL_MAX_TICKS / 20 + " 秒血也没回够，先继续打猎");
+					healLater = HEAL_RETRY_TICKS;
+					setPhase(Phase.FIND);
+				} else if (bot.getHealth() >= RESUME_HEALTH || !bot.canRegenerate()) {
 					setPhase(Phase.FIND);
 				}
 				yield BotTask.Status.RUNNING;
@@ -163,6 +173,8 @@ final class HuntTask {
 	}
 
 	private boolean warnedNoFood;
+	/** Ticks until it may stop to heal again. */
+	private int healLater;
 
 	private void setPhase(Phase next) {
 		phase = next;
@@ -235,6 +247,18 @@ final class HuntTask {
 		ServerLevel level = bot.level();
 		if (explorer != null) {
 			explorer.look(bot.blockPosition());
+		}
+		if (!anyAnimals(level) && !anyMonsters(level) && structuresSeen.size() < MAX_STRUCTURES) {
+			Set<Holder<net.minecraft.world.level.levelgen.structure.Structure>> where = new java.util.HashSet<>();
+			sources.keySet().forEach(t -> where.addAll(com.vale.helperbot.knowledge.StructureIndex.spawning(level, t)));
+			BlockPos at = com.vale.helperbot.knowledge.StructureIndex.nearest(level, where, bot.blockPosition(), structuresSeen);
+			if (at != null) {
+				structuresSeen.add(at);
+				bot.say(requester, Component.literal("附近没有").append(names()).append("，去 " + at.getX() + ", " + at.getZ() + " 的结构里找。"));
+				headFor(bot, at);
+				setPhase(Phase.STRUCTURE);
+				return BotTask.Status.RUNNING;
+			}
 		}
 		if (!anyAnimals(level) && !anyMonsters(level)) {
 			return fail(bot, "附近没有" + names().getString() + "，而它们不会在这个维度的任何群系里自然刷新"
@@ -386,6 +410,23 @@ final class HuntTask {
 		farTrip = true;
 		headFor(bot, t);
 		setPhase(Phase.EXPLORE);
+		return BotTask.Status.RUNNING;
+	}
+
+	private final List<BlockPos> structuresSeen = new java.util.ArrayList<>();
+	private static final int MAX_STRUCTURES = 3;
+
+	private BotTask.Status toStructure(BotPlayer bot) {
+		if (phaseTicks % 40 == 0 && nearestPrey(bot, SCAN_RADIUS) != null) {
+			bot.movement().stop();
+			setPhase(Phase.FIND);
+			return BotTask.Status.RUNNING;
+		}
+		MovementController.Status status = bot.movement().status();
+		if (status != MovementController.Status.MOVING) {
+			bot.movement().stop();
+			setPhase(Phase.FIND);
+		}
 		return BotTask.Status.RUNNING;
 	}
 
@@ -663,6 +704,7 @@ final class HuntTask {
 		return switch (phase) {
 			case FIND -> "打猎（" + what + "）：找猎物";
 			case LOCATE -> "打猎（" + what + "）：看哪里有它们";
+			case STRUCTURE -> "打猎（" + what + "）：去结构";
 			case EXPLORE -> "打猎（" + what + "）：去 " + (waypoint == null ? "?" : waypoint.getX() + ", " + waypoint.getZ())
 					+ " 找（已探索 " + (explorer == null ? 0 : explorer.seconds()) + " 秒）";
 			case WAIT -> "打猎（" + what + "）：等刷新（已等 " + waited / 20 + " 秒）";

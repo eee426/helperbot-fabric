@@ -68,7 +68,7 @@ public final class LocalPathfinder implements Planner {
 	public static final double PLAYER_HEIGHT = 1.8;
 	/** Extra ticks a jump takes over walking. */
 	public static final double ASCEND_EXTRA = 4.0;
-	static final double BREAK_OVERHEAD = 3.0;
+	public static final double BREAK_OVERHEAD = 3.0;
 	/** Feet height above the cell bottom when floating at a water surface. */
 	public static final double SWIM_FLOOR = 0.1;
 	/** Vanilla swimming speed is roughly 0.1-0.15 blocks/tick. */

@@ -31,7 +31,7 @@ import java.util.Set;
  * (from each biome's spawn list). Nothing is written per mob.
  */
 public final class MobDrops {
-	private static final int TRIALS = 60;
+	private static final int TRIALS = 400;
 
 	/** Never hunted, whatever they drop: villagers and other mobs players care about, bosses. */
 	private static final Set<EntityType<?>> PROTECTED = Set.of(

@@ -833,6 +833,9 @@ public final class MovementController {
 	 * again. A catch-all next to the specific checks (blocked, frozen, fell off the path).
 	 */
 	private boolean stepTimedOut(PathStep step) {
+		if (bot.isUsingItem()) {
+			return false; // waiting for the hands (see executeStep), not stuck
+		}
 		double expected = index < pathTicks.size() ? pathTicks.get(index) : 20;
 		if (++stepTicks <= expected + STEP_TIMEOUT_EXTRA) {
 			return false;
@@ -975,6 +978,11 @@ public final class MovementController {
 		// from where we are instead of jumping at a ledge that's no longer within reach.
 		if (bot.getY() < Math.min(step.from().getY(), step.to().getY()) - 0.6 && !body.isInWater()) {
 			replan("掉到了这一步的起点和终点下面");
+			return;
+		}
+		// Taking out a tool or a block ends a meal, and it starts over: it ate one apple nine times
+		// through a tunnel. Walking goes on while it eats, the hands wait.
+		if (bot.isUsingItem() && (breakIndex < step.toBreak().size() || step.place() != null && !placed)) {
 			return;
 		}
 		while (breakIndex < step.toBreak().size()) {

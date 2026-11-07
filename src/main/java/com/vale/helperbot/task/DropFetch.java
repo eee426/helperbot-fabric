@@ -79,7 +79,7 @@ final class DropFetch {
 	 * ten blocks off won over the ink at its feet. Whether the breath lasts is for the planner to say.
 	 */
 	static double cost(BotPlayer bot, ItemEntity e, int needed) {
-		return bot.distanceTo(e) * 5 / Math.max(1, Math.min(e.getItem().getCount(), needed));
+		return bot.distanceTo(e) / Mode.DEFAULT.speed() / Math.max(1, Math.min(e.getItem().getCount(), needed));
 	}
 
 	boolean active() {

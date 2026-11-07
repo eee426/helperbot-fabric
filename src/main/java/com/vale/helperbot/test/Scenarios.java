@@ -159,6 +159,84 @@ public final class Scenarios {
 				}, Scenario.has(Items.COBBLESTONE, 8, c -> c.logHas("吃 ") && c.logCount("控制权") <= 60,
 						"没吃东西，或者控制权换手超过 60 次")),
 
+				new Scenario("FD1", "受伤，饥饿值 17，只有金苹果（补 4 点，缺 3 点，用上 75%）：吃", 20 * 20, (a, bot, me) -> {
+					hungry(bot, 6, 17);
+					give(bot, Items.GOLDEN_APPLE, 1);
+					return null;
+				}, c -> c.count(Items.GOLDEN_APPLE) == 0 ? Scenario.Outcome.pass("吃了") : null),
+
+				new Scenario("FD2", "受伤，饥饿值 16，只有牛排（补 8 点，缺 4 点，只用上 50%）：不吃", 20 * 20, (a, bot, me) -> {
+					hungry(bot, 6, 16);
+					give(bot, Items.COOKED_BEEF, 1);
+					return null;
+				}, c -> c.count(Items.COOKED_BEEF) == 0 ? Scenario.Outcome.fail("吃了")
+						: c.ticks() > 15 * 20 ? Scenario.Outcome.pass("没吃") : null),
+
+				new Scenario("FD3", "饥饿值 14，牛排（用上 75%）：吃，放着的小面包不动", 20 * 20, (a, bot, me) -> {
+					hungry(bot, 20, 14);
+					give(bot, Items.BREAD, 1);
+					give(bot, Items.COOKED_BEEF, 1);
+					return null;
+				}, c -> c.count(Items.BREAD) == 0 ? Scenario.Outcome.fail("吃了面包，不是能吃的里最大的")
+						: c.count(Items.COOKED_BEEF) == 0 ? Scenario.Outcome.pass("吃了牛排") : null),
+
+				new Scenario("FD4", "饥饿值 16，不受伤：还不饿，不吃", 10 * 20, (a, bot, me) -> {
+					hungry(bot, 20, 16);
+					give(bot, Items.BREAD, 1);
+					return null;
+				}, c -> c.count(Items.BREAD) == 0 ? Scenario.Outcome.fail("吃了")
+						: c.ticks() > 8 * 20 ? Scenario.Outcome.pass("没吃") : null),
+
+				new Scenario("FD5", "打通石头时饿了：一口气吃完，不被挖方块打断", 4 * MINUTE, (a, bot, me) -> {
+					a.set(3, 20, 3, Blocks.DIAMOND_ORE);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 4);
+					return new AcquireTask(me, Items.DIAMOND, 1, Mode.NORMAL);
+				}, c -> {
+					if (c.ticks() == 80) {
+						hungry(c.bot(), 20, 10); // by now it's digging
+					}
+					return c.logCount("吃 ") > 1 ? Scenario.Outcome.fail("吃了 " + c.logCount("吃 ") + " 次才吃完")
+							: c.count(Items.DIAMOND) < 1 ? null
+							: c.logCount("吃 ") == 1 ? Scenario.Outcome.pass("吃了 1 次") : Scenario.Outcome.fail("一路都没吃");
+				}),
+
+				new Scenario("FD6", "打猎时血很低，手里的吃的用不上：不站着等回血，接着打", 2 * MINUTE, (a, bot, me) -> {
+					hungry(bot, 6, 16);
+					give(bot, Items.COOKED_BEEF, 1);
+					give(bot, Items.IRON_SWORD, 1);
+					a.spawn(EntityType.SHEEP, 6, Arena.SURFACE, 3);
+					return new AcquireTask(me, Items.MUTTON, 1, Mode.NORMAL);
+				}, Scenario.has(Items.MUTTON, 1, c -> !c.logHas("先停下回血"), "站着等回血了")),
+
+				new Scenario("FD7", "打猎时等回血等不到：30 秒后接着打，不再回去等", 3 * MINUTE, (a, bot, me) -> {
+					hungry(bot, 6, 20);
+					give(bot, Items.IRON_SWORD, 1);
+					a.spawn(EntityType.SHEEP, 6, Arena.SURFACE, 3);
+					return new AcquireTask(me, Items.MUTTON, 1, Mode.NORMAL);
+				}, c -> {
+					// Whatever it heals doesn't help, and healing doesn't use up the food it waits on.
+					c.bot().setHealth(6);
+					c.bot().getFoodData().setFoodLevel(20);
+					return c.logCount("先停下回血") > 1 ? Scenario.Outcome.fail("又回去等回血了")
+							: c.count(Items.MUTTON) < 1 ? (c.ended() ? Scenario.Outcome.fail("任务结束了") : null)
+							: c.logHas("血也没回够") ? Scenario.Outcome.pass("等满 30 秒后去打了") : Scenario.Outcome.fail("没等就去打了");
+				}),
+
+				new Scenario("L1", "附近有没开过的结构箱子：去开，只拿要的", 2 * MINUTE, (a, bot, me) -> {
+					a.set(9, Arena.SURFACE, 3, Blocks.CHEST);
+					chestWith(a, 9, 3, "chests/igloo_chest");
+					return new com.vale.helperbot.task.LootTask(me, Items.GOLDEN_APPLE, 1, Mode.NORMAL, java.util.Set.of(), java.util.Set.of(table("chests/igloo_chest")));
+				}, Scenario.has(Items.GOLDEN_APPLE, 1)),
+
+				new Scenario("L2", "开过的箱子是别人的：不碰", 30 * 20, (a, bot, me) -> {
+					a.set(9, Arena.SURFACE, 3, Blocks.CHEST);
+					((net.minecraft.world.level.block.entity.ChestBlockEntity) a.level.getBlockEntity(a.at(9, Arena.SURFACE, 3)))
+							.setItem(0, new ItemStack(Items.GOLDEN_APPLE));
+					return new com.vale.helperbot.task.LootTask(me, Items.GOLDEN_APPLE, 1, Mode.NORMAL, java.util.Set.of(), java.util.Set.of(table("chests/igloo_chest")));
+				}, c -> c.count(Items.GOLDEN_APPLE) > 0 ? Scenario.Outcome.fail("拿了玩家箱子里的")
+						: c.ended() ? Scenario.Outcome.pass("没碰") : null),
+
 				new Scenario("T22", "挖 10 个钻石：一处 4 个的矿堆要挖干净再去下一处", 8 * MINUTE, (a, bot, me) -> {
 					a.fill(5, -50, 5, 6, -50, 6, Blocks.DEEPSLATE_DIAMOND_ORE); // 4, the nearer vein
 					a.fill(25, -50, 25, 28, -49, 25, Blocks.DEEPSLATE_DIAMOND_ORE); // 8, further off
@@ -1482,6 +1560,20 @@ public final class Scenarios {
 	private static final String[] PLAN_RESULT = new String[2];
 	/** W36: whether the bot was seen in the swimming pose. */
 	private static final boolean[] SWAM = new boolean[1];
+
+	private static net.minecraft.resources.ResourceKey<net.minecraft.world.level.storage.loot.LootTable> table(String path) {
+		return net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.LOOT_TABLE, net.minecraft.resources.Identifier.withDefaultNamespace(path));
+	}
+
+	private static void chestWith(Arena a, int x, int z, String path) {
+		((net.minecraft.world.level.block.entity.ChestBlockEntity) a.level.getBlockEntity(a.at(x, Arena.SURFACE, z))).setLootTable(table(path), 1L);
+	}
+
+	private static void hungry(BotPlayer bot, float health, int food) {
+		bot.setHealth(health);
+		bot.getFoodData().setFoodLevel(food);
+		bot.getFoodData().setSaturation(0);
+	}
 
 	private static void give(BotPlayer bot, Item item, int count) {
 		bot.getInventory().add(new ItemStack(item, count));
