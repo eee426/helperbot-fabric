@@ -69,6 +69,8 @@ public final class LocalPathfinder implements Planner {
 	/** Extra ticks a jump takes over walking. */
 	public static final double ASCEND_EXTRA = 4.0;
 	public static final double BREAK_OVERHEAD = 3.0;
+	/** Within this above a floor it is on it: the one measure, for the body (see Body#isGrounded) and the search alike. */
+	public static final double ON_GROUND = 0.03;
 	/** Feet height above the cell bottom when floating at a water surface. */
 	public static final double SWIM_FLOOR = 0.1;
 	/** Vanilla swimming speed is roughly 0.1-0.15 blocks/tick. */
@@ -808,7 +810,7 @@ public final class LocalPathfinder implements Planner {
 		// bottom of a pit it wasn't standing, couldn't dig or build, and had no first step at all.
 		BlockState in = level.getBlockState(p);
 		double ground = BlockTable.empty(in, level, p) ? p.getY() : p.getY() + BlockTable.top(in, level, p);
-		boolean standing = Math.abs(cur - ground) < 1e-3 || Math.abs(cur - p.getY()) < 1e-3
+		boolean standing = Math.abs(cur - ground) < ON_GROUND || Math.abs(cur - p.getY()) < ON_GROUND
 				|| (!isWater(level, p) && BlockTable.top(level.getBlockState(p.below()), level, p.below()) > 1 + 1e-6);
 		digsDry = !isWater(level, p.above());
 		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), standing, digsDry && isWater(level, p));

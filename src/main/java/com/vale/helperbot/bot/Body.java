@@ -126,7 +126,7 @@ final class Body {
 	}
 
 	boolean isGrounded() {
-		return !bot.level().noCollision(bot, bot.getBoundingBox().move(0, -0.03, 0));
+		return !bot.level().noCollision(bot, bot.getBoundingBox().move(0, -LocalPathfinder.ON_GROUND, 0));
 	}
 
 	boolean isInWater() {
@@ -146,6 +146,12 @@ final class Body {
 	void fall(boolean working) {
 		if (isGrounded()) {
 			verticalVelocity = 0;
+			// The rest of the way down, so the feet are on the floor itself: a bot left hovering
+			// 0.009 over a pit's floor counted as on the ground here and not as standing for the
+			// search, and could neither dig nor build its way out.
+			if (!collides(bot.getBoundingBox().move(0, -1e-4, 0))) {
+				moveDown(-LocalPathfinder.ON_GROUND);
+			}
 			return;
 		}
 		BlockPos f = feet();

@@ -184,6 +184,17 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.IRON_PICKAXE, 1, Mode.AGGRESSIVE);
 				}, Scenario.has(Items.IRON_PICKAXE, 1)),
 
+				new Scenario("ST11", "同 ST3，但机器人悬在坑底上方 0.0093 格（玩家报告：进游戏时就停在这个高度）", MINUTE, (a, bot, me) -> {
+					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.STONE);
+					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
+					teleport(bot, a, 0, Arena.SURFACE - 2, 0);
+					bot.setPos(bot.getX(), bot.getY() + 0.0093, bot.getZ());
+					give(bot, Items.COBBLESTONE, 8);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					return new AcquireTask(me, Items.STONE_AXE, 1, Mode.NORMAL);
+				}, Scenario.has(Items.STONE_AXE, 1)),
+
 				new Scenario("ST4", "同上，但手里一个能垫的方块都没有", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
 					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
