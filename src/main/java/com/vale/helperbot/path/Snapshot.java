@@ -30,6 +30,8 @@ public final class Snapshot implements BlockGetter, InDimension {
 	private static final BlockState VOID = Blocks.VOID_AIR.defaultBlockState();
 
 	private final ResourceKey<Level> dimension;
+	/** The dimension has a roof (the Nether): see Worlds#hasCeiling. */
+	final boolean hasCeiling;
 	private final int minY, height;
 	/** Copied chunks: x from minCX, z from minCZ, sizeX by sizeZ; sections from minSection up. */
 	private final int minCX, minCZ, sizeX, sizeZ, minSection, sections;
@@ -46,6 +48,7 @@ public final class Snapshot implements BlockGetter, InDimension {
 	@SuppressWarnings("unchecked")
 	private Snapshot(ServerLevel level, int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
 		this.dimension = level.dimension();
+		this.hasCeiling = level.dimensionType().hasCeiling();
 		this.minY = level.getMinY();
 		this.height = level.getHeight();
 		this.generator = level.getChunkSource().getGenerator();

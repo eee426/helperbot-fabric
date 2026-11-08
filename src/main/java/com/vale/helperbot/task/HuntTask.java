@@ -547,7 +547,7 @@ final class HuntTask {
 	/** Where the prey lives: animals on the surface; monsters anywhere dark (see {@link Habitat}). */
 	private Habitat.Layer layer(ServerLevel level) {
 		if (layer == null) {
-			layer = Habitat.ofAll(sources.keySet());
+			layer = Habitat.in(level, Habitat.ofAll(sources.keySet()));
 		}
 		return layer;
 	}

@@ -172,8 +172,12 @@ final class Station {
 	}
 
 	/** The nearest spot of dry ground on top of what's loaded, ring by ring of chunks; null if it's all water. */
+	/** Under a roof: dry ground this far above or below its own height counts. */
+	private static final int NEAR_HEIGHT = 8;
+
 	private BlockPos nearestDryGround(BotPlayer bot) {
 		ServerLevel level = bot.level();
+		boolean ceiling = com.vale.helperbot.path.Worlds.hasCeiling(level);
 		BlockPos feet = bot.movement().feet();
 		int breath = Air.fullBudget(bot);
 		int cx = feet.getX() >> 4, cz = feet.getZ() >> 4;
@@ -188,6 +192,18 @@ final class Station {
 					}
 					for (int i = 0; i < 16; i++) {
 						for (int j = 0; j < 16; j++) {
+							if (ceiling) {
+								// Under a roof the top of the column is the bedrock: dry ground near its own height instead.
+								for (int dy = -NEAR_HEIGHT; dy <= NEAR_HEIGHT; dy++) {
+									BlockPos q = new BlockPos(x * 16 + i, feet.getY() + dy, z * 16 + j);
+									double d = q.distSqr(feet);
+									if (d < bestDist && roomBeside(level, q) && !unreachable.covers(q, breath, feet)) {
+										best = q;
+										bestDist = d;
+									}
+								}
+								continue;
+							}
 							BlockPos q = new BlockPos(x * 16 + i, chunk.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, i, j) + 1, z * 16 + j);
 							double d = q.distSqr(feet);
 							if (d < bestDist && roomBeside(level, q) && !unreachable.covers(q, breath, feet)) {

@@ -14,6 +14,19 @@ public final class Worlds {
 	private Worlds() {
 	}
 
+	/**
+	 * The dimension has a roof (the Nether's bedrock): there's no surface to go up to. The top of
+	 * its columns is that roof, and everything that took "the top" for the open ground (going up to
+	 * run, the height of far places, out under the sky, how deep something is buried, dry ground to
+	 * put a table on) climbed for the bedrock.
+	 */
+	public static boolean hasCeiling(BlockGetter world) {
+		if (world instanceof Snapshot s) {
+			return s.hasCeiling;
+		}
+		return world instanceof net.minecraft.world.level.Level level && level.dimensionType().hasCeiling();
+	}
+
 	/** Is the chunk there (loaded live, or copied into the snapshot)? */
 	public static boolean loaded(BlockGetter world, BlockPos pos) {
 		if (world instanceof Snapshot s) {

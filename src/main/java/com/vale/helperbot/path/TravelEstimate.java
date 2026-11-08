@@ -93,6 +93,9 @@ public final class TravelEstimate {
 	 * there now, the roof of a house was the ground, and it climbed onto it instead of walking out.
 	 */
 	private int depth(BlockPos p) {
+		if (Worlds.hasCeiling(level)) {
+			return 0; // no surface (see Worlds#hasCeiling): on it, as far as going there goes
+		}
 		long key = BlockPos.asLong(p.getX(), 0, p.getZ());
 		int y = surface.get(key);
 		if (y == Integer.MIN_VALUE) {

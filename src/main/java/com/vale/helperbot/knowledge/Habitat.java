@@ -61,9 +61,14 @@ public final class Habitat {
 		return result == null ? Layer.ANY : result;
 	}
 
+	/** Under a roof (see Worlds#hasCeiling) there's no surface: what lives on top of things there lives anywhere. */
+	public static Layer in(ServerLevel level, Layer layer) {
+		return layer == Layer.SURFACE && com.vale.helperbot.path.Worlds.hasCeiling(level) ? Layer.ANY : layer;
+	}
+
 	/** Where to head for {@code xz}: on the surface there for surface things, else at the bot's own height. */
 	public static BlockPos target(ServerLevel level, BlockPos xz, Layer layer, BlockPos bot) {
-		return layer == Layer.SURFACE ? new BlockPos(xz.getX(), com.vale.helperbot.path.Worlds.surfaceY(level, xz.getX(), xz.getZ()), xz.getZ())
+		return in(level, layer) == Layer.SURFACE ? new BlockPos(xz.getX(), com.vale.helperbot.path.Worlds.surfaceY(level, xz.getX(), xz.getZ()), xz.getZ())
 				: xz.atY(bot.getY());
 	}
 
@@ -78,12 +83,12 @@ public final class Habitat {
 		return (w, p) -> {
 			long dx = p.getX() - xz.getX(), dz = p.getZ() - xz.getZ();
 			return dx * dx + dz * dz <= r2
-					&& (layer != Layer.SURFACE || p.getY() >= com.vale.helperbot.path.Worlds.surfaceY(w, p.getX(), p.getZ()) - 1);
+					&& (layer != Layer.SURFACE || com.vale.helperbot.path.Worlds.hasCeiling(w) || p.getY() >= com.vale.helperbot.path.Worlds.surfaceY(w, p.getX(), p.getZ()) - 1);
 		};
 	}
 
 	/** Out in the open: nothing but sky over the head (a tree's leaves don't count as a roof). */
 	public static boolean onSurface(ServerLevel level, BlockPos feet) {
-		return feet.getY() >= level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, feet.getX(), feet.getZ()) - 1;
+		return com.vale.helperbot.path.Worlds.hasCeiling(level) || feet.getY() >= level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, feet.getX(), feet.getZ()) - 1;
 	}
 }

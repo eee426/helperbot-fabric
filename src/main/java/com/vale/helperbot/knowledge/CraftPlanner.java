@@ -846,6 +846,9 @@ public final class CraftPlanner {
 	 * really takes, and the step down (other source blocks, like the rest of a trunk, don't count).
 	 */
 	private double buried(Item item, BlockPos p) {
+		if (com.vale.helperbot.path.Worlds.hasCeiling(level)) {
+			return 0; // no surface to dig down from (see Worlds#hasCeiling): the way there is all it takes
+		}
 		Set<Block> sources = sourceBlocks.get(item);
 		int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, p.getX(), p.getZ());
 		int solid = 0;
@@ -1698,6 +1701,9 @@ public final class CraftPlanner {
 
 	/** Ticks to dig down to {@code p} from the surface, with what's in the bag (0 if it's out in the open). */
 	private double digDownTo(BlockPos p) {
+		if (com.vale.helperbot.path.Worlds.hasCeiling(level)) {
+			return 0; // as for #buried
+		}
 		int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, p.getX(), p.getZ());
 		double ticks = 0;
 		int solid = 0;

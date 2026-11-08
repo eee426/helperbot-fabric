@@ -215,6 +215,67 @@ public final class Scenarios {
 					return c.bot().getInventory().countItem(Items.OAK_LOG) >= 1 ? Scenario.Outcome.pass("出了水拿到了") : null;
 				}),
 
+				new Scenario("NE1", "在地狱里（真实生成的地形）去东边 400 格外：不往基岩顶上爬（玩家报告：地狱里一直想上基岩顶）", 3 * MINUTE, (a, bot, me) -> {
+					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+					BlockPos start = null;
+					for (int x = 0; x < 400 && start == null; x += 8) {
+						nether.getChunk(x >> 4, 0);
+						for (int y = 40; y < 100 && start == null; y++) {
+							BlockPos p = new BlockPos(x, y, 0);
+							if (nether.getBlockState(p).isAir() && nether.getBlockState(p.above()).isAir()
+									&& nether.getBlockState(p.below()).isSolidRender() && nether.getFluidState(p.below()).isEmpty()) {
+								start = p;
+							}
+						}
+					}
+					if (start == null) {
+						PLAN_RESULT[0] = "地狱里找不到能站的起点";
+						return null;
+					}
+					PLAN_RESULT[0] = null;
+					PLAN_RESULT[1] = start.getX() + "," + start.getY();
+					bot.teleportTo(nether, start.getX() + 0.5, start.getY(), start.getZ() + 0.5, Set.of(), 0, 0, true);
+					bot.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE, 20 * 600));
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					BlockPos far = start.offset(400, 0, 0);
+					return new com.vale.helperbot.bot.BotTask() {
+						private boolean sent;
+
+						@Override
+						public Status tick(BotPlayer b) {
+							if (!sent) {
+								sent = true;
+								b.movement().goTo(com.vale.helperbot.knowledge.Habitat.arrived(far, 16, com.vale.helperbot.knowledge.Habitat.Layer.ANY),
+										far, Mode.NORMAL, true);
+							}
+							return Status.RUNNING;
+						}
+
+						@Override
+						public void onEnd(BotPlayer b, Status status) {
+						}
+
+						@Override
+						public String describe() {
+							return "去地狱东边 400 格外";
+						}
+					};
+				}, c -> {
+					if (PLAN_RESULT[0] != null) {
+						return Scenario.Outcome.fail(PLAN_RESULT[0]);
+					}
+					if (c.bot().level().dimension() != net.minecraft.world.level.Level.NETHER) {
+						return null; // not there yet
+					}
+					if (c.bot().getY() >= 118) {
+						return Scenario.Outcome.fail("往基岩顶上爬了（y=" + (int) c.bot().getY() + "，起点 " + PLAN_RESULT[1] + "）");
+					}
+					int startX = Integer.parseInt(PLAN_RESULT[1].split(",")[0]);
+					return c.bot().getX() - startX >= 48 ? Scenario.Outcome.pass("往东走了 48 格，现在 y=" + (int) c.bot().getY()) : null;
+				}),
+
 				new Scenario("ST4", "同上，但手里一个能垫的方块都没有", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
 					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);

@@ -119,7 +119,7 @@ public final class BiomeHints {
 				}
 			}
 		}
-		return surface == underground ? Habitat.Layer.ANY : surface ? Habitat.Layer.SURFACE : Habitat.Layer.UNDERGROUND;
+		return Habitat.in(level, surface == underground ? Habitat.Layer.ANY : surface ? Habitat.Layer.SURFACE : Habitat.Layer.UNDERGROUND);
 	}
 
 	/** For checking it against the world: every block it knows of, the biomes and how many per chunk. */
