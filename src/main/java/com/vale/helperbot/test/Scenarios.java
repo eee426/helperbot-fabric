@@ -116,6 +116,63 @@ public final class Scenarios {
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
+				new Scenario("C38", "空背包要 1 个红石粉：挖红石矿，不去等女巫（女巫只占怪物刷新的 1%）（只规划）", 20, (a, bot, me) -> {
+					a.tree(6, 6, 5);
+					a.tree(-7, 5, 5);
+					a.fill(3, 30, -3, 4, 31, -2, Blocks.IRON_ORE);
+					a.fill(-3, 32, 3, -2, 33, 4, Blocks.COAL_ORE);
+					a.fill(-4, 20, 4, -3, 20, 5, Blocks.REDSTONE_ORE);
+					give(bot, Items.BREAD, 16);
+					CraftPlanner.Plan plan = new CraftPlanner(a.level, bot, bot.getInventory(), new HashSet<>())
+							.plan(Items.REDSTONE, 1, CraftPlanner.counts(bot.getInventory()));
+					PLAN_RESULT[0] = !plan.possible() ? "规划失败：" + plan.problems().stream().limit(4).map(x -> x.getString()).toList()
+							: plan.actions().stream().anyMatch(x -> x instanceof CraftPlanner.Hunt)
+							? "计划里要打怪：" + plan.actions().stream().filter(x -> x instanceof CraftPlanner.Hunt).toList()
+							: plan.actions().stream().noneMatch(x -> x instanceof CraftPlanner.Gather g && g.item() == Items.REDSTONE)
+							? "计划里没有挖红石" : null;
+					PLAN_RESULT[1] = (plan.possible() ? plan.actions().size() : 0) + " 步，预计 " + (int) (plan.ticks() / 20) + " 秒";
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
+				new Scenario("H5", "关在有屋顶的房子里，背后墙上有个 2×2 的洞，要去 400 格外：从洞走出去，不往房顶上搭（玩家报告）", MINUTE, (a, bot, me) -> {
+					a.fill(-3, Arena.SURFACE, -3, 3, Arena.SURFACE + 3, 3, Blocks.COBBLESTONE);
+					a.fill(-2, Arena.SURFACE, -2, 2, Arena.SURFACE + 2, 2, Blocks.AIR);
+					a.fill(-3, Arena.SURFACE, 0, -3, Arena.SURFACE + 1, 1, Blocks.AIR); // the hole, on the far side from where it goes
+					a.set(1, Arena.SURFACE, 2, Blocks.WHITE_BED);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.COBBLESTONE, 17);
+					BlockPos far = a.at(400, Arena.SURFACE, 0);
+					return new com.vale.helperbot.bot.BotTask() {
+						private boolean sent;
+
+						@Override
+						public Status tick(BotPlayer b) {
+							if (!sent) {
+								sent = true;
+								b.movement().goTo(com.vale.helperbot.knowledge.Habitat.arrived(far, 16, com.vale.helperbot.knowledge.Habitat.Layer.ANY),
+										far, Mode.AGGRESSIVE, true);
+							}
+							return Status.RUNNING;
+						}
+
+						@Override
+						public void onEnd(BotPlayer b, Status status) {
+						}
+
+						@Override
+						public String describe() {
+							return "去 400 格外";
+						}
+					};
+				}, c -> {
+					BlockPos p = c.bot().blockPosition(), o = c.arena().at(0, Arena.SURFACE, 0);
+					if (p.getY() >= o.getY() + 3) {
+						return Scenario.Outcome.fail("往上搭到了房顶（y=" + p.getY() + "）");
+					}
+					return Math.abs(p.getX() - o.getX()) > 4 || Math.abs(p.getZ() - o.getZ()) > 4
+							? Scenario.Outcome.pass("从墙上的洞走出去了") : null;
+				}),
+
 				new Scenario("C37", "镐都快坏了（耐久 1）还要钻石镐：规划里要先做新铁镐（只规划）", 20, (a, bot, me) -> {
 					a.tree(6, 6, 5);
 					a.tree(-7, 5, 5);

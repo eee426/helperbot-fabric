@@ -43,6 +43,8 @@ public final class MobDrops {
 	private static Map<Item, Map<EntityType<?>, Double>> index;
 	/** mob type -> biomes of this dimension it spawns in naturally. */
 	private static Map<EntityType<?>, Set<Holder<Biome>>> spawnBiomes;
+	/** mob type -> how common it is among its kind where it's most common (see #commonness). */
+	private static Map<EntityType<?>, Double> commonness;
 
 	private MobDrops() {
 	}
@@ -50,6 +52,7 @@ public final class MobDrops {
 	public static void clearCache() {
 		index = null;
 		spawnBiomes = null;
+		commonness = null;
 	}
 
 	/** Mobs that drop {@code item} when killed by the bot, with drops per kill. */
@@ -61,6 +64,18 @@ public final class MobDrops {
 	public static Set<Holder<Biome>> spawnBiomes(ServerLevel level, EntityType<?> type) {
 		buildSpawns(level);
 		return spawnBiomes.getOrDefault(type, Set.of());
+	}
+
+	/**
+	 * How often this mob turns up next to the others of its kind (monsters, animals...), in the
+	 * biome where it's most common, from the biomes' spawn weights: 1 for one of average weight,
+	 * more for the common ones, less for the rare. In plains a witch has weight 5 of 515 among
+	 * nine monsters: about 0.09, one turning up for every eleven of an average monster. 1 if it
+	 * doesn't spawn naturally.
+	 */
+	public static double commonness(ServerLevel level, EntityType<?> type) {
+		buildSpawns(level);
+		return commonness.getOrDefault(type, 1.0);
 	}
 
 	/** May the bot hunt this particular mob? No pets, named or leashed mobs, babies or protected kinds. */
@@ -126,14 +141,26 @@ public final class MobDrops {
 			return;
 		}
 		Map<EntityType<?>, Set<Holder<Biome>>> built = new HashMap<>();
+		Map<EntityType<?>, Double> common = new HashMap<>();
 		for (Holder<Biome> biome : level.getChunkSource().getGenerator().getBiomeSource().possibleBiomes()) {
 			MobSpawnSettings settings = biome.value().getMobSettings();
 			for (MobCategory category : MobCategory.values()) {
-				for (Weighted<MobSpawnSettings.SpawnerData> entry : settings.getMobs(category).unwrap()) {
+				var entries = settings.getMobs(category).unwrap();
+				int total = 0;
+				for (Weighted<MobSpawnSettings.SpawnerData> entry : entries) {
+					total += entry.weight();
+				}
+				for (Weighted<MobSpawnSettings.SpawnerData> entry : entries) {
 					built.computeIfAbsent(entry.value().type(), k -> new HashSet<>()).add(biome);
+					if (total > 0) {
+						// Its share, against the share of one of average weight (1 / how many kinds).
+						double c = (double) entry.weight() * entries.size() / total;
+						common.merge(entry.value().type(), c, Math::max);
+					}
 				}
 			}
 		}
+		commonness = common;
 		spawnBiomes = built;
 	}
 }

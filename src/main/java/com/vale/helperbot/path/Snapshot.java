@@ -158,6 +158,17 @@ public final class Snapshot implements BlockGetter, InDimension {
 		return null;
 	}
 
+	/** The terrain's top here, as world generation made it, whatever has been built or dug since. */
+	public int groundY(int x, int z) {
+		long key = BlockPos.asLong(x, 0, z);
+		int y = generated.get(key);
+		if (y == Integer.MIN_VALUE) {
+			y = generator.getBaseHeight(x, z, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, this, randomState);
+			generated.put(key, y);
+		}
+		return y;
+	}
+
 	public int surfaceY(int x, int z) {
 		int c = chunk(x, z);
 		if (c >= 0 && loadedChunks[c]) {

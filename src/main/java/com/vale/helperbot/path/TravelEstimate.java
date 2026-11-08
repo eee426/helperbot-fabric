@@ -87,21 +87,39 @@ public final class TravelEstimate {
 
 	/**
 	 * Blocks below the surface at this column (0 or less: on or above it). The surface is the
-	 * highest of this column and a few around it: a shaft it dug itself (or any narrow hole) isn't
-	 * the ground level there. Reading the column alone, its own shaft made it "always on the
-	 * surface" while digging down.
+	 * terrain as world generation made it (see Worlds#groundY), the highest of this column and a few
+	 * around it: a shaft it dug itself (or any narrow hole) isn't the ground level there. Reading the
+	 * column alone, its own shaft made it "always on the surface" while digging down; reading what's
+	 * there now, the roof of a house was the ground, and it climbed onto it instead of walking out.
 	 */
 	private int depth(BlockPos p) {
 		long key = BlockPos.asLong(p.getX(), 0, p.getZ());
 		int y = surface.get(key);
 		if (y == Integer.MIN_VALUE) {
-			y = Worlds.surfaceY(level, p.getX(), p.getZ());
+			y = ground(p.getX(), p.getZ());
 			for (int[] o : new int[][]{{AROUND, 0}, {-AROUND, 0}, {0, AROUND}, {0, -AROUND}}) {
-				y = Math.max(y, Worlds.surfaceY(level, p.getX() + o[0], p.getZ() + o[1]));
+				y = Math.max(y, ground(p.getX() + o[0], p.getZ() + o[1]));
 			}
 			surface.put(key, y);
 		}
 		return y - p.getY();
+	}
+
+	/** One column's ground, worked out once: world generation is asked for it (see Worlds#groundY). */
+	private int ground(int x, int z) {
+		long key = BlockPos.asLong(x, 0, z);
+		int y = grounds.get(key);
+		if (y == Integer.MIN_VALUE) {
+			y = Worlds.groundY(level, x, z);
+			grounds.put(key, y);
+		}
+		return y;
+	}
+
+	private final Long2IntOpenHashMap grounds = new Long2IntOpenHashMap();
+
+	{
+		grounds.defaultReturnValue(Integer.MIN_VALUE);
 	}
 
 	private static double sq(double v) {

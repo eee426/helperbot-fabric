@@ -32,6 +32,7 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.structure.Structure;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -592,7 +593,7 @@ public final class CraftPlanner {
 		Map<Block, List<String>> candidates = DropAnalysis.candidates(level, breaker, item);
 		Map<Block, List<Item>> toolsFor = new LinkedHashMap<>();
 		boolean ready = false;
-		for (Block block : candidates.keySet()) {
+		for (Block block : found(item, candidates.keySet())) {
 			if (DropAnalysis.handDrops(level, breaker, block, item)
 					|| DropAnalysis.toolSlotFor(level, breaker, realInventory, block, item) != DropAnalysis.NONE) {
 				ready = true;
@@ -993,7 +994,7 @@ public final class CraftPlanner {
 			long started = System.nanoTime();
 			List<Item> tools = new ArrayList<>();
 			boolean ready = false;
-			for (Block block : DropAnalysis.candidates(level, breaker, i).keySet()) {
+			for (Block block : found(i, DropAnalysis.candidates(level, breaker, i).keySet())) {
 				if (DropAnalysis.handDrops(level, breaker, block, i)
 						|| DropAnalysis.toolSlotFor(level, breaker, realInventory, block, i) != DropAnalysis.NONE) {
 					ready = true;
@@ -1009,6 +1010,26 @@ public final class CraftPlanner {
 			tDrops += System.nanoTime() - started;
 			return !ready && tools.isEmpty() ? NO_PLAIN_TOOL : tools;
 		});
+	}
+
+	/**
+	 * Of the blocks that drop it, those it would really find: around it, or made by the world
+	 * (biomes, see BiomeHints). All of them if none is. Redstone wire gives redstone to a bare hand,
+	 * but nobody's laid any in the wild: going by it, redstone looked like it took no pickaxe, and
+	 * the ore it found then couldn't be mined.
+	 */
+	private Collection<Block> found(Item item, Collection<Block> candidates) {
+		Set<Block> there = new HashSet<>();
+		for (BlockPos p : sites(item)) {
+			there.add(level.getBlockState(p).getBlock());
+		}
+		for (Block block : candidates) {
+			if (!BiomeHints.perChunk(level, List.of(block)).isEmpty()) {
+				there.add(block);
+			}
+		}
+		there.retainAll(candidates);
+		return there.isEmpty() ? candidates : there;
 	}
 
 	/** See {@link #gatherTools}: compared by identity. */
@@ -1265,7 +1286,24 @@ public final class CraftPlanner {
 				: animals ? ticks(TRIP_BLOCKS) : ticksToDark();
 		double kill = killTicks(prey) + ticks(CHASE_BLOCKS) + PICKUP_TICKS;
 		double near = Math.min(kills, around);
-		return trip + near * kill + (kills - near) * (kill + (animals ? ticks(NEXT_HERD_BLOCKS) : SPAWN_WAIT_PER_KILL));
+		return trip + near * kill + (kills - near) * (kill + waitPerKill(prey));
+	}
+
+	/**
+	 * Ticks to the next one, once those around are used up: an average animal is the walk to the
+	 * next herd, an average monster the wait for one to spawn. By how common each is among its kind
+	 * (spawn weights, see MobDrops#commonness), and by what it drops: a witch turns up for every
+	 * eleven of an average monster, so waiting for one takes eleven times as long. (They were all one,
+	 * and witches, dropping a bit of everything, came up in plan after plan.)
+	 */
+	private double waitPerKill(Map<EntityType<?>, Double> prey) {
+		double best = Double.POSITIVE_INFINITY;
+		for (EntityType<?> type : prey.keySet()) {
+			double base = type.getCategory() == MobCategory.MONSTER ? SPAWN_WAIT_PER_KILL : ticks(NEXT_HERD_BLOCKS);
+			double common = MobDrops.spawnBiomes(level, type).isEmpty() ? 1 : MobDrops.commonness(level, type);
+			best = Math.min(best, base / Math.max(1e-3, common));
+		}
+		return Double.isInfinite(best) ? SPAWN_WAIT_PER_KILL : best;
 	}
 
 	/** None of it spawns out in the world: it's in structures or nowhere. */

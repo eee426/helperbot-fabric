@@ -23,6 +23,19 @@ public final class Worlds {
 	}
 
 	/**
+	 * The terrain's top in this column, as world generation made it: what's built on it (a house's
+	 * roof) or dug out of it doesn't count. For where open ground is, not for what's there now.
+	 */
+	public static int groundY(BlockGetter world, int x, int z) {
+		if (world instanceof Snapshot s) {
+			return s.groundY(x, z);
+		}
+		ServerLevel level = (ServerLevel) world;
+		return level.getChunkSource().getGenerator().getBaseHeight(x, z, Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+				level, level.getChunkSource().randomState());
+	}
+
+	/**
 	 * Y of the first free cell above the ground in this column, where you'd stand: read from the
 	 * world if that chunk is loaded, otherwise worked out from world generation without loading
 	 * anything (like the biome search does).

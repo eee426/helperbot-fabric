@@ -359,7 +359,7 @@ public final class LocalPathfinder implements Planner {
 			}
 		}
 		Node end = partialEnd();
-		result = end == startNode ? Result.EMPTY : beforeBuilding(reconstruct(end, false));
+		result = end == startNode ? Result.EMPTY : beforeBuilding(reconstruct(end, false), end.blocks);
 		progress = (heuristic(origin) - heuristic(end.pos)) / walkCost;
 		return true;
 	}
@@ -754,10 +754,12 @@ public final class LocalPathfinder implements Planner {
 
 	/**
 	 * Out of blocks on the way, a path that doesn't get there stops short of the first one laid: out
-	 * on a bridge it can't finish, it would stand over the drop with nothing left to go on with.
+	 * on a bridge it can't finish, it would stand over the drop with nothing left to go on with. Only
+	 * this path's own blocks count: that other routes of the search ran short says nothing of this
+	 * one (it was cut to nothing in a house for a step up it had the blocks for, and stood there).
 	 */
-	private Result beforeBuilding(Result partial) {
-		if (blocksShort == 0) {
+	private Result beforeBuilding(Result partial, int blocksLeft) {
+		if (blocksLeft > 0) {
 			return partial;
 		}
 		for (int i = 0; i < partial.steps().size(); i++) {
