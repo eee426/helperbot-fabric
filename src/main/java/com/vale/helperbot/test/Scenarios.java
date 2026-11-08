@@ -195,6 +195,26 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.STONE_AXE, 1, Mode.NORMAL);
 				}, Scenario.has(Items.STONE_AXE, 1)),
 
+				new Scenario("W69", "在水池里往下沉（离整数高度差一点），池边外面是一道很深的空沟，沟对面的岸上有树；背包里有圆石（玩家报告：在水里一直搭桥失败，淹死）", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(-5, Arena.SURFACE - 14, -4, 9, Arena.SURFACE - 1, 4, Blocks.STONE);
+					a.fill(-4, Arena.SURFACE - 10, -3, 0, Arena.SURFACE - 1, 3, Blocks.WATER);
+					a.fill(1, Arena.SURFACE - 13, -3, 3, Arena.SURFACE - 1, 3, Blocks.AIR);
+					a.tree(14, 0, 5);
+					teleport(bot, a, -1, Arena.SURFACE - 3, 0);
+					bot.setPos(bot.getX(), bot.getY() + 0.01, bot.getZ());
+					give(bot, Items.COBBLESTONE, 32);
+					give(bot, Items.BREAD, 8);
+					return new AcquireTask(me, Items.OAK_LOG, 1, Mode.NORMAL);
+				}, c -> {
+					if (c.log().contains("搭桥放方块失败")) {
+						return Scenario.Outcome.fail("在水里搭桥放方块失败");
+					}
+					if (!c.bot().isAlive()) {
+						return Scenario.Outcome.fail("死了");
+					}
+					return c.bot().getInventory().countItem(Items.OAK_LOG) >= 1 ? Scenario.Outcome.pass("出了水拿到了") : null;
+				}),
+
 				new Scenario("ST4", "同上，但手里一个能垫的方块都没有", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
 					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);

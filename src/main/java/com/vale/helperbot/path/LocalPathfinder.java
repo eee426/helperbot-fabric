@@ -812,8 +812,22 @@ public final class LocalPathfinder implements Planner {
 		double ground = BlockTable.empty(in, level, p) ? p.getY() : p.getY() + BlockTable.top(in, level, p);
 		boolean standing = Math.abs(cur - ground) < ON_GROUND || Math.abs(cur - p.getY()) < ON_GROUND
 				|| (!isWater(level, p) && BlockTable.top(level.getBlockState(p.below()), level, p.below()) > 1 + 1e-6);
+		// Where it really is, a height alone isn't a floor: sinking through water it passed whole
+		// heights, within ON_GROUND of each it was "standing", and bridged out of the water over a
+		// drop, against nothing, over and over till it drowned. So there it needs one under it.
+		// The same in the water, where nothing the plan puts down is ever under it. (Elsewhere further
+		// on, the heights are the plan's own: on what the plan stands, a block it puts down a step
+		// earlier among them, which the world doesn't have yet.)
+		boolean atStart = p.equals(origin) && cur == startNode.floor;
+		if ((atStart || isWater(level, p)) && standing && BlockTable.empty(in, level, p)) {
+			BlockState under = level.getBlockState(p.below());
+			double top = BlockTable.empty(under, level, p.below()) ? 0 : BlockTable.top(under, level, p.below());
+			standing = top >= 1 - 1e-3 || (!isWater(level, p) && top > 1 + 1e-6);
+		}
 		digsDry = !isWater(level, p.above());
-		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), standing, digsDry && isWater(level, p));
+		// Still in the water where it is, it may dig sideways as it always could from there (what
+		// it may mine is the hand's gate's to say: see Guard); only building and digging down need the floor.
+		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), standing, isWater(level, p));
 		for (Move move : Moves.ALL) {
 			move.addSteps(this, p, cur, from, out);
 		}
