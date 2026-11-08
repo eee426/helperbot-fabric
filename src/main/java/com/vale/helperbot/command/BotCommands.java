@@ -112,6 +112,9 @@ public final class BotCommands {
 						.then(Commands.literal("portals")
 								.then(Commands.literal("on").executes(ctx -> setPortals(ctx, true)))
 								.then(Commands.literal("off").executes(ctx -> setPortals(ctx, false)))))
+				// For the remote's item list: where each item comes from (see WhereFrom), one marked
+				// line the remote reads and hides.
+				.then(Commands.literal("where").executes(BotCommands::whereFrom))
 				.then(Commands.literal("protect")
 						.executes(BotCommands::protectChunk)
 						.then(Commands.literal("list").executes(BotCommands::listChunks))
@@ -312,6 +315,32 @@ public final class BotCommands {
 				+ (bad > 0 ? "，" + bad + " 个写法不对没处理" : "") + "。取消保护只能在服务器后台按 ID 执行。";
 		ctx.getSource().sendSuccess(() -> Component.literal(text), true);
 		return added;
+	}
+
+	/** Start of the reply to /bot where: the remote hides lines starting with this. */
+	public static final String WHERE_MARKER = "[helperbot-where]";
+
+	/**
+	 * "/bot where": the items that need the Nether, the End, or can't be had at all, as
+	 * "n=id,id;e=id,...;x=id,...". Everything else comes from the Overworld.
+	 */
+	private static int whereFrom(CommandContext<CommandSourceStack> ctx) {
+		var places = com.vale.helperbot.knowledge.WhereFrom.all(ctx.getSource().getServer());
+		StringBuilder n = new StringBuilder("n="), e = new StringBuilder(";e="), x = new StringBuilder(";x=");
+		places.forEach((item, place) -> {
+			StringBuilder to = switch (place) {
+				case NETHER -> n;
+				case END -> e;
+				case NONE -> x;
+				default -> null;
+			};
+			if (to != null) {
+				to.append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item)).append(',');
+			}
+		});
+		String text = WHERE_MARKER + n + e + x;
+		ctx.getSource().sendSuccess(() -> Component.literal(text), false);
+		return places.size();
 	}
 
 	/** "/bot protect query x z radius": the protected chunks around chunk (x, z), as "id,x,z;...". */

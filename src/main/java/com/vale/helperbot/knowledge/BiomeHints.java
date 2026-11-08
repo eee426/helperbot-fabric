@@ -59,9 +59,12 @@ public final class BiomeHints {
 	private static final double WHOLE_CHUNK = 256;
 	/** Water freezes, and snow settles, below this temperature (vanilla). */
 	private static final float FREEZING = 0.15f;
-	/** Keys whose blocks are conditions, not what's put down. */
+	/**
+	 * Keys whose blocks are conditions, not what's put down. ("blocks" isn't one: as a condition it
+	 * only names blocks, never states, so it adds nothing; and it's where a geode keeps its layers.)
+	 */
 	private static final Set<String> CONDITIONS = Set.of("target", "predicate", "valid_blocks", "can_place_on", "can_be_placed_on",
-			"replaceable", "blocks", "match", "can_place_below", "cannot_replace", "allowed_blocks", "placed_on", "rule_test",
+			"replaceable", "match", "can_place_below", "cannot_replace", "allowed_blocks", "placed_on", "rule_test",
 			"location_predicate", "input_predicate", "position_predicate", "target_state");
 
 	private record Index(Map<Block, Map<Holder<Biome>, Double>> perChunk, Map<Block, Set<GenerationStep.Decoration>> steps,

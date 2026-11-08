@@ -790,6 +790,39 @@ public final class Scenarios {
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
+				new Scenario("P2", "遥控选物品用的指令 /bot where：烈焰棒在地狱，末地石在末地，鞘翅拿不到，铁锭在主世界", 20, (a, bot, me) -> {
+					var server = a.level.getServer();
+					StringBuilder reply = new StringBuilder();
+					server.getCommands().performPrefixedCommand(me.createCommandSourceStack()
+									.withSource(new net.minecraft.commands.CommandSource() {
+										public void sendSystemMessage(net.minecraft.network.chat.Component message) {
+											reply.append(message.getString());
+										}
+
+										public boolean acceptsSuccess() {
+											return true;
+										}
+
+										public boolean acceptsFailure() {
+											return true;
+										}
+
+										public boolean shouldInformAdmins() {
+											return false;
+										}
+									}),
+							"bot where");
+					String r = reply.toString();
+					int n = r.indexOf("n="), e = r.indexOf(";e="), x = r.indexOf(";x=");
+					PLAN_RESULT[0] = !r.startsWith(com.vale.helperbot.command.BotCommands.WHERE_MARKER) || n < 0 || e < 0 || x < 0 ? "回复格式不对：" + r.substring(0, Math.min(80, r.length()))
+							: !r.substring(n, e).contains("minecraft:blaze_rod,") ? "烈焰棒不在地狱里"
+							: !r.substring(e, x).contains("minecraft:end_stone,") ? "末地石不在末地里"
+							: !r.substring(x).contains("minecraft:elytra,") ? "鞘翅不在拿不到里"
+							: r.contains("minecraft:iron_ingot,") ? "铁锭不该在列表里（列表里只有主世界以外的）" : null;
+					PLAN_RESULT[1] = "回复 " + r.length() + " 个字符";
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
 				new Scenario("Z5", "在保护区块里召唤（或药水效果变化）：不会变隐身", 6 * 20, (a, bot, me) -> {
 					protect(a, 0, 0);
 					// Vanilla works out "invisible?" on joining and whenever effects change: a short effect

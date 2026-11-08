@@ -39,6 +39,7 @@ public class HelperBot implements ModInitializer {
 			com.vale.helperbot.knowledge.MobDrops.clearCache();
 			com.vale.helperbot.knowledge.StructureIndex.clearCache();
 			com.vale.helperbot.knowledge.Interactions.clearCache();
+			com.vale.helperbot.knowledge.WhereFrom.clearCache();
 			warmUp(server);
 		});
 

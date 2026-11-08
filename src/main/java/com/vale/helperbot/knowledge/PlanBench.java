@@ -69,6 +69,14 @@ public final class PlanBench {
 	/** Every item from an empty bag: can it be planned, by what kinds of step, and if not why (see scripts/run-sweep.ps1). */
 	private static void sweep(ServerLevel level, FakePlayer bot) {
 		long start = System.nanoTime();
+		// Where each item comes from, as the remote shows it (see WhereFrom).
+		try (java.io.PrintWriter out = new java.io.PrintWriter("where-from.txt", java.nio.charset.StandardCharsets.UTF_8)) {
+			var sorted = new java.util.TreeMap<String, WhereFrom.Place>();
+			WhereFrom.all(level.getServer()).forEach((item, place) -> sorted.put(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item).getPath(), place));
+			sorted.forEach((item, place) -> out.println(place + "	" + item));
+		} catch (java.io.IOException e) {
+			HelperBot.LOGGER.error("Where-from list failed", e);
+		}
 		// What the biome knowledge says, to check against the world: block, then its biomes, richest first.
 		try (java.io.PrintWriter out = new java.io.PrintWriter("biome-table.txt", java.nio.charset.StandardCharsets.UTF_8)) {
 			var table = new java.util.TreeMap<String, Map<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>, Double>>();

@@ -39,7 +39,16 @@ public class HelperBotClient implements ClientModInitializer {
 				ClientZones.read(text);
 				return false;
 			}
+			if (text.startsWith(ClientWhere.MARKER)) {
+				ClientWhere.read(text);
+				return false;
+			}
 			return true;
+		});
+		// Another world, another server: what the last one said about it doesn't hold.
+		net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.JOIN.register((handler, sender, client) -> {
+			ClientWhere.forget();
+			ClientZones.forget();
 		});
 	}
 
