@@ -39,29 +39,54 @@ public final class WhereFrom {
 	}
 
 	private static Map<Item, Place> places;
+	/** Of those with a place, the ones that need a silk touch tool given to the bot (directly or for what they're made from). */
+	private static Set<Item> silk;
 
 	private WhereFrom() {
 	}
 
 	public static void clearCache() {
 		places = null;
+		silk = null;
 	}
 
 	public static Map<Item, Place> all(MinecraftServer server) {
 		if (places == null) {
 			long start = System.nanoTime();
-			places = build(server);
-			HelperBot.LOGGER.info("HelperBot item origins: {} items, {} ms", places.size(), (System.nanoTime() - start) / 1_000_000);
+			ServerLevel overworld = server.overworld();
+			Map<Item, Place> plain = build(server, false), withSilk = build(server, true);
+			Map<Item, Place> out = new HashMap<>();
+			Set<Item> needSilk = new HashSet<>();
+			// Without silk touch where it can, with it only where there's no other way: it can't make
+			// one, the player has to give it (see CraftPlanner#ensureGatherTool).
+			for (Item item : BuiltInRegistries.ITEM) {
+				Place p = plain.get(item);
+				if (p == Place.NONE && withSilk.get(item) != Place.NONE && Obtainability.refusal(overworld, item) == null) {
+					p = withSilk.get(item);
+					needSilk.add(item);
+				}
+				out.put(item, p);
+			}
+			places = out;
+			silk = needSilk;
+			HelperBot.LOGGER.info("HelperBot item origins: {} items ({} with silk touch), {} ms", out.size(), needSilk.size(),
+					(System.nanoTime() - start) / 1_000_000);
 		}
 		return places;
 	}
 
-	private static Map<Item, Place> build(MinecraftServer server) {
+	/** Those of #all that need a silk touch tool. */
+	public static Set<Item> needSilk(MinecraftServer server) {
+		all(server);
+		return silk;
+	}
+
+	private static Map<Item, Place> build(MinecraftServer server, boolean silkTouch) {
 		ServerLevel overworld = server.overworld(), nether = server.getLevel(Level.NETHER), end = server.getLevel(Level.END);
-		Set<Item> o = reach(overworld, List.of(overworld));
-		Set<Item> on = nether == null ? o : reach(overworld, List.of(overworld, nether));
-		Set<Item> oe = end == null ? o : reach(overworld, List.of(overworld, end));
-		Set<Item> all = nether == null || end == null ? new HashSet<>(on) : reach(overworld, List.of(overworld, nether, end));
+		Set<Item> o = reach(overworld, List.of(overworld), silkTouch);
+		Set<Item> on = nether == null ? o : reach(overworld, List.of(overworld, nether), silkTouch);
+		Set<Item> oe = end == null ? o : reach(overworld, List.of(overworld, end), silkTouch);
+		Set<Item> all = nether == null || end == null ? new HashSet<>(on) : reach(overworld, List.of(overworld, nether, end), silkTouch);
 		all.addAll(oe);
 		Map<Item, Place> out = new HashMap<>();
 		for (Item item : BuiltInRegistries.ITEM) {
@@ -82,8 +107,8 @@ public final class WhereFrom {
 		return out;
 	}
 
-	/** What these dimensions give, between them. */
-	private static Set<Item> reach(ServerLevel overworld, List<ServerLevel> levels) {
+	/** What these dimensions give, between them; with {@code silkTouch}, a block that drops it only to silk touch counts too. */
+	private static Set<Item> reach(ServerLevel overworld, List<ServerLevel> levels, boolean silkTouch) {
 		FakePlayer player = FakePlayer.get(overworld);
 		// Mobs living there: their biomes' spawn lists (each dimension's own), and its structures.
 		Set<EntityType<?>> mobs = new HashSet<>();
@@ -114,7 +139,7 @@ public final class WhereFrom {
 			more = false;
 			for (java.util.Iterator<Item> it = rest.iterator(); it.hasNext(); ) {
 				Item item = it.next();
-				if (gets(item, overworld, player, levels, mobs, blockThere, yes)) {
+				if (gets(item, overworld, player, levels, mobs, blockThere, yes, silkTouch)) {
 					yes.add(item);
 					it.remove();
 					more = true;
@@ -125,12 +150,18 @@ public final class WhereFrom {
 	}
 
 	private static boolean gets(Item item, ServerLevel overworld, FakePlayer player, List<ServerLevel> levels,
-								Set<EntityType<?>> mobs, Map<Block, Boolean> blockThere, Set<Item> yes) {
-		// Mined: a block there that drops it by hand, or with a plain tool it can have already.
+								Set<EntityType<?>> mobs, Map<Block, Boolean> blockThere, Set<Item> yes, boolean silkTouch) {
+		// Mined: a block there that drops it by hand, or with a plain tool it can have already; with
+		// silkTouch, also one no plain tool gets it from (that's silk touch: it's what's left).
 		for (Block block : DropAnalysis.candidates(overworld, player, item).keySet()) {
-			if (blockThere.computeIfAbsent(block, b -> there(b, levels))
-					&& (DropAnalysis.handDrops(overworld, player, block, item)
-					|| DropAnalysis.toolItemsFor(overworld, player, block, item).stream().anyMatch(yes::contains))) {
+			if (!blockThere.computeIfAbsent(block, b -> there(b, levels))) {
+				continue;
+			}
+			if (DropAnalysis.handDrops(overworld, player, block, item)) {
+				return true;
+			}
+			List<Item> tools = DropAnalysis.toolItemsFor(overworld, player, block, item);
+			if (tools.stream().anyMatch(yes::contains) || (silkTouch && tools.isEmpty())) {
 				return true;
 			}
 		}

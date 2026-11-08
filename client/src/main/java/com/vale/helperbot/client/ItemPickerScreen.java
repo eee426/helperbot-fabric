@@ -115,7 +115,7 @@ public class ItemPickerScreen extends TouchScreen {
 		int bottom = height - 6 - 2 * rowH;
 		gridY = y;
 		cols = Math.max(1, (w - BAR - GAP) / CELL);
-		rows = Math.max(1, (bottom - 14 - gridY) / CELL);
+		rows = Math.max(1, (bottom - 26 - gridY) / CELL); // room for two lines of text over the buttons
 		gridX = x;
 		barX = x + w - BAR;
 		Button[] pages = row(x, bottom, w, h, new String[]{"▲ 往上", "▼ 往下"},
@@ -316,6 +316,11 @@ public class ItemPickerScreen extends TouchScreen {
 					+ (p == ClientWhere.Place.OVERWORLD ? "" : "，要先把机器人叫到" + p.label) + "）";
 		}
 		g.drawCenteredString(font, line, width / 2, bottom - 11, note != null ? 0xFFFF8080 : picked == null ? 0xFFAAAAAA : 0xFFFFFF80);
+		if (note == null && picked != null && ClientWhere.needsSilk(picked.getItem())) {
+			// The small print: it can't make one itself.
+			g.drawCenteredString(font, "需要精准采集：先给机器人一把带精准采集的工具（它自己做不出来）",
+					width / 2, bottom - 22, 0xFF80C0FF);
+		}
 	}
 
 	private boolean inList(double x, double y) {

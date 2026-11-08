@@ -12,6 +12,8 @@ import net.minecraft.world.entity.MobCategory;
 import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.MobSpawnSettings;
@@ -32,6 +34,8 @@ import java.util.Set;
  */
 public final class MobDrops {
 	private static final int TRIALS = 400;
+	/** The sizes slimes and magma cubes spawn at (vanilla Slime#finalizeSpawn). */
+	private static final int[] SLIME_SIZES = {1, 2, 4};
 
 	/** Never hunted, whatever they drop: villagers and other mobs players care about, bosses. */
 	private static final Set<EntityType<?>> PROTECTED = Set.of(
@@ -41,18 +45,22 @@ public final class MobDrops {
 
 	/** item -> mob type -> average number dropped per kill. */
 	private static Map<Item, Map<EntityType<?>, Double>> index;
-	/** mob type -> biomes of this dimension it spawns in naturally. */
-	private static Map<EntityType<?>, Set<Holder<Biome>>> spawnBiomes;
-	/** mob type -> how common it is among its kind where it's most common (see #commonness). */
-	private static Map<EntityType<?>, Double> commonness;
+	/**
+	 * Per dimension: mob type -> biomes of that dimension it spawns in naturally. (One list for all,
+	 * made from whichever dimension asked first, had slimes in the Nether and no magma cubes: magma
+	 * cream was slime balls and blaze powder.)
+	 */
+	private static final Map<ResourceKey<Level>, Map<EntityType<?>, Set<Holder<Biome>>>> spawnBiomes = new java.util.concurrent.ConcurrentHashMap<>();
+	/** Per dimension: mob type -> how common it is among its kind where it's most common (see #commonness). */
+	private static final Map<ResourceKey<Level>, Map<EntityType<?>, Double>> commonness = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private MobDrops() {
 	}
 
 	public static void clearCache() {
 		index = null;
-		spawnBiomes = null;
-		commonness = null;
+		spawnBiomes.clear();
+		commonness.clear();
 	}
 
 	/** Mobs that drop {@code item} when killed by the bot, with drops per kill. */
@@ -63,7 +71,7 @@ public final class MobDrops {
 
 	public static Set<Holder<Biome>> spawnBiomes(ServerLevel level, EntityType<?> type) {
 		buildSpawns(level);
-		return spawnBiomes.getOrDefault(type, Set.of());
+		return spawnBiomes.get(level.dimension()).getOrDefault(type, Set.of());
 	}
 
 	/**
@@ -75,7 +83,7 @@ public final class MobDrops {
 	 */
 	public static double commonness(ServerLevel level, EntityType<?> type) {
 		buildSpawns(level);
-		return commonness.getOrDefault(type, 1.0);
+		return commonness.get(level.dimension()).getOrDefault(type, 1.0);
 	}
 
 	/** May the bot hunt this particular mob? No pets, named or leashed mobs, babies or protected kinds. */
@@ -117,7 +125,13 @@ public final class MobDrops {
 						.withOptionalParameter(LootContextParams.DIRECT_ATTACKING_ENTITY, killer)
 						.withOptionalParameter(LootContextParams.LAST_DAMAGE_PLAYER, killer)
 						.create(LootContextParamSets.ENTITY);
+				// Slimes and magma cubes drop by their size, and a new one is the tiny kind, which drops
+				// nothing: each size they spawn at, in turn. (Magma cubes didn't drop magma cream.)
+				int[] sizes = entity instanceof net.minecraft.world.entity.monster.Slime ? SLIME_SIZES : new int[]{0};
 				for (int i = 0; i < TRIALS; i++) {
+					if (entity instanceof net.minecraft.world.entity.monster.Slime slime) {
+						slime.setSize(sizes[i % sizes.length], false);
+					}
 					for (ItemStack drop : table.getRandomItems(params)) {
 						if (!drop.isEmpty()) {
 							counts.merge(drop.getItem(), drop.getCount(), Integer::sum);
@@ -137,7 +151,7 @@ public final class MobDrops {
 	}
 
 	private static void buildSpawns(ServerLevel level) {
-		if (spawnBiomes != null) {
+		if (spawnBiomes.containsKey(level.dimension())) {
 			return;
 		}
 		Map<EntityType<?>, Set<Holder<Biome>>> built = new HashMap<>();
@@ -160,7 +174,7 @@ public final class MobDrops {
 				}
 			}
 		}
-		commonness = common;
-		spawnBiomes = built;
+		commonness.put(level.dimension(), common);
+		spawnBiomes.put(level.dimension(), built);
 	}
 }

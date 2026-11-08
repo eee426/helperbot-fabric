@@ -276,6 +276,34 @@ public final class Scenarios {
 					return c.bot().getX() - startX >= 48 ? Scenario.Outcome.pass("往东走了 48 格，现在 y=" + (int) c.bot().getY()) : null;
 				}),
 
+				new Scenario("NE2", "在地狱里要岩浆膏：打岩浆怪，不去找史莱姆（玩家报告：地狱里用的是主世界的刷怪表）（只规划）", 20, (a, bot, me) -> {
+					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+					// The Overworld's lists first, as on a server that asked there before.
+					com.vale.helperbot.knowledge.MobDrops.spawnBiomes(a.level, EntityType.SLIME);
+					bot.teleportTo(nether, 0.5, 100, 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.IRON_SWORD, 1);
+					CraftPlanner.Plan plan = new CraftPlanner(nether, bot, bot.getInventory(), new HashSet<>(), Mode.NORMAL)
+							.plan(Items.MAGMA_CREAM, 1, CraftPlanner.counts(bot.getInventory()));
+					PLAN_RESULT[0] = !plan.possible() ? "规划失败：" + plan.problems().stream().limit(4).map(x -> x.getString()).toList()
+							: plan.actions().stream().anyMatch(x -> x instanceof CraftPlanner.Hunt h && h.sources().containsKey(EntityType.SLIME))
+							? "要去找史莱姆：" + plan.actions()
+							: plan.actions().stream().noneMatch(x -> x instanceof CraftPlanner.Hunt h && h.sources().containsKey(EntityType.MAGMA_CUBE))
+							? "计划里没有打岩浆怪：" + plan.actions() : null;
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass("打岩浆怪") : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
+				new Scenario("NE3", "在末地要皮革：不打牛（末地没有牛，刷怪表按维度分开）（只规划）", 20, (a, bot, me) -> {
+					net.minecraft.server.level.ServerLevel end = a.level.getServer().getLevel(net.minecraft.world.level.Level.END);
+					com.vale.helperbot.knowledge.MobDrops.spawnBiomes(a.level, EntityType.COW);
+					bot.teleportTo(end, 100.5, 50, 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.IRON_SWORD, 1);
+					CraftPlanner.Plan plan = new CraftPlanner(end, bot, bot.getInventory(), new HashSet<>(), Mode.NORMAL)
+							.plan(Items.LEATHER, 1, CraftPlanner.counts(bot.getInventory()));
+					PLAN_RESULT[0] = plan.possible() && plan.actions().stream().anyMatch(x -> x instanceof CraftPlanner.Hunt h && h.sources().containsKey(EntityType.COW))
+							? "在末地要去打牛：" + plan.actions() : null;
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass("不打牛") : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
 				new Scenario("ST4", "同上，但手里一个能垫的方块都没有", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
 					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
@@ -851,7 +879,7 @@ public final class Scenarios {
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
-				new Scenario("P2", "遥控选物品用的指令 /bot where：烈焰棒在地狱，末地石在末地，鞘翅拿不到，铁锭在主世界", 20, (a, bot, me) -> {
+				new Scenario("WH1", "遥控选物品用的指令 /bot where：烈焰棒在地狱，末地石在末地，鞘翅拿不到，铁锭在主世界，钻石矿在主世界但要精准采集", 20, (a, bot, me) -> {
 					var server = a.level.getServer();
 					StringBuilder reply = new StringBuilder();
 					server.getCommands().performPrefixedCommand(me.createCommandSourceStack()
@@ -874,11 +902,12 @@ public final class Scenarios {
 									}),
 							"bot where");
 					String r = reply.toString();
-					int n = r.indexOf("n="), e = r.indexOf(";e="), x = r.indexOf(";x=");
-					PLAN_RESULT[0] = !r.startsWith(com.vale.helperbot.command.BotCommands.WHERE_MARKER) || n < 0 || e < 0 || x < 0 ? "回复格式不对：" + r.substring(0, Math.min(80, r.length()))
+					int n = r.indexOf("n="), e = r.indexOf(";e="), x = r.indexOf(";x="), sk = r.indexOf(";s=");
+					PLAN_RESULT[0] = !r.startsWith(com.vale.helperbot.command.BotCommands.WHERE_MARKER) || n < 0 || e < 0 || x < 0 || sk < 0 ? "回复格式不对：" + r.substring(0, Math.min(80, r.length()))
 							: !r.substring(n, e).contains("minecraft:blaze_rod,") ? "烈焰棒不在地狱里"
 							: !r.substring(e, x).contains("minecraft:end_stone,") ? "末地石不在末地里"
-							: !r.substring(x).contains("minecraft:elytra,") ? "鞘翅不在拿不到里"
+							: !r.substring(x, sk).contains("minecraft:elytra,") ? "鞘翅不在拿不到里"
+							: r.substring(x, sk).contains("minecraft:diamond_ore,") || !r.substring(sk).contains("minecraft:diamond_ore,") ? "钻石矿（要精准采集）没放回主世界、标成要精准采集"
 							: r.contains("minecraft:iron_ingot,") ? "铁锭不该在列表里（列表里只有主世界以外的）" : null;
 					PLAN_RESULT[1] = "回复 " + r.length() + " 个字符";
 					return null;

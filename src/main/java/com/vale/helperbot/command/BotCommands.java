@@ -322,7 +322,8 @@ public final class BotCommands {
 
 	/**
 	 * "/bot where": the items that need the Nether, the End, or can't be had at all, as
-	 * "n=id,id;e=id,...;x=id,...". Everything else comes from the Overworld.
+	 * "n=id,id;e=id,...;x=id,...;s=id,..." (s: needs a silk touch tool given, wherever it is).
+	 * Everything else comes from the Overworld.
 	 */
 	private static int whereFrom(CommandContext<CommandSourceStack> ctx) {
 		var places = com.vale.helperbot.knowledge.WhereFrom.all(ctx.getSource().getServer());
@@ -338,7 +339,11 @@ public final class BotCommands {
 				to.append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item)).append(',');
 			}
 		});
-		String text = WHERE_MARKER + n + e + x;
+		StringBuilder s = new StringBuilder(";s=");
+		for (var item : com.vale.helperbot.knowledge.WhereFrom.needSilk(ctx.getSource().getServer())) {
+			s.append(net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(item)).append(',');
+		}
+		String text = WHERE_MARKER + n + e + x + s;
 		ctx.getSource().sendSuccess(() -> Component.literal(text), false);
 		return places.size();
 	}
