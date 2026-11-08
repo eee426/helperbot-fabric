@@ -193,6 +193,8 @@ public final class StructureIndex {
 		StructureTemplateManager templates = server.getStructureManager();
 		templates.listTemplates().forEach(templateIds::add);
 		Registry<StructureTemplatePool> pools = level.registryAccess().lookupOrThrow(Registries.TEMPLATE_POOL);
+		var processors = level.registryAccess().lookupOrThrow(Registries.PROCESSOR_LIST);
+		Map<Identifier, Set<Identifier>> processorIdsIn = new HashMap<>();
 		Map<Identifier, Set<Identifier>> templateIdsIn = new HashMap<>();
 		Map<Identifier, Set<Identifier>> poolIdsIn = new HashMap<>();
 
@@ -213,8 +215,19 @@ public final class StructureIndex {
 					continue;
 				}
 				if (pools.containsKey(id)) {
-					queue.addAll(poolIdsIn.computeIfAbsent(id, i -> ids(StructureTemplatePool.DIRECT_CODEC.encodeStart(ops, pools.getValue(i))
-							.result().map(JsonElement::toString).orElse(""))));
+					Set<Identifier> named = poolIdsIn.computeIfAbsent(id, i -> ids(StructureTemplatePool.DIRECT_CODEC.encodeStart(ops, pools.getValue(i))
+							.result().map(JsonElement::toString).orElse("")));
+					queue.addAll(named);
+					// Blocks a pool's own processors put in (written out in the pool itself).
+					readTemplate(named, c);
+				}
+				// What processors swap in: a village farm's template is all wheat, and its processor
+				// list turns some of it into carrots, potatoes and beetroots.
+				if (processors.containsKey(id)) {
+					Set<Identifier> named = processorIdsIn.computeIfAbsent(id, i -> ids(
+							net.minecraft.world.level.levelgen.structure.templatesystem.StructureProcessorType.DIRECT_CODEC
+									.encodeStart(ops, processors.getValue(i)).result().map(JsonElement::toString).orElse("")));
+					readTemplate(named, c);
 				}
 				if (templateIds.contains(id)) {
 					Set<Identifier> named = templateIdsIn.computeIfAbsent(id, i -> read(templates, i));

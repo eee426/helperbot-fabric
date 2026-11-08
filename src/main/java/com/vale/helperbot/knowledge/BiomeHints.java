@@ -310,8 +310,12 @@ public final class BiomeHints {
 					}
 				}
 				default -> {
-					// Its shape is code: one block a placement of each block it puts down.
+					// Its shape is code: one block a placement of each block it puts down; and a
+					// feature it places (the azalea tree on top of a root system), once.
 					merge(out, states(config), 1);
+					if (config.get("feature") != null) {
+						merge(out, placedYield(config.get("feature")), 1);
+					}
 					if (o.get("type") != null && o.get("type").isJsonPrimitive()) {
 						BuiltInRegistries.BLOCK.getOptional(Identifier.tryParse(o.get("type").getAsString()))
 								.ifPresent(block -> out.merge(block, 1.0, Double::sum));

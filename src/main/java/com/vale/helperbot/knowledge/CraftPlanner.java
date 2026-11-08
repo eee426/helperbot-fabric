@@ -1324,9 +1324,56 @@ public final class CraftPlanner {
 		return StructureIndex.typicalDistance(level, where);
 	}
 
-	/** Nothing makes it, and no mob drops it: the one case where a structure is where to go. */
+	/**
+	 * Nothing out in the world gives it: no biome grows it, no mob drops it, and no recipe makes it
+	 * from things that are. The one case where a structure is where to go. A recipe that only leads
+	 * back to itself doesn't count: wheat is made from hay bales and hay bales from wheat, and with
+	 * "made by a recipe" alone, villages were never looked at for either.
+	 */
 	private boolean onlyInStructures(Item item) {
-		return RecipeIndex.craftsFor(level, item).isEmpty() && RecipeIndex.smeltsFor(level, item).isEmpty() && huntSources(item).isEmpty();
+		if (worldly == null) {
+			worldly = fromTheWorld();
+		}
+		return !worldly.contains(item);
+	}
+
+	/** Everything that comes from out in the world (see #onlyInStructures), worked out once a plan. */
+	private Set<Item> worldly;
+
+	/**
+	 * What a biome grows or a mob drops, then whatever a recipe makes from those, over and over
+	 * until nothing more is added. (Asking item by item went round the dye recipes, which lead
+	 * into each other, for ever.)
+	 */
+	private Set<Item> fromTheWorld() {
+		Set<Item> yes = new HashSet<>();
+		List<Item> rest = new ArrayList<>();
+		for (Item item : net.minecraft.core.registries.BuiltInRegistries.ITEM) {
+			Set<Block> blocks = sourceBlocks.computeIfAbsent(item, i -> DropAnalysis.candidates(level, breaker, i).keySet());
+			// A mob that spawns out in the world drops it (quietly: not every item's hunt is a problem).
+			boolean dropped = breaker instanceof Player killer && MobDrops.sources(level, killer, item).keySet().stream()
+					.anyMatch(t -> !MobDrops.spawnBiomes(level, t).isEmpty() || !StructureIndex.spawning(level, t).isEmpty());
+			if (!BiomeHints.biomesFor(level, blocks).isEmpty() || dropped) {
+				yes.add(item);
+			} else {
+				rest.add(item);
+			}
+		}
+		for (boolean more = true; more; ) {
+			more = false;
+			for (java.util.Iterator<Item> it = rest.iterator(); it.hasNext(); ) {
+				Item item = it.next();
+				boolean made = RecipeIndex.craftsFor(level, item).stream().anyMatch(craft -> craft.ingredients().stream()
+								.allMatch(ing -> RecipeIndex.options(ing).stream().anyMatch(yes::contains)))
+						|| RecipeIndex.smeltsFor(level, item).stream().anyMatch(smelt -> RecipeIndex.options(smelt.input()).stream().anyMatch(yes::contains));
+				if (made) {
+					yes.add(item);
+					it.remove();
+					more = true;
+				}
+			}
+		}
+		return yes;
 	}
 
 	/** Ticks until monsters spawn in the open: none under cover, or at night. */
