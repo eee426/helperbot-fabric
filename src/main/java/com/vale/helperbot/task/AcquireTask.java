@@ -41,6 +41,8 @@ public class AcquireTask implements BotTask {
 	private final Mode mode;
 	private final ComeTask returnLeg;
 	private final Set<Item> noGather = new HashSet<>();
+	/** Apart from gathering: spiders it couldn't get to are no reason to leave the cobwebs alone. */
+	private final Set<Item> noHunt = new HashSet<>();
 	private final Set<Item> planItems = new HashSet<>();
 	private final OutOfReach outOfReach = new OutOfReach();
 	private final Map<Item, Explorer> explorers = new java.util.HashMap<>();
@@ -155,7 +157,7 @@ public class AcquireTask implements BotTask {
 		failedHere = true;
 		int n = failures.merge(what, 1, Integer::sum);
 		if (n >= MAX_STEP_FAILURES) {
-			noGather.add(what);
+			(how.equals("打猎") ? noHunt : noGather).add(what);
 			lastFailure = how + CraftPlanner.name(what).getString() + "连续失败 " + n + " 次，这次不再" + how + "它";
 			bot.log(lastFailure);
 		} else {
@@ -217,6 +219,7 @@ public class AcquireTask implements BotTask {
 			bot.log("走出保护区了，重新规划");
 			failures.clear();
 			noGather.clear();
+			noHunt.clear();
 			lastFailure = null;
 			lastAction = null;
 			repeats = 0;
@@ -258,7 +261,7 @@ public class AcquireTask implements BotTask {
 		// is never material for its own plan (it used to dye finished white carpets blue and back).
 		Map<Item, Integer> inventory = CraftPlanner.counts(bot.getInventory());
 		long started = System.nanoTime();
-		CraftPlanner planner = new CraftPlanner(bot.level(), bot, bot.getInventory(), noGather, mode);
+		CraftPlanner planner = new CraftPlanner(bot.level(), bot, bot.getInventory(), noGather, noHunt, mode);
 		CraftPlanner.Plan plan = planner.plan(item, wanted - got, inventory);
 		bot.perf().add(com.vale.helperbot.bot.Perf.Part.PLANNER, System.nanoTime() - started);
 		long ms = (System.nanoTime() - started) / 1_000_000;

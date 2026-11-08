@@ -165,6 +165,8 @@ public final class CraftPlanner {
 	private final Inventory realInventory;
 	/** Items whose gathering already failed this task: don't plan to gather them again. */
 	private final Set<Item> noGather;
+	/** Items whose hunting already failed this task: hunting them is out, gathering isn't. */
+	private final Set<Item> noHunt;
 	private final FuelValues fuel;
 	private final Set<Component> problems = new LinkedHashSet<>();
 	/** Source blocks found nearby, nearest first. */
@@ -175,15 +177,20 @@ public final class CraftPlanner {
 	private final Map<Item, Double> gatherRate = new HashMap<>();
 
 	public CraftPlanner(ServerLevel level, Entity breaker, Inventory realInventory, Set<Item> noGather) {
-		this(level, breaker, realInventory, noGather, Mode.DEFAULT);
+		this(level, breaker, realInventory, noGather, Set.of(), Mode.DEFAULT);
 	}
 
 	public CraftPlanner(ServerLevel level, Entity breaker, Inventory realInventory, Set<Item> noGather, Mode mode) {
+		this(level, breaker, realInventory, noGather, Set.of(), mode);
+	}
+
+	public CraftPlanner(ServerLevel level, Entity breaker, Inventory realInventory, Set<Item> noGather, Set<Item> noHunt, Mode mode) {
 		this.mode = mode;
 		this.level = level;
 		this.breaker = breaker;
 		this.realInventory = realInventory;
 		this.noGather = noGather;
+		this.noHunt = noHunt;
 		this.fuel = level.fuelValues();
 	}
 
@@ -1227,7 +1234,7 @@ public final class CraftPlanner {
 	 * spawn somewhere in this dimension (no waiting for blazes in the overworld).
 	 */
 	private Map<EntityType<?>, Double> huntSources(Item item) {
-		if (noGather.contains(item) || !(breaker instanceof Player killer)) {
+		if (noHunt.contains(item) || !(breaker instanceof Player killer)) {
 			return Map.of();
 		}
 		Map<EntityType<?>, Double> known = huntSources.get(item);
@@ -1282,7 +1289,7 @@ public final class CraftPlanner {
 		double kills = n / Math.max(1e-3, perKill);
 		int around = nearbyPrey(prey);
 		boolean animals = prey.keySet().stream().anyMatch(t -> t.getCategory() != MobCategory.MONSTER);
-		double trip = around > 0 ? ticks(32) : structureOnly(prey) ? ticks(structureDistance(prey))
+		double trip = around > 0 ? toNearestPrey(prey) : structureOnly(prey) ? ticks(structureDistance(prey))
 				: animals ? ticks(TRIP_BLOCKS) : ticksToDark();
 		double kill = killTicks(prey) + ticks(CHASE_BLOCKS) + PICKUP_TICKS;
 		double near = Math.min(kills, around);
@@ -1385,9 +1392,11 @@ public final class CraftPlanner {
 		if (nearbyTypes == null) {
 			// One look around per plan (it used to search for mobs every time a hunt was costed).
 			nearbyTypes = new HashMap<>();
+			nearbyAt = new HashMap<>();
 			for (Mob m : level.getEntitiesOfClass(Mob.class, breaker.getBoundingBox().inflate(64),
 					m -> m.isAlive() && MobDrops.mayHunt(m))) {
 				nearbyTypes.merge(m.getType(), 1, Integer::sum);
+				nearbyAt.computeIfAbsent(m.getType(), k -> new ArrayList<>()).add(m.blockPosition());
 			}
 		}
 		int n = 0;
@@ -1397,8 +1406,45 @@ public final class CraftPlanner {
 		return n;
 	}
 
-	/** Huntable mobs within 64 blocks, by kind, looked up once per plan. */
+	/** Huntable mobs within 64 blocks, by kind, looked up once per plan; and where they are. */
 	private Map<EntityType<?>, Integer> nearbyTypes;
+	private Map<EntityType<?>, List<BlockPos>> nearbyAt;
+
+	/**
+	 * Ticks to the nearest of these around: the walk, and the digging down to it if it's under
+	 * the ground (every solid block above it, as for a block to mine: see #buried). A spider in a
+	 * mineshaft forty blocks down was a walk of 32 blocks, while the cobwebs next to it were costed
+	 * with all the digging: it went for spiders it couldn't get to.
+	 */
+	private double toNearestPrey(Map<EntityType<?>, Double> prey) {
+		nearbyPrey(prey);
+		BlockPos from = breaker.blockPosition();
+		double best = Double.POSITIVE_INFINITY;
+		for (EntityType<?> type : prey.keySet()) {
+			for (BlockPos p : nearbyAt.getOrDefault(type, List.of())) {
+				best = Math.min(best, ticks(Math.sqrt(from.distSqr(p))) + digDownTo(p));
+			}
+		}
+		return Double.isInfinite(best) ? ticks(32) : best;
+	}
+
+	/** Ticks to dig down to {@code p} from the surface, with what's in the bag (0 if it's out in the open). */
+	private double digDownTo(BlockPos p) {
+		int surface = level.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, p.getX(), p.getZ());
+		double ticks = 0;
+		int solid = 0;
+		BlockPos.MutableBlockPos q = new BlockPos.MutableBlockPos();
+		for (int y = p.getY() + 1; y < surface && solid < 80; y++) {
+			q.set(p.getX(), y, p.getZ());
+			BlockState state = level.getBlockState(q);
+			if (!state.getCollisionShape(level, q).isEmpty()) {
+				solid++;
+				int dig = BreakTimes.estimateTicks(realInventory, level, q, state);
+				ticks += (dig == Integer.MAX_VALUE ? 0 : dig + LocalPathfinder.BREAK_OVERHEAD) + ticks(1);
+			}
+		}
+		return ticks;
+	}
 
 	private static Map<Ingredient, Integer> group(List<Ingredient> ingredients) {
 		Map<Ingredient, Integer> grouped = new LinkedHashMap<>();

@@ -231,8 +231,9 @@ final class Station {
 				}
 			}
 		}
-		// Walled in on all sides (e.g. at the bottom of a 1x1 shaft): above our head is in reach.
-		BlockPos overhead = feet.above(2);
+		// Walled in on all sides (e.g. at the bottom of a 1x1 shaft): above our head is in reach. The
+		// cell over the head, not two over the feet: standing on a path the head is in that one.
+		BlockPos overhead = BlockPos.containing(bot.getX(), bot.getBoundingBox().maxY - 1e-4, bot.getZ()).above();
 		if (Placement.allowed(level, overhead, Placement.Kind.STATION) && tryPlace(bot, overhead, slot)) {
 			return true;
 		}

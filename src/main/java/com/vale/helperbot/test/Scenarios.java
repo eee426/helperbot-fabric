@@ -173,6 +173,123 @@ public final class Scenarios {
 							? Scenario.Outcome.pass("从墙上的洞走出去了") : null;
 				}),
 
+				new Scenario("ST3", "在 1×1、2 格深的坑底要做铁镐（要放工作台），手里有圆石（玩家报告）", MINUTE, (a, bot, me) -> {
+					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
+					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
+					teleport(bot, a, 0, Arena.SURFACE - 2, 0);
+					give(bot, Items.IRON_INGOT, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.COBBLESTONE, 8);
+					return new AcquireTask(me, Items.IRON_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.IRON_PICKAXE, 1)),
+
+				new Scenario("ST4", "同上，但手里一个能垫的方块都没有", MINUTE, (a, bot, me) -> {
+					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
+					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
+					teleport(bot, a, 0, Arena.SURFACE - 2, 0);
+					give(bot, Items.IRON_INGOT, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					return new AcquireTask(me, Items.IRON_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.IRON_PICKAXE, 1)),
+
+				new Scenario("ST5", "坑底是草径，要做铁镐（要放工作台）", MINUTE, (a, bot, me) -> {
+					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
+					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
+					a.set(0, Arena.SURFACE - 3, 0, Blocks.DIRT_PATH);
+					teleport(bot, a, 0, Arena.SURFACE - 2, 0);
+					give(bot, Items.IRON_INGOT, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.COBBLESTONE, 8);
+					return new AcquireTask(me, Items.IRON_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.IRON_PICKAXE, 1)),
+
+				new Scenario("ST6", "坑底是耕地，要做铁镐（要放工作台）", MINUTE, (a, bot, me) -> {
+					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
+					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
+					a.set(0, Arena.SURFACE - 3, 0, Blocks.FARMLAND);
+					teleport(bot, a, 0, Arena.SURFACE - 2, 0);
+					give(bot, Items.IRON_INGOT, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.COBBLESTONE, 8);
+					return new AcquireTask(me, Items.IRON_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.IRON_PICKAXE, 1)),
+
+				new Scenario("ST7", "坑底是泥巴，要做铁镐（要放工作台）", MINUTE, (a, bot, me) -> {
+					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
+					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
+					a.set(0, Arena.SURFACE - 3, 0, Blocks.MUD);
+					teleport(bot, a, 0, Arena.SURFACE - 2, 0);
+					give(bot, Items.IRON_INGOT, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.COBBLESTONE, 8);
+					return new AcquireTask(me, Items.IRON_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.IRON_PICKAXE, 1)),
+
+				new Scenario("ST8", "坑底是灵魂沙，要做铁镐（要放工作台）", MINUTE, (a, bot, me) -> {
+					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
+					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
+					a.set(0, Arena.SURFACE - 3, 0, Blocks.SOUL_SAND);
+					teleport(bot, a, 0, Arena.SURFACE - 2, 0);
+					give(bot, Items.IRON_INGOT, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.COBBLESTONE, 8);
+					return new AcquireTask(me, Items.IRON_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.IRON_PICKAXE, 1)),
+
+				new Scenario("ST9", "坑底是缠根泥土，要做铁镐（要放工作台）", MINUTE, (a, bot, me) -> {
+					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
+					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
+					a.set(0, Arena.SURFACE - 3, 0, Blocks.ROOTED_DIRT);
+					teleport(bot, a, 0, Arena.SURFACE - 2, 0);
+					give(bot, Items.IRON_INGOT, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.COBBLESTONE, 8);
+					return new AcquireTask(me, Items.IRON_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.IRON_PICKAXE, 1)),
+
+				new Scenario("ST10", "坑底是灰化土，要做铁镐（要放工作台）", MINUTE, (a, bot, me) -> {
+					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
+					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
+					a.set(0, Arena.SURFACE - 3, 0, Blocks.PODZOL);
+					teleport(bot, a, 0, Arena.SURFACE - 2, 0);
+					give(bot, Items.IRON_INGOT, 3);
+					give(bot, Items.STICK, 2);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.COBBLESTONE, 8);
+					return new AcquireTask(me, Items.IRON_PICKAXE, 1, Mode.AGGRESSIVE);
+				}, Scenario.has(Items.IRON_PICKAXE, 1)),
+
+				new Scenario("C39", "打猎拿线失败过：还会去挖蜘蛛网（打猎失败不连带封掉采集）（只规划）", 20, (a, bot, me) -> {
+					a.fill(5, Arena.SURFACE, 5, 6, Arena.SURFACE, 6, Blocks.COBWEB);
+					give(bot, Items.IRON_SWORD, 1);
+					CraftPlanner.Plan plan = new CraftPlanner(a.level, bot, bot.getInventory(), new HashSet<>(), java.util.Set.of(Items.STRING), Mode.AGGRESSIVE)
+							.plan(Items.STRING, 2, CraftPlanner.counts(bot.getInventory()));
+					PLAN_RESULT[0] = !plan.possible() ? "规划失败：" + plan.problems().stream().limit(4).map(x -> x.getString()).toList()
+							: plan.actions().stream().noneMatch(x -> x instanceof CraftPlanner.Gather) ? "没有去挖蜘蛛网：" + plan.actions() : null;
+					PLAN_RESULT[1] = plan.possible() ? plan.actions().toString() : "";
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass("挖蜘蛛网") : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
+				new Scenario("C40", "蜘蛛在地下 30 格的洞里，蜘蛛网在地下 15 格：去挖蜘蛛网，不当蜘蛛就在手边（只规划）", 20, (a, bot, me) -> {
+					a.fill(10, 10, 0, 12, 12, 2, Blocks.AIR);
+					a.spawn(EntityType.SPIDER, 11, 10, 1);
+					a.spawn(EntityType.SPIDER, 11, 10, 1);
+					a.fill(-8, 25, 0, -7, 25, 1, Blocks.COBWEB);
+					give(bot, Items.IRON_SWORD, 1);
+					CraftPlanner.Plan plan = new CraftPlanner(a.level, bot, bot.getInventory(), new HashSet<>(), Mode.AGGRESSIVE)
+							.plan(Items.STRING, 2, CraftPlanner.counts(bot.getInventory()));
+					PLAN_RESULT[0] = !plan.possible() ? "规划失败：" + plan.problems().stream().limit(4).map(x -> x.getString()).toList()
+							: plan.actions().stream().anyMatch(x -> x instanceof CraftPlanner.Hunt) ? "去打蜘蛛了：" + plan.actions() : null;
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass("挖蜘蛛网") : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
 				new Scenario("C37", "镐都快坏了（耐久 1）还要钻石镐：规划里要先做新铁镐（只规划）", 20, (a, bot, me) -> {
 					a.tree(6, 6, 5);
 					a.tree(-7, 5, 5);

@@ -803,7 +803,13 @@ public final class LocalPathfinder implements Planner {
 		// In a protected chunk it's a ghost: it can pass through, but not dig or build from there.
 		// Digging and building assume we stand on a full block (or hold still in water).
 		// (On top of a fence it's standing too, half a block up: from there digging may be the only way off.)
-		boolean standing = Math.abs(cur - p.getY()) < 1e-3 || (!isWater(level, p) && BlockTable.top(level.getBlockState(p.below()), level, p.below()) > 1 + 1e-6);
+		// On the ground of this cell: its bottom, or the top of a low block in it (a path, mud, soul
+		// sand: the ground itself, see floorHeight). Only the bottom counted, so on a path at the
+		// bottom of a pit it wasn't standing, couldn't dig or build, and had no first step at all.
+		BlockState in = level.getBlockState(p);
+		double ground = BlockTable.empty(in, level, p) ? p.getY() : p.getY() + BlockTable.top(in, level, p);
+		boolean standing = Math.abs(cur - ground) < 1e-3 || Math.abs(cur - p.getY()) < 1e-3
+				|| (!isWater(level, p) && BlockTable.top(level.getBlockState(p.below()), level, p.below()) > 1 + 1e-6);
 		digsDry = !isWater(level, p.above());
 		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), standing, digsDry && isWater(level, p));
 		for (Move move : Moves.ALL) {
