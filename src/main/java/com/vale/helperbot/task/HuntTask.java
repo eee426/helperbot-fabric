@@ -658,7 +658,10 @@ final class HuntTask {
 		Mob prey = target;
 		com.vale.helperbot.path.PathGoal inReach = com.vale.helperbot.bot.Sight.attackSpot(bot, prey);
 		BlockPos at = prey.blockPosition();
-		if (bot.movement().provenFrom() != null) {
+		// Only what its own search for this one found: before it has set off, what the movement
+		// remembers is about the last target (a drop it couldn't get to), and every mob it picked
+		// after that was "out of reach" without a search, one after another, the lot.
+		if (aimedAt != null && bot.movement().provenFrom() != null) {
 			bot.log(target.getType().getDescription().getString() + " 到不了，换一只");
 			rejected.add(target.getUUID());
 			target = null;

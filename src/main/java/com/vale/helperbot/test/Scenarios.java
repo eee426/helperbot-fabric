@@ -304,6 +304,72 @@ public final class Scenarios {
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass("不打牛") : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
+				new Scenario("HU1", "地上有块牛肉被封在基岩盒里（到不了），旁边有能打的牛：去打牛，不把牛都当成到不了（玩家报告：地狱里岩浆膏捡不到后，岩浆怪全被判到不了）", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(4, Arena.SURFACE, -2, 8, Arena.SURFACE + 4, 2, Blocks.BEDROCK);
+					a.fill(5, Arena.SURFACE + 1, -1, 7, Arena.SURFACE + 3, 1, Blocks.AIR);
+					BlockPos in = a.at(6, Arena.SURFACE + 1, 0);
+					net.minecraft.world.entity.item.ItemEntity beef = new net.minecraft.world.entity.item.ItemEntity(a.level,
+							in.getX() + 0.5, in.getY(), in.getZ() + 0.5, new net.minecraft.world.item.ItemStack(Items.BEEF));
+					beef.setUnlimitedLifetime();
+					a.level.addFreshEntity(beef);
+					for (int i = 0; i < 3; i++) {
+						a.spawn(EntityType.COW, -10, Arena.SURFACE, -2 + 2 * i);
+					}
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 8);
+					give(bot, Items.COBBLESTONE, 16); // as in the report: with blocks, the search proves the drop out of reach
+					return new AcquireTask(me, Items.BEEF, 1, Mode.NORMAL);
+				}, c -> {
+					if (c.bot().getInventory().countItem(Items.BEEF) >= 1) {
+						return Scenario.Outcome.pass("打牛拿到了");
+					}
+					return c.log().contains("等了很久也没刷出") ? Scenario.Outcome.fail("把牛都当成到不了，原地等刷怪") : null;
+				}),
+
+				new Scenario("LV1", "一格宽的石头堤穿过岩浆池（岩浆比脚低一层），堤那头的小岛上有铁矿：沿着堤走过去挖（不会被击退）", 2 * MINUTE, (a, bot, me) -> {
+					// Bedrock under it all: no way under the pool, the causeway is the only way over.
+					a.fill(-2, Arena.SURFACE - 6, -8, 16, Arena.SURFACE - 3, 8, Blocks.BEDROCK);
+					a.fill(-2, Arena.SURFACE - 2, -8, 16, Arena.SURFACE - 2, 8, Blocks.STONE);
+					a.fill(2, Arena.SURFACE - 1, -7, 15, Arena.SURFACE - 1, 7, Blocks.LAVA);
+					a.fill(2, Arena.SURFACE - 1, 0, 11, Arena.SURFACE - 1, 0, Blocks.STONE);
+					a.fill(11, Arena.SURFACE - 1, -1, 13, Arena.SURFACE - 1, 1, Blocks.STONE);
+					a.set(13, Arena.SURFACE, 0, Blocks.IRON_ORE);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.BREAD, 8);
+					return new AcquireTask(me, Items.RAW_IRON, 1, Mode.NORMAL);
+				}, c -> {
+					if (c.bot().isOnFire() || c.bot().isInLava() || !c.bot().isAlive()) {
+						return Scenario.Outcome.fail("掉进岩浆或着火了");
+					}
+					return c.bot().getInventory().countItem(Items.RAW_IRON) >= 1 ? Scenario.Outcome.pass("沿着堤走过去挖到了") : null;
+				}),
+
+				new Scenario("LV2", "同样的堤，铁矿就在堤上一块石头的正下方（那块石头两边就是岩浆）：不从堤上往下挖", MINUTE, (a, bot, me) -> {
+					// Bedrock under it all: no way under the pool, the causeway is the only way over.
+					a.fill(-2, Arena.SURFACE - 6, -8, 16, Arena.SURFACE - 3, 8, Blocks.BEDROCK);
+					a.fill(-2, Arena.SURFACE - 2, -8, 16, Arena.SURFACE - 2, 8, Blocks.STONE);
+					a.fill(2, Arena.SURFACE - 1, -7, 15, Arena.SURFACE - 1, 7, Blocks.LAVA);
+					a.fill(2, Arena.SURFACE - 1, 0, 11, Arena.SURFACE - 1, 0, Blocks.STONE);
+					a.set(6, Arena.SURFACE - 2, 0, Blocks.IRON_ORE);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.BREAD, 8);
+					return new AcquireTask(me, Items.RAW_IRON, 1, Mode.NORMAL);
+				}, c -> {
+					if (c.bot().isOnFire() || c.bot().isInLava() || !c.bot().isAlive()) {
+						return Scenario.Outcome.fail("掉进岩浆或着火了");
+					}
+					if (!c.arena().level.getBlockState(c.arena().at(6, Arena.SURFACE - 1, 0)).is(Blocks.STONE)) {
+						return Scenario.Outcome.fail("把堤上两边是岩浆的那块石头挖开了");
+					}
+					if (c.bot().getInventory().countItem(Items.RAW_IRON) >= 1) {
+						return Scenario.Outcome.pass("从别处安全地挖到了，堤没挖开");
+					}
+					return c.ticks() >= 50 * 20 ? Scenario.Outcome.pass("50 秒没挖开堤（拿不到也行，不能拿命换）") : null;
+				}),
+
 				new Scenario("ST4", "同上，但手里一个能垫的方块都没有", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
 					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);

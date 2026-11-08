@@ -1122,10 +1122,15 @@ public final class LocalPathfinder implements Planner {
 		if (cached == 0) {
 			cached = 2;
 			int m = mode.lavaMargin;
+			// Lava a level down, beside the block underfoot, can't come up, and nothing knocks the
+			// bot about: the shore of a lava pool is somewhere to walk. Beside it at its own height
+			// or above, it flows in (and a cell dug out is asked about too: digging down on the shore
+			// is still out). The careful mode keeps away from it all.
+			int lowest = mode == Mode.SAFE ? -1 : 0;
 			search:
 			for (int dx = -m; dx <= m; dx++) {
 				for (int dz = -m; dz <= m; dz++) {
-					for (int dy = -1; dy <= 2; dy++) {
+					for (int dy = lowest; dy <= 2; dy++) {
 						if (level.getFluidState(feet.offset(dx, dy, dz)).is(FluidTags.LAVA)) {
 							cached = 1;
 							break search;
