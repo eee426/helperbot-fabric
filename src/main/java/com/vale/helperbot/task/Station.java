@@ -36,8 +36,8 @@ import java.util.Map;
 final class Station {
 	private static final int PICKUP_WAIT = 40;
 
-	private final Item item;
-	private final Block block;
+	private Item item;
+	private Block block;
 	private BlockPos pos;
 	private int pickupTicks;
 	private String failure = "";
@@ -52,6 +52,12 @@ final class Station {
 
 	BlockPos pos() {
 		return pos;
+	}
+
+	/** What's down there turned into something else (a log stripped, powder gone to concrete): pick that up instead. */
+	void became(Item item, Block block) {
+		this.item = item;
+		this.block = block;
 	}
 
 	String failure() {
@@ -221,11 +227,13 @@ final class Station {
 		}
 		ServerLevel level = bot.level();
 		BlockPos feet = bot.movement().feet();
+		// Sand and powder fall: only onto something.
+		boolean falls = block instanceof net.minecraft.world.level.block.FallingBlock;
 		for (int dy = 0; dy <= 1; dy++) {
 			for (Direction d : Direction.Plane.HORIZONTAL) {
 				BlockPos spot = feet.relative(d).above(dy);
 				if (Placement.allowed(level, spot, Placement.Kind.STATION)
-						&& (dy == 1 || LocalPathfinder.isSupport(level, spot.below()))
+						&& ((dy == 1 && !falls) || LocalPathfinder.isSupport(level, spot.below()))
 						&& tryPlace(bot, spot, slot)) {
 					return true;
 				}
@@ -234,7 +242,7 @@ final class Station {
 		// Walled in on all sides (e.g. at the bottom of a 1x1 shaft): above our head is in reach. The
 		// cell over the head, not two over the feet: standing on a path the head is in that one.
 		BlockPos overhead = BlockPos.containing(bot.getX(), bot.getBoundingBox().maxY - 1e-4, bot.getZ()).above();
-		if (Placement.allowed(level, overhead, Placement.Kind.STATION) && tryPlace(bot, overhead, slot)) {
+		if (!falls && Placement.allowed(level, overhead, Placement.Kind.STATION) && tryPlace(bot, overhead, slot)) {
 			return true;
 		}
 		failure = "身边找不到能放" + new ItemStack(item).getHoverName().getString() + "的地方";

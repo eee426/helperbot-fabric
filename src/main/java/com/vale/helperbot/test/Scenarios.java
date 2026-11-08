@@ -290,6 +290,126 @@ public final class Scenarios {
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass("挖蜘蛛网") : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
+				new Scenario("U1", "要 2 个去皮橡木原木，背包里有橡木原木和铁斧：放下、去皮、挖回来", MINUTE, (a, bot, me) -> {
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.OAK_LOG, 2);
+					give(bot, Items.IRON_AXE, 1);
+					return new AcquireTask(me, Items.STRIPPED_OAK_LOG, 2, Mode.NORMAL);
+				}, c -> {
+					if (c.bot().getInventory().countItem(Items.STRIPPED_OAK_LOG) >= 2) {
+						return nothingLeftAround(c, Blocks.STRIPPED_OAK_LOG, Blocks.OAK_LOG) ? Scenario.Outcome.pass("拿到了，地上没留东西")
+								: Scenario.Outcome.fail("拿到了，但地上留了原木");
+					}
+					return null;
+				}),
+
+				new Scenario("U2", "要白桦展示架（要去皮白桦原木），背包里只有白桦原木、铁斧和工作台", 2 * MINUTE, (a, bot, me) -> {
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.BIRCH_LOG, 6);
+					give(bot, Items.CRAFTING_TABLE, 1);
+					give(bot, Items.IRON_AXE, 1);
+					return new AcquireTask(me, Items.BIRCH_SHELF, 1, Mode.NORMAL);
+				}, Scenario.has(Items.BIRCH_SHELF, 1)),
+
+				new Scenario("U3", "要 2 个白色混凝土，有粉末、水桶、铁镐：倒水、收水、挖回来，不留水", MINUTE, (a, bot, me) -> {
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.WHITE_CONCRETE_POWDER, 2);
+					give(bot, Items.WATER_BUCKET, 1);
+					give(bot, Items.IRON_PICKAXE, 1);
+					return new AcquireTask(me, Items.WHITE_CONCRETE, 2, Mode.NORMAL);
+				}, c -> {
+					if (c.bot().getInventory().countItem(Items.WHITE_CONCRETE) >= 2) {
+						if (!nothingLeftAround(c, Blocks.WATER, Blocks.WHITE_CONCRETE, Blocks.WHITE_CONCRETE_POWDER)) {
+							return Scenario.Outcome.fail("拿到了，但地上留了水或方块");
+						}
+						return c.bot().getInventory().countItem(Items.WATER_BUCKET) >= 1 ? Scenario.Outcome.pass("拿到了，水也收回来了")
+								: Scenario.Outcome.fail("拿到了，但水桶没了");
+					}
+					return null;
+				}),
+
+				new Scenario("U4", "要 1 个红色混凝土，只有红色粉末、空桶和铁镐，旁边有水：先装水", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(6, Arena.SURFACE - 1, -1, 8, Arena.SURFACE - 1, 1, Blocks.WATER);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.RED_CONCRETE_POWDER, 1);
+					give(bot, Items.BUCKET, 1);
+					give(bot, Items.IRON_PICKAXE, 1);
+					return new AcquireTask(me, Items.RED_CONCRETE, 1, Mode.NORMAL);
+				}, Scenario.has(Items.RED_CONCRETE, 1)),
+
+				new Scenario("U5", "要岩浆桶，旁边地上有个岩浆池：站在旁边装，不掉进去", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(5, Arena.SURFACE - 2, -2, 9, Arena.SURFACE - 1, 2, Blocks.STONE);
+					a.fill(6, Arena.SURFACE - 1, -1, 8, Arena.SURFACE - 1, 1, Blocks.LAVA);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.BUCKET, 1);
+					return new AcquireTask(me, Items.LAVA_BUCKET, 1, Mode.NORMAL);
+				}, c -> {
+					if (c.bot().isOnFire() || c.bot().isInLava()) {
+						return Scenario.Outcome.fail("掉进岩浆了");
+					}
+					return c.bot().getInventory().countItem(Items.LAVA_BUCKET) >= 1 ? Scenario.Outcome.pass("装到了，没着火") : null;
+				}),
+
+				new Scenario("U6", "要细雪桶，旁边有一片细雪：站在旁边装，不踩进去", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(6, Arena.SURFACE - 1, -1, 8, Arena.SURFACE - 1, 1, Blocks.POWDER_SNOW);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.BUCKET, 1);
+					return new AcquireTask(me, Items.POWDER_SNOW_BUCKET, 1, Mode.NORMAL);
+				}, c -> {
+					if (c.bot().isInPowderSnow) {
+						return Scenario.Outcome.fail("踩进细雪里了");
+					}
+					return c.bot().getInventory().countItem(Items.POWDER_SNOW_BUCKET) >= 1 ? Scenario.Outcome.pass("装到了") : null;
+				}),
+
+				new Scenario("U7", "要 2 桶牛奶，附近有一头牛，背包里有 2 个空桶", 2 * MINUTE, (a, bot, me) -> {
+					a.spawn(EntityType.COW, 8, Arena.SURFACE, 0);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.BUCKET, 2);
+					return new AcquireTask(me, Items.MILK_BUCKET, 2, Mode.NORMAL);
+				}, c -> {
+					if (c.bot().getInventory().countItem(Items.MILK_BUCKET) >= 2) {
+						return c.arena().level.getEntitiesOfClass(net.minecraft.world.entity.animal.cow.Cow.class, c.bot().getBoundingBox().inflate(32)).isEmpty()
+								? Scenario.Outcome.fail("拿到了，但牛被打死了") : Scenario.Outcome.pass("挤到了，牛还在");
+					}
+					return null;
+				}),
+
+				new Scenario("U8", "要一桶鳕鱼，水池里有鳕鱼，背包里有水桶", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(5, Arena.SURFACE - 3, -3, 11, Arena.SURFACE - 1, 3, Blocks.WATER);
+					a.spawn(EntityType.COD, 8, Arena.SURFACE - 2, 0);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.WATER_BUCKET, 1);
+					return new AcquireTask(me, Items.COD_BUCKET, 1, Mode.NORMAL);
+				}, Scenario.has(Items.COD_BUCKET, 1)),
+
+				new Scenario("U9", "要一张地图，背包里有空地图：拿在手上用", 20, (a, bot, me) -> {
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.MAP, 1);
+					return new AcquireTask(me, Items.FILLED_MAP, 1, Mode.NORMAL);
+				}, Scenario.has(Items.FILLED_MAP, 1)),
+
+				new Scenario("U10", "要一瓶水，有玻璃瓶，旁边有水", MINUTE, (a, bot, me) -> {
+					a.fill(6, Arena.SURFACE - 1, -1, 8, Arena.SURFACE - 1, 1, Blocks.WATER);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.GLASS_BOTTLE, 1);
+					return new AcquireTask(me, Items.POTION, 1, Mode.NORMAL);
+				}, Scenario.has(Items.POTION, 1)),
+
+				new Scenario("U11", "要蛋糕（要 3 桶牛奶）：规划里有挤奶（只规划）", 20, (a, bot, me) -> {
+					a.spawn(EntityType.COW, 8, Arena.SURFACE, 0);
+					give(bot, Items.BUCKET, 3);
+					give(bot, Items.SUGAR, 2);
+					give(bot, Items.WHEAT, 3);
+					give(bot, Items.EGG, 1);
+					CraftPlanner.Plan plan = new CraftPlanner(a.level, bot, bot.getInventory(), new HashSet<>(), Mode.NORMAL)
+							.plan(Items.CAKE, 1, CraftPlanner.counts(bot.getInventory()));
+					PLAN_RESULT[0] = !plan.possible() ? "规划失败：" + plan.problems().stream().limit(4).map(x -> x.getString()).toList()
+							: plan.actions().stream().noneMatch(x -> x instanceof CraftPlanner.Use u && u.way().result() == Items.MILK_BUCKET)
+							? "计划里没有挤奶：" + plan.actions() : null;
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass("会去挤奶") : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
 				new Scenario("C37", "镐都快坏了（耐久 1）还要钻石镐：规划里要先做新铁镐（只规划）", 20, (a, bot, me) -> {
 					a.tree(6, 6, 5);
 					a.tree(-7, 5, 5);
@@ -1720,6 +1840,19 @@ public final class Scenarios {
 	private static final String[] PLAN_RESULT = new String[2];
 	/** W36: whether the bot was seen in the swimming pose. */
 	private static final boolean[] SWAM = new boolean[1];
+
+	/** None of these blocks within 4 of the bot: it took back what it put down. */
+	private static boolean nothingLeftAround(Scenario.Context c, net.minecraft.world.level.block.Block... blocks) {
+		BlockPos at = c.bot().blockPosition();
+		for (BlockPos p : BlockPos.betweenClosed(at.offset(-4, -2, -4), at.offset(4, 3, 4))) {
+			for (net.minecraft.world.level.block.Block b : blocks) {
+				if (c.arena().level.getBlockState(p).is(b)) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
 
 	private static void hungry(BotPlayer bot, float health, int food) {
 		bot.setHealth(health);

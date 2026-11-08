@@ -52,7 +52,7 @@ import java.util.Set;
  * and plans again from the real inventory, which absorbs any surprises.
  */
 public final class CraftPlanner {
-	public sealed interface Action permits Gather, Hunt, Craft, Smelt, Fill {
+	public sealed interface Action permits Gather, Hunt, Craft, Smelt, Fill, Use {
 	}
 
 	public record Gather(Item item, int count) implements Action {
@@ -70,6 +70,14 @@ public final class CraftPlanner {
 
 	/** Fill {@code count} empty buckets with water. */
 	public record Fill(int count) implements Action {
+	}
+
+	/**
+	 * Make {@code count} by using something on a block or a mob (see Interactions): strip logs,
+	 * turn powder into concrete, fill a bucket, milk a cow. {@code mobs}: those of the way's mobs
+	 * that are around or live in the world, for a MOB way.
+	 */
+	public record Use(Interactions.Way way, int count, Map<EntityType<?>, Double> mobs) implements Action {
 	}
 
 	/** Actions in order; empty if the inventory already has everything. Null actions = impossible. */
@@ -332,6 +340,15 @@ public final class CraftPlanner {
 				}
 			}
 		}
+		for (Interactions.Way way : usable(item)) {
+			if (best != null && useFloor(way, n) >= best.cost - s.cost) {
+				continue;
+			}
+			State t = s.copy();
+			if (useInto(t, way, n, depth, resolving, limit(s, best)) && t.beats(best)) {
+				best = t;
+			}
+		}
 		Map<EntityType<?>, Double> prey = huntSources(item);
 		if (prey.isEmpty() && huntProblem.containsKey(item)) {
 			problems.add(huntProblem.get(item));
@@ -380,7 +397,7 @@ public final class CraftPlanner {
 		}
 		resolving.remove(item);
 		if (best == null) {
-			if (ways.isEmpty() && prey.isEmpty() && !huntProblem.containsKey(item) && !gatherable(item)
+			if (ways.isEmpty() && prey.isEmpty() && !huntProblem.containsKey(item) && !gatherable(item) && usable(item).isEmpty()
 					&& Obtainability.refusal(level, item) == null) {
 				problems.add(Component.literal("不知道怎么弄到").append(name(item)).append("：挖、打、做都得不到"));
 			}
@@ -907,6 +924,10 @@ public final class CraftPlanner {
 			if (item == Items.WATER_BUCKET) {
 				queue.add(Items.BUCKET);
 			}
+			for (Interactions.Way way : usable(item)) {
+				queue.add(way.input());
+				queue.addAll(useTools(way));
+			}
 			for (RecipeIndex.Craft craft : recipes(item)) {
 				for (Ingredient ingredient : craft.ingredients()) {
 					queue.addAll(RecipeIndex.options(ingredient));
@@ -953,6 +974,21 @@ public final class CraftPlanner {
 		if (item == Items.WATER_BUCKET) {
 			Est bucket = estimates.getOrDefault(Items.BUCKET, Est.NONE);
 			best = cheaper(best, new Est(bucket.unit() + FILL_PER_ITEM, bucket.once() + ticks(WATER_TRIP_BLOCKS)));
+		}
+		for (Interactions.Way way : usable(item)) {
+			Est input = estimates.getOrDefault(way.input(), Est.NONE);
+			Est use = split(useCost(way, 1), useCost(way, SPLIT_AT));
+			double tools = 0;
+			for (Item tool : useTools(way)) {
+				tools += estimates.getOrDefault(tool, Est.NONE).total();
+			}
+			if (way.kind() == Interactions.Kind.STRIP) {
+				tools = Double.POSITIVE_INFINITY; // any one axe
+				for (Item axe : useTools(way)) {
+					tools = Math.min(tools, estimates.getOrDefault(axe, Est.NONE).total());
+				}
+			}
+			best = cheaper(best, new Est(input.unit() + use.unit(), input.once() + use.once() + tools));
 		}
 		Map<EntityType<?>, Double> prey = huntSources(item);
 		if (!prey.isEmpty()) {
@@ -1171,6 +1207,9 @@ public final class CraftPlanner {
 		if (item == Items.WATER_BUCKET) {
 			best = Math.min(best, ticks(WATER_TRIP_BLOCKS) + FILL_PER_ITEM * count + floor(Items.BUCKET, count));
 		}
+		for (Interactions.Way way : usable(item)) {
+			best = Math.min(best, useFloor(way, count));
+		}
 		Map<EntityType<?>, Double> prey = huntSources(item);
 		if (!prey.isEmpty()) {
 			best = Math.min(best, huntCost(prey, count));
@@ -1285,13 +1324,17 @@ public final class CraftPlanner {
 	 * around first.
 	 */
 	private double huntCost(Map<EntityType<?>, Double> prey, double n) {
+		return huntCost(prey, n, killTicks(prey) + ticks(CHASE_BLOCKS) + PICKUP_TICKS);
+	}
+
+	/** {@code kill}: what each one takes once there (a fight, or using something on it). */
+	private double huntCost(Map<EntityType<?>, Double> prey, double n, double kill) {
 		double perKill = prey.values().stream().mapToDouble(Double::doubleValue).max().orElse(1.0);
 		double kills = n / Math.max(1e-3, perKill);
 		int around = nearbyPrey(prey);
 		boolean animals = prey.keySet().stream().anyMatch(t -> t.getCategory() != MobCategory.MONSTER);
 		double trip = around > 0 ? toNearestPrey(prey) : structureOnly(prey) ? ticks(structureDistance(prey))
 				: animals ? ticks(TRIP_BLOCKS) : ticksToDark();
-		double kill = killTicks(prey) + ticks(CHASE_BLOCKS) + PICKUP_TICKS;
 		double near = Math.min(kills, around);
 		return trip + near * kill + (kills - near) * (kill + waitPerKill(prey));
 	}
@@ -1365,7 +1408,12 @@ public final class CraftPlanner {
 				Item item = it.next();
 				boolean made = RecipeIndex.craftsFor(level, item).stream().anyMatch(craft -> craft.ingredients().stream()
 								.allMatch(ing -> RecipeIndex.options(ing).stream().anyMatch(yes::contains)))
-						|| RecipeIndex.smeltsFor(level, item).stream().anyMatch(smelt -> RecipeIndex.options(smelt.input()).stream().anyMatch(yes::contains));
+						|| RecipeIndex.smeltsFor(level, item).stream().anyMatch(smelt -> RecipeIndex.options(smelt.input()).stream().anyMatch(yes::contains))
+						|| Interactions.waysTo(level, item).stream().anyMatch(way -> yes.contains(way.input()) && switch (way.kind()) {
+							case SCOOP -> !BiomeHints.biomesFor(level, way.at()).isEmpty();
+							case MOB -> way.mobs().stream().anyMatch(t -> !MobDrops.spawnBiomes(level, t).isEmpty());
+							default -> true;
+						});
 				if (made) {
 					yes.add(item);
 					it.remove();
@@ -1374,6 +1422,179 @@ public final class CraftPlanner {
 			}
 		}
 		return yes;
+	}
+
+	// ---- using things on blocks and mobs (see Interactions) --------------------------------
+
+	private final Map<Item, List<Interactions.Way>> usable = new HashMap<>();
+
+	/** The ways of using something that make it and can be done from here: what to use it on is around, or out in the world. */
+	private List<Interactions.Way> usable(Item item) {
+		List<Interactions.Way> known = usable.get(item);
+		if (known != null) {
+			return known;
+		}
+		List<Interactions.Way> out = new ArrayList<>();
+		for (Interactions.Way way : Interactions.waysTo(level, item)) {
+			boolean ok = switch (way.kind()) {
+				case MOB -> !noHunt.contains(item) && breaker instanceof Player && !mobsFor(way).isEmpty();
+				case SCOOP -> !noGather.contains(item) && !Double.isNaN(scoopTrip(way));
+				default -> !noGather.contains(item);
+			};
+			if (ok) {
+				out.add(way);
+			}
+		}
+		usable.put(item, out);
+		return out;
+	}
+
+	/** What a way needs in the bag and keeps: an axe (any one), or the water bucket and the pick for concrete. */
+	private List<Item> useTools(Interactions.Way way) {
+		return switch (way.kind()) {
+			case STRIP -> axes();
+			case SOLIDIFY -> {
+				List<Item> tools = new ArrayList<>(List.of(Items.WATER_BUCKET));
+				List<Item> pick = gatherTools(way.result());
+				if (!pick.isEmpty() && pick != NO_PLAIN_TOOL) {
+					tools.add(pick.get(0));
+				}
+				yield tools;
+			}
+			default -> List.of();
+		};
+	}
+
+	private List<Item> axes;
+
+	private List<Item> axes() {
+		if (axes == null) {
+			axes = new ArrayList<>();
+			net.minecraft.core.registries.BuiltInRegistries.ITEM.getTagOrEmpty(ItemTags.AXES).forEach(h -> axes.add(h.value()));
+		}
+		return axes;
+	}
+
+	private boolean useInto(State t, Interactions.Way way, int n, int depth, Set<Item> resolving, double limit) {
+		switch (way.kind()) {
+			case STRIP -> {
+				if (!keepAny(t, axes(), depth, resolving)) {
+					return false;
+				}
+			}
+			case SOLIDIFY -> {
+				if (!keepStation(t, Items.WATER_BUCKET, depth, resolving) || !ensureGatherTool(t, way.result(), depth, resolving)) {
+					return false;
+				}
+			}
+			default -> {
+			}
+		}
+		double cost = useCost(way, n);
+		if (Double.isNaN(cost) || Double.isInfinite(cost) || t.cost >= limit) {
+			return false;
+		}
+		if (!acquire(t, way.input(), n, depth + 1, resolving)) {
+			return false;
+		}
+		t.cost += cost;
+		t.actions.add(new Use(way, n, way.kind() == Interactions.Kind.MOB ? mobsFor(way) : Map.of()));
+		return true;
+	}
+
+	/** One of these in the bag, kept: the one there, or the cheapest-looking one that can be made. */
+	private boolean keepAny(State t, List<Item> tools, int depth, Set<Item> resolving) {
+		for (Item tool : tools) {
+			if (t.have(tool) > 0) {
+				return true;
+			}
+		}
+		int tried = 0;
+		for (Item tool : byEstimate(tools)) {
+			if (tried++ >= MAX_ALTERNATIVES) {
+				break;
+			}
+			State u = t.copy();
+			if (acquire(u, tool, 1, depth + 1, resolving)) {
+				u.add(tool, 1);
+				t.become(u);
+				return true;
+			}
+		}
+		if (!tools.isEmpty()) {
+			problems.add(Component.literal("需要").append(name(tools.get(0))).append("，但做不出来"));
+		}
+		return false;
+	}
+
+	/**
+	 * Ticks for {@code n} once the input is in the bag: putting the block down, using the tool,
+	 * mining it back (with what the bag has, see #breakTicks) and the drop coming in; the way to
+	 * what it's used on and the filling; the way to a mob and using it (as a hunt, see #huntCost).
+	 */
+	private double useCost(Interactions.Way way, int n) {
+		BlockPos here = breaker.blockPosition();
+		return switch (way.kind()) {
+			case STRIP -> n * (2 * PLACE_TICKS + breakTicks(way.result(), here, way.becomes().defaultBlockState()) + PICKUP_TICKS);
+			// Powder down, water on, water back up, then the concrete.
+			case SOLIDIFY -> n * (3 * PLACE_TICKS + breakTicks(way.result(), here, way.becomes().defaultBlockState()) + PICKUP_TICKS);
+			case SCOOP -> scoopTrip(way) + FILL_PER_ITEM * n + (n - 1) * ticks(VEIN_BLOCKS);
+			case MOB -> {
+				Map<EntityType<?>, Double> mobs = mobsFor(way);
+				yield mobs.isEmpty() ? Double.NaN : huntCost(mobs, n, PLACE_TICKS + ticks(CHASE_BLOCKS));
+			}
+			case USE -> n * PLACE_TICKS;
+		};
+	}
+
+	/** What it takes at the very least (see #floor): the use itself, and the floor of what's used up. */
+	private double useFloor(Interactions.Way way, int n) {
+		double use = useCost(way, n);
+		return Double.isNaN(use) ? Double.POSITIVE_INFINITY : use + floor(way.input(), n);
+	}
+
+	private final Map<Interactions.Way, Double> scoopTrips = new HashMap<>();
+
+	/**
+	 * Ticks to the nearest of what it's used on, around (digging down to it if it's under the
+	 * ground, see #digDownTo); a trip if only the biomes have it; NaN if nowhere does.
+	 */
+	private double scoopTrip(Interactions.Way way) {
+		Double known = scoopTrips.get(way);
+		if (known != null) {
+			return known;
+		}
+		List<BlockPos> found = BlockScanner.find(level, breaker.blockPosition(), NEARBY_CHUNKS,
+				state -> way.at().contains(state.getBlock()) && (state.getFluidState().isEmpty() || state.getFluidState().isSource()),
+				p -> !com.vale.helperbot.guard.ProtectionZones.isProtected(level, p), 1);
+		double trip;
+		if (!found.isEmpty()) {
+			BlockPos p = found.get(0);
+			trip = ticks(Math.sqrt(breaker.blockPosition().distSqr(p))) + digDownTo(p);
+		} else {
+			trip = BiomeHints.biomesFor(level, way.at()).isEmpty() ? Double.NaN : ticks(TRIP_BLOCKS);
+		}
+		scoopTrips.put(way, trip);
+		return trip;
+	}
+
+	private final Map<Interactions.Way, Map<EntityType<?>, Double>> mobsFor = new HashMap<>();
+
+	/** The way's mobs that are around, live in the world or in its structures; one use each. */
+	private Map<EntityType<?>, Double> mobsFor(Interactions.Way way) {
+		Map<EntityType<?>, Double> known = mobsFor.get(way);
+		if (known != null) {
+			return known;
+		}
+		Map<EntityType<?>, Double> out = new HashMap<>();
+		for (EntityType<?> type : way.mobs()) {
+			if (!MobDrops.spawnBiomes(level, type).isEmpty() || nearbyPrey(Map.of(type, 1.0)) > 0
+					|| !StructureIndex.spawning(level, type).isEmpty()) {
+				out.put(type, 1.0);
+			}
+		}
+		mobsFor.put(way, out);
+		return out;
 	}
 
 	/** Ticks until monsters spawn in the open: none under cover, or at night. */

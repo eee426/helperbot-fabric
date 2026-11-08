@@ -38,6 +38,7 @@ public class HelperBot implements ModInitializer {
 			RecipeIndex.clearCache();
 			com.vale.helperbot.knowledge.MobDrops.clearCache();
 			com.vale.helperbot.knowledge.StructureIndex.clearCache();
+			com.vale.helperbot.knowledge.Interactions.clearCache();
 			warmUp(server);
 		});
 
@@ -48,6 +49,7 @@ public class HelperBot implements ModInitializer {
 			warmUp(server);
 			BiomeHints.biomesFor(server.overworld(), java.util.List.of()); // reads every world-gen feature once
 			com.vale.helperbot.knowledge.StructureIndex.warmUp(server.overworld());
+			com.vale.helperbot.knowledge.Interactions.warmUp(server.overworld());
 			LOGGER.info("HelperBot drop, recipe, mob and biome indexes built in {} ms", (System.nanoTime() - start) / 1_000_000);
 			if (System.getenv("HELPERBOT_BENCH") != null) {
 				com.vale.helperbot.knowledge.PlanBench.run(server);

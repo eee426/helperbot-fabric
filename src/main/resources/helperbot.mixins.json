@@ -4,6 +4,8 @@
 	"package": "com.vale.helperbot.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
+		"AxeItemAccessor",
+		"ConcretePowderBlockAccessor",
 		"ItemEntityMixin",
 		"MobMixin",
 		"SleepStatusMixin"

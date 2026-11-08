@@ -32,7 +32,7 @@ public class AcquireTask implements BotTask {
 	private static final int MAX_PROBLEMS_SHOWN = 4;
 
 	private enum Phase {
-		PLAN, GATHER, HUNT, FILL, CRAFT, SMELT, LEAVE_ZONE, RETURN
+		PLAN, GATHER, HUNT, FILL, USE, SCOOP, CRAFT, SMELT, LEAVE_ZONE, RETURN
 	}
 
 	private final ServerPlayer requester;
@@ -63,6 +63,9 @@ public class AcquireTask implements BotTask {
 	private CraftStep craft;
 	private SmeltStep smelt;
 	private FetchWaterTask fill;
+	private UseStep use;
+	private ScoopStep scoop;
+	private Item useItem;
 
 	public AcquireTask(ServerPlayer requester, Item item, int wanted, Mode mode) {
 		this.requester = requester;
@@ -130,6 +133,8 @@ public class AcquireTask implements BotTask {
 				}
 				yield Status.RUNNING;
 			}
+			case USE -> useDone(bot, use.tick(bot), use.failure());
+			case SCOOP -> useDone(bot, scoop.tick(bot), scoop.failure());
 			case CRAFT -> stepDone(bot, craft.tick(bot), craft.failure());
 			case SMELT -> stepDone(bot, smelt.tick(bot), smelt.failure());
 			case LEAVE_ZONE -> leaveZone(bot);
@@ -163,6 +168,23 @@ public class AcquireTask implements BotTask {
 		} else {
 			bot.log(how + CraftPlanner.name(what).getString() + "失败（第 " + n + " 次），重新规划再试");
 		}
+	}
+
+	/** A use step ended: a failure counts like one at gathering (see #stepFailed). */
+	private Status useDone(BotPlayer bot, Status s, String failure) {
+		if (s == Status.RUNNING) {
+			return Status.RUNNING;
+		}
+		if (s == Status.FAILED) {
+			bot.log("这一步失败：" + failure);
+			stepFailed(bot, useItem, "采集");
+		} else {
+			failures.remove(useItem);
+		}
+		use = null;
+		scoop = null;
+		phase = Phase.PLAN;
+		return Status.RUNNING;
 	}
 
 	private Status stepDone(BotPlayer bot, Status s, String failure) {
@@ -327,6 +349,25 @@ public class AcquireTask implements BotTask {
 				fill = new FetchWaterTask(requester, mode, true);
 				phase = Phase.FILL;
 			}
+			case CraftPlanner.Use u -> {
+				useItem = u.way().result();
+				switch (u.way().kind()) {
+					case MOB -> {
+						huntItem = useItem;
+						hunt = new HuntTask(requester, useItem, u.count(), mode, u.mobs(), explorers, u.way().input());
+						phase = Phase.HUNT;
+					}
+					case SCOOP -> {
+						scoop = new ScoopStep(requester, u.way(), u.count(), mode, explorers);
+						phase = Phase.SCOOP;
+					}
+					default -> {
+						bot.movement().stop();
+						use = new UseStep(requester, u.way(), u.count(), outOfReach);
+						phase = Phase.USE;
+					}
+				}
+			}
 			case CraftPlanner.Craft c -> {
 				bot.movement().stop();
 				craft = new CraftStep(requester, c, outOfReach);
@@ -347,6 +388,7 @@ public class AcquireTask implements BotTask {
 			case CraftPlanner.Gather g -> g.item();
 			case CraftPlanner.Hunt h -> h.item();
 			case CraftPlanner.Fill f -> Items.WATER_BUCKET;
+			case CraftPlanner.Use u -> u.way().result();
 			case CraftPlanner.Craft c -> c.recipe().result();
 			case CraftPlanner.Smelt s -> s.recipe().result();
 		};
@@ -363,6 +405,11 @@ public class AcquireTask implements BotTask {
 				case CraftPlanner.Fill f -> {
 					planItems.add(Items.BUCKET);
 					planItems.add(Items.WATER_BUCKET);
+				}
+				case CraftPlanner.Use u -> {
+					planItems.add(u.way().result());
+					planItems.add(u.way().input());
+					planItems.add(Items.BUCKET); // the water bucket, poured and taken back
 				}
 				case CraftPlanner.Craft c -> {
 					planItems.add(c.recipe().result());
@@ -388,6 +435,7 @@ public class AcquireTask implements BotTask {
 				case CraftPlanner.Gather g -> text.append("采集 ").append(name(g.item())).append(" ×" + g.count());
 				case CraftPlanner.Hunt h -> text.append("打猎 ").append(name(h.item())).append(" ×" + h.count());
 				case CraftPlanner.Fill f -> text.append("装水 ").append(name(Items.WATER_BUCKET)).append(" ×" + f.count());
+				case CraftPlanner.Use u -> text.append(UseStep.verb(u.way())).append(name(u.way().result())).append(" ×" + u.count());
 				case CraftPlanner.Craft c -> text.append("合成 ").append(name(c.recipe().result()))
 						.append(" ×" + c.times() * c.recipe().resultCount());
 				case CraftPlanner.Smelt s -> text.append("熔炼 ").append(name(s.recipe().result()))
@@ -456,6 +504,8 @@ public class AcquireTask implements BotTask {
 			case HUNT -> "获取 " + what + " → " + hunt.describe();
 			case CRAFT -> "获取 " + what + " → " + craft.describe().getString();
 			case FILL -> "获取 " + what + " → " + fill.describe();
+			case USE -> "获取 " + what + " → " + use.describe().getString();
+			case SCOOP -> "获取 " + what + " → " + scoop.describe().getString();
 			case SMELT -> "获取 " + what + " → " + smelt.describe().getString();
 			case LEAVE_ZONE -> "获取 " + what + "：先走出保护区";
 			case RETURN -> "获取 " + what + "：返回";

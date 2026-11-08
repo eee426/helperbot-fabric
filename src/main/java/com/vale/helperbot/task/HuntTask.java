@@ -76,6 +76,8 @@ final class HuntTask {
 	private final int wanted;
 	private final Mode mode;
 	private final Map<EntityType<?>, Double> sources;
+	/** What's used on them instead of a weapon; null for a hunt. */
+	private final Item use;
 	private final Set<UUID> rejected = new HashSet<>();
 	private Phase phase = Phase.FIND;
 	/** Items on the ground are sources too (a kill's drops, say): the one it's fetching, in FETCH (see DropFetch). */
@@ -103,6 +105,15 @@ final class HuntTask {
 	private int nightWaited;
 
 	HuntTask(ServerPlayer requester, Item item, int wanted, Mode mode, Map<EntityType<?>, Double> sources, Map<Item, Explorer> explorers) {
+		this(requester, item, wanted, mode, sources, explorers, null);
+	}
+
+	/**
+	 * Not killing them: using {@code use} on them (a bucket on a cow, a water bucket on a fish, see
+	 * Interactions). Finding and getting to them is the same as for a hunt.
+	 */
+	HuntTask(ServerPlayer requester, Item item, int wanted, Mode mode, Map<EntityType<?>, Double> sources, Map<Item, Explorer> explorers, Item use) {
+		this.use = use;
 		this.explorers = explorers;
 		this.requester = requester;
 		this.item = item;
@@ -122,12 +133,15 @@ final class HuntTask {
 	BotTask.Status tick(BotPlayer bot) {
 		if (startCount < 0) {
 			startCount = count(bot.getInventory());
-			bot.say(requester, Component.literal("去打猎：").append(names()).append("，要 ").append(CraftPlanner.name(item))
+			bot.say(requester, Component.literal(use != null ? "去找：" : "去打猎：").append(names()).append("，要 ").append(CraftPlanner.name(item))
 					.append(" ×" + wanted + "。"));
 		}
 		if (count(bot.getInventory()) - startCount >= wanted) {
 			bot.movement().stop();
 			return BotTask.Status.DONE;
+		}
+		if (use != null && bot.getInventory().findSlotMatchingItem(new ItemStack(use)) < 0) {
+			return fail(bot, "背包里没有" + CraftPlanner.name(use).getString());
 		}
 		phaseTicks++;
 		// Only stop to heal when health can come back (food at 18+, or something to eat): without
@@ -618,6 +632,20 @@ final class HuntTask {
 		if (bot.isWithinEntityInteractionRange(target, 0) && bot.hasLineOfSight(target)) {
 			bot.movement().stop();
 			bot.movement().hands().lookAt(target.getBoundingBox().getCenter());
+			if (use != null) {
+				int had = count(bot.getInventory());
+				bot.movement().hands().selectSlot(bot.getInventory().findSlotMatchingItem(new ItemStack(use)));
+				bot.interactOn(target, net.minecraft.world.InteractionHand.MAIN_HAND);
+				bot.swing(net.minecraft.world.InteractionHand.MAIN_HAND);
+				if (count(bot.getInventory()) <= had) {
+					// (A baby, say: nothing to be had from this one.)
+					bot.log("从 " + target.getType().getDescription().getString() + " 身上什么也没拿到，换一只");
+					rejected.add(target.getUUID());
+					bot.movement().stop();
+					setPhase(Phase.FIND);
+				}
+				return BotTask.Status.RUNNING;
+			}
 			if (bot.getAttackStrengthScale(0.5f) >= 0.95f) {
 				bot.holdWeapon();
 				bot.attack(target);
