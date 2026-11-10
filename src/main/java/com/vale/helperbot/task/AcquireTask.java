@@ -51,6 +51,11 @@ public class AcquireTask implements BotTask {
 	private final List<net.minecraft.core.BlockPos> structuresTried = new java.util.ArrayList<>();
 	private final Set<Item> planItems = new HashSet<>();
 	private final OutOfReach outOfReach = new OutOfReach();
+
+	/** What this order found out of reach (see OutOfReach). */
+	OutOfReach outOfReach() {
+		return outOfReach;
+	}
 	private final Map<Item, Explorer> explorers = new java.util.HashMap<>();
 	private Phase phase = Phase.PLAN;
 	private int startCount = -1;

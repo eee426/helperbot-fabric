@@ -31,6 +31,8 @@ public class HelperBot implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		// The restock reflex lives in the body; the fetching is the task layer's (see bot/Restock).
+		com.vale.helperbot.bot.BotPlayer.restockFinder = com.vale.helperbot.task.RestockStep::find;
 		CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> BotCommands.register(dispatcher, registryAccess));		// Loot tables and world-gen data can change on /reload: forget what we derived from them.
 		ServerLifecycleEvents.END_DATA_PACK_RELOAD.register((server, resources, success) -> {
 			DropAnalysis.clearCache();
@@ -40,6 +42,7 @@ public class HelperBot implements ModInitializer {
 			com.vale.helperbot.knowledge.StructureIndex.clearCache();
 			com.vale.helperbot.knowledge.Interactions.clearCache();
 			com.vale.helperbot.knowledge.WhereFrom.clearCache();
+			com.vale.helperbot.knowledge.BuildingSources.clearCache();
 			warmUp(server);
 		});
 
@@ -124,6 +127,9 @@ public class HelperBot implements ModInitializer {
 		var level = server.overworld();
 		com.vale.helperbot.path.BlockTable.build();
 		DropAnalysis.warmUp(level);
+		var ground = com.vale.helperbot.knowledge.BuildingSources.items(server);
+		com.vale.helperbot.path.BuildingBlocks.setGround(ground);
+		LOGGER.info("HelperBot building blocks: {} kinds from the ground", ground.size());
 		RecipeIndex.craftsFor(level, net.minecraft.world.item.Items.STICK);
 		com.vale.helperbot.knowledge.MobDrops.sources(level, net.fabricmc.fabric.api.entity.FakePlayer.get(level),
 				net.minecraft.world.item.Items.BONE);

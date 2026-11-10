@@ -103,9 +103,18 @@ public class BotPlayer extends ServerPlayer {
 			perf.add(Perf.Part.SURVIVAL, System.nanoTime() - started);
 			return;
 		}
-		hand(Layer.TASK);
 		perf.add(Perf.Part.SURVIVAL, System.nanoTime() - started);
 		started = System.nanoTime();
+		// Building blocks running low: top up from the ground around, the task waiting meanwhile.
+		if (restock()) {
+			hand(Layer.RESTOCK);
+			perf.add(Perf.Part.TASK, System.nanoTime() - started);
+			started = System.nanoTime();
+			movement.tick();
+			perf.add(Perf.Part.MOVE, System.nanoTime() - started);
+			return;
+		}
+		hand(Layer.TASK);
 		if (tickCount % 40 == 0 && freeSlots() <= LOW_FREE_SLOTS) {
 			tidyInventory();
 		}
@@ -229,7 +238,7 @@ public class BotPlayer extends ServerPlayer {
 	 * (see {@link Loot}).
 	 */
 	public enum Layer {
-		BREATH("换气"), COMBAT("打架"), EAT("吃东西"), TASK("任务");
+		BREATH("换气"), COMBAT("打架"), EAT("吃东西"), RESTOCK("补方块"), TASK("任务");
 
 		final String label;
 
@@ -253,6 +262,95 @@ public class BotPlayer extends ServerPlayer {
 
 	public Layer owner() {
 		return owner;
+	}
+
+	// ---- restocking building blocks -----------------------------------------------------
+
+	/** How a restock is found and done: the task layer's, set at start (see HelperBot). */
+	public static Restock.Finder restockFinder;
+	/** Ticks between looks around for ground to dig, while low and there was none. */
+	private static final int RESTOCK_LOOK_TICKS = 100;
+	private Restock restocking;
+	private MovementController.Lent restockLent;
+	/** The task it was lent from: another one now, and the restock is off. */
+	private BotTask restockFor;
+	private int restockLookAt;
+	/**
+	 * It has had LOW or more since the last restock: "fewer than LOW" means it ran low, by laying them.
+	 * A bag that never had any isn't running low: it'd stop at the start of every order to dig 64 of
+	 * them, building or not. Then only a way that needs them sends it (see MovementController#wantsBlocks).
+	 */
+	private boolean hadBlocks;
+
+	/**
+	 * The restock reflex. Run low on building blocks (fewer than BuildingBlocks#LOW, see #hadBlocks), or a way that needs
+	 * building and too few for it (see MovementController#wantsBlocks), it tops up to
+	 * BuildingBlocks#TOP_UP from the ground around, through the gathering task (see task/RestockStep),
+	 * the task waiting and its movement given back as it was. Only between steps, on firm ground (see
+	 * MovementController#mayLend). With no ground in reach to dig it carries on and looks again every
+	 * few seconds: no interruption, nothing to remember. Ground the gathering finds out of reach goes
+	 * into what's out of reach (see task/OutOfReach), so it isn't seen as there to dig again.
+	 */
+	private boolean restock() {
+		if (restocking != null) {
+			if (task != restockFor || !Rules.open()) {
+				endRestock();
+				movement.dropLend(); // another task now, or no building: nothing to go back to
+				return false;
+			}
+			BotTask.Status status = restocking.tick(this);
+			if (status == BotTask.Status.RUNNING) {
+				return true;
+			}
+			int have = com.vale.helperbot.path.BuildingBlocks.count(getInventory());
+			log(status == BotTask.Status.DONE ? "方块补到 " + have + " 个，回到原来的事" : "附近没补到方块（现有 " + have + "），回到原来的事");
+			MovementController.Lent lent = restockLent;
+			endRestock();
+			movement.takeBack(lent, status == BotTask.Status.DONE);
+			restockLookAt = tickCount + RESTOCK_LOOK_TICKS;
+			return false;
+		}
+		boolean asked = movement.wantsBlocks();
+		int blocks = com.vale.helperbot.path.BuildingBlocks.count(getInventory());
+		if (blocks >= com.vale.helperbot.path.BuildingBlocks.LOW) {
+			hadBlocks = true;
+		}
+		if (!asked && (task == null || !hadBlocks || tickCount < restockLookAt || blocks >= com.vale.helperbot.path.BuildingBlocks.LOW)) {
+			return false;
+		}
+		// Asked out on its own bridge, it's run out half way: no restock from there, so say so (it
+		// used to wait there for good).
+		if (!Rules.open() || task == null || restockFinder == null || (asked && movement.onOwnBlocks())) {
+			if (asked) {
+				movement.noBlocksAround();
+			}
+			return false;
+		}
+		if (!movement.mayLend()) {
+			return false;
+		}
+		restockLookAt = tickCount + RESTOCK_LOOK_TICKS;
+		Restock found = restockFinder.find(this, com.vale.helperbot.path.BuildingBlocks.TOP_UP);
+		if (found == null) {
+			if (asked) {
+				movement.noBlocksAround();
+			}
+			return false;
+		}
+		int have = com.vale.helperbot.path.BuildingBlocks.count(getInventory());
+		log((asked ? "要搭路，方块不够（现有 " + have + "）" : "搭路的方块只剩 " + have + " 个") + "，先在附近补到 "
+				+ com.vale.helperbot.path.BuildingBlocks.TOP_UP + " 个");
+		restockLent = movement.lend();
+		restocking = found;
+		restockFor = task;
+		return restock();
+	}
+
+	private void endRestock() {
+		restocking.end(this);
+		restocking = null;
+		restockLent = null;
+		restockFor = null;
 	}
 
 	public int handovers() {
@@ -650,8 +748,6 @@ public class BotPlayer extends ServerPlayer {
 		this.debugPath = debugPath;
 	}
 
-	/** Building blocks kept for bridges and pillars; more than this aren't picked up, and get tidied away. */
-	private static final int BUILDING_BLOCK_STOCK = 128;
 	/** Tidy the bag when this few free slots are left. */
 	private static final int LOW_FREE_SLOTS = 2;
 	/** What the bot picked up itself (only this may be thrown away when tidying). */
@@ -669,27 +765,17 @@ public class BotPlayer extends ServerPlayer {
 		if (!Rules.open() || !com.vale.helperbot.path.BuildingBlocks.isBuildingBlock(stack)) {
 			return false;
 		}
-		// Restock below the low mark, up to the full stock, with a gap in between: right at a single
-		// threshold, placing one block made it want the next one again, and it dug up the block it
-		// had just put down to fetch a dropped one, and so on forever.
-		int have = com.vale.helperbot.path.BuildingBlocks.count(getInventory());
-		if (have < BUILDING_BLOCK_LOW) {
-			restocking = true;
-		} else if (have >= BUILDING_BLOCK_STOCK) {
-			restocking = false;
-		}
-		// Only while there's room, or it would pick up again what it just threw away to make room.
-		return restocking && freeSlots() > LOW_FREE_SLOTS + 1;
+		// Only what it walks over: going for blocks is the restock reflex's (see #restock), from the
+		// ground, not from what lies about (it once dug up the block it had just laid to fetch a
+		// dropped one). And only while there's room, or it would pick up again what it just threw away.
+		return com.vale.helperbot.path.BuildingBlocks.count(getInventory()) < com.vale.helperbot.path.BuildingBlocks.MOST
+				&& freeSlots() > LOW_FREE_SLOTS + 1;
 	}
 
 	/** Things the current task needs: only these are worth going out of the way for (see task/DropFetch). */
 	public boolean taskWants(ItemStack stack) {
 		return task != null && task.wantsPickup(stack);
 	}
-
-	/** Start picking up building blocks again below this. */
-	private static final int BUILDING_BLOCK_LOW = 64;
-	private boolean restocking = true;
 
 	public void notePickedUp(Item item, int count) {
 		pickedUp.merge(item, count, Integer::sum);
@@ -716,7 +802,7 @@ public class BotPlayer extends ServerPlayer {
 				}
 				boolean junk = pass == 0
 						? com.vale.helperbot.path.BuildingBlocks.isBuildingBlock(stack)
-						&& com.vale.helperbot.path.BuildingBlocks.count(inv) - stack.getCount() >= BUILDING_BLOCK_STOCK / 2
+						&& com.vale.helperbot.path.BuildingBlocks.count(inv) - stack.getCount() >= com.vale.helperbot.path.BuildingBlocks.MOST / 2
 						: task == null || !task.wantsPickup(stack);
 				if (!junk) {
 					continue;

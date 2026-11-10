@@ -29,6 +29,7 @@ import net.minecraft.world.level.block.state.properties.Property;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -117,6 +118,18 @@ public final class DropAnalysis {
 			sampleRare(level, item);
 		}
 		return index.getOrDefault(item, Map.of());
+	}
+
+	/** Every item some tool (or the hand) makes this block drop, by the index (rare drops apart). */
+	public static Set<Item> dropsOf(ServerLevel level, Block block) {
+		buildIndex(level);
+		Set<Item> out = new HashSet<>();
+		index.forEach((item, blocks) -> {
+			if (blocks.containsKey(block)) {
+				out.add(item);
+			}
+		});
+		return out;
 	}
 
 	private static void buildIndex(ServerLevel level) {

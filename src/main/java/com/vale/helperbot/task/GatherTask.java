@@ -92,6 +92,8 @@ public class GatherTask implements BotTask {
 	 * spending some health under water, every deep block was out of reach for the rest of the task.
 	 */
 	private final OutOfReach unreachable;
+	/** See the constructor: null for an ordinary gathering. */
+	private final Set<Block> onlyFrom;
 	/** For this item, the whole order long (see Explorer). */
 	private final Map<Item, Explorer> explorers;
 
@@ -133,6 +135,18 @@ public class GatherTask implements BotTask {
 	}
 
 	GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode, boolean asStep, OutOfReach unreachable, Map<Item, Explorer> explorers) {
+		this(requester, item, wanted, mode, asStep, unreachable, explorers, null);
+	}
+
+	/**
+	 * @param onlyFrom null, or the blocks it may get the item from (of those that drop it): the ground,
+	 *                 for building blocks (see RestockStep), not a player's farmland for dirt. With
+	 *                 it, it gathers near here only: when what's around runs out, it's done with what
+	 *                 it has, never off to explore.
+	 */
+	GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode, boolean asStep, OutOfReach unreachable, Map<Item, Explorer> explorers,
+			   Set<Block> onlyFrom) {
+		this.onlyFrom = onlyFrom;
 		this.unreachable = unreachable;
 		this.explorers = explorers;
 		this.requester = requester;
@@ -167,7 +181,9 @@ public class GatherTask implements BotTask {
 			}
 		}
 		if (phase != Phase.PREPARE && phase != Phase.RETURN) {
-			if (collected(bot) < wanted && (phase == Phase.APPROACH || phase == Phase.MINE) && bot.tickCount % 10 == 0
+			// (Not for a restock: what lies around then is mostly what rolled off the edge it dug at,
+			// down the chasm or into the pit by the lava, and it went down after the last one or two.)
+			if (onlyFrom == null && collected(bot) < wanted && (phase == Phase.APPROACH || phase == Phase.MINE) && bot.tickCount % 10 == 0
 					&& collected(bot) + drops.lying(bot, item, DROP_RANGE) >= wanted && !bot.movement().isMining()) {
 				// Enough lies around: no more mining, just picking up.
 				bot.log("地上的已经够了，去捡（还差 " + (wanted - collected(bot)) + " 个）");
@@ -210,6 +226,10 @@ public class GatherTask implements BotTask {
 			return Status.FAILED;
 		}
 		Map<Block, List<String>> candidates = DropAnalysis.candidates(level, bot, item);
+		if (onlyFrom != null) {
+			candidates = new HashMap<>(candidates);
+			candidates.keySet().retainAll(onlyFrom);
+		}
 		if (candidates.isEmpty()) {
 			bot.say(requester, Component.literal("没有哪种方块挖了会掉").append(itemName())
 					.append("。它可能要靠合成、熔炼、打怪、交易或钓鱼获得（这些还不支持），也可能生存模式里本来就拿不到。"));
@@ -257,6 +277,13 @@ public class GatherTask implements BotTask {
 	// ---- finding ------------------------------------------------------------------------
 
 	private Status find(BotPlayer bot) {
+		if (onlyFrom != null && scanned) {
+			// Near here only: one look round. What it didn't get from that is for the restock to
+			// start over on (see RestockStep), not for scanning on and on through all the ground in
+			// sight: boxed in, it went through every block of dirt under the floor, one by one.
+			return giveUp(bot, "附近能挖的都试过了");
+		}
+		scanned = true;
 		targets = scan(bot, SCAN_CHUNKS);
 		bot.log("附近扫描到 " + targets.size() + " 处" + itemName().getString() + "（不算记下到不了的 " + unreachable.size() + " 处）");
 		if (!targets.isEmpty()) {
@@ -269,9 +296,13 @@ public class GatherTask implements BotTask {
 		ServerLevel level = bot.level();
 		return BlockScanner.find(level, bot.blockPosition(), chunkRadius,
 				state -> toolFor.containsKey(state.getBlock()) && DropAnalysis.dropsFrom(item, state),
-				pos -> !outOfReach(bot, pos) && Guard.canHarvest(level, pos, level.getBlockState(pos)),
+				pos -> !outOfReach(bot, pos) && Guard.canHarvest(level, pos, level.getBlockState(pos))
+						&& (onlyFrom == null || !bot.movement().hands().laid(pos)), // not its own bridge
 				64);
 	}
+
+	/** It has looked round once (see #find). */
+	private boolean scanned;
 
 	private Status nextTarget(BotPlayer bot) {
 		if (!refreshTools(bot, new HashSet<>(toolFor.keySet()))) {
@@ -288,7 +319,7 @@ public class GatherTask implements BotTask {
 		net.minecraft.world.entity.item.ItemEntity bestItem = lyingBest.item();
 		double bestItemCost = lyingBest.cost();
 		Escape escape = bot.movement().newEscape();
-		if (bestItem != null && lyingBest.lying() >= needed) {
+		if (bestItem != null && lyingBest.lying() >= needed && onlyFrom == null) { // (see tick, for a restock)
 			return fetch(bot, bestItem);
 		}
 		// Also drops ones that changed since the scan (berries picked, crop trampled).
@@ -423,6 +454,9 @@ public class GatherTask implements BotTask {
 
 	/** None around: on to the next place that may have it (see Explorer). */
 	private Status lookFurther(BotPlayer bot) {
+		if (onlyFrom != null) {
+			return giveUp(bot, "附近的挖完了"); // near here only (see the constructor)
+		}
 		ServerLevel level = bot.level();
 		if (biomes == null) {
 			biomes = BiomeHints.biomesFor(level, toolFor.keySet());

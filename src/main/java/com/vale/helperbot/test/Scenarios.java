@@ -1541,9 +1541,46 @@ public final class Scenarios {
 					return null;
 				}, Scenarios::partialProgress),
 
+				// Building blocks (2026-11-10 redesign): topped up by the restock reflex from what's
+				// around, through the gathering task, not by digging the cells next to its feet.
+				new Scenario("RB1", "站在基岩台子上、没方块，前面 3 格宽的沟（只能搭桥），能挖的泥土在身后几格外：先去补方块，再搭过去", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(-4, 36, -4, 7, Arena.SURFACE - 1, 4, Blocks.BEDROCK); // nothing to dig under or beside it
+					a.fill(7, 1, -100, 11, Arena.SURFACE - 1, 100, Blocks.BEDROCK); // down to the bottom: no tunnel under
+					a.fill(8, 20, -100, 10, Arena.SURFACE - 1, 100, Blocks.AIR); // the chasm, 3 wide, too long to go round
+					teleport(bot, a, 6, Arena.SURFACE, 0);
+					me.teleportTo(a.level, a.origin.getX() + 20.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> c.bot().position().distanceTo(c.arena().at(20, Arena.SURFACE, 0).getBottomCenter()) <= 3
+						? Scenario.Outcome.pass("补了方块搭过去了（现有 " + com.vale.helperbot.path.BuildingBlocks.count(c.bot().getInventory()) + "）")
+						: c.ended() ? Scenario.Outcome.fail("任务结束了但没过去") : null),
+
+				new Scenario("RB2", "去 30 格外的玩家身边，身上 40 块圆石，中间 10 格宽的沟要搭桥：搭完剩 30 块，路上补到 64 块，补完接着走到", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(7, 19, -100, 18, Arena.SURFACE - 1, 100, Blocks.BEDROCK);
+					a.fill(8, 20, -100, 17, Arena.SURFACE - 1, 100, Blocks.AIR); // 10 wide, too long to go round
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					me.teleportTo(a.level, a.origin.getX() + 30.5, Arena.SURFACE, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.COBBLESTONE, 40);
+					give(bot, Items.IRON_SHOVEL, 1);
+					give(bot, Items.BREAD, 16);
+					return new ComeTask(me, Mode.NORMAL);
+				}, c -> {
+					// What the restock came to (walking on, it may lay one or two to step up).
+					int topped = 0;
+					for (var m = java.util.regex.Pattern.compile("方块补到 (\\d+) 个").matcher(c.log()); m.find(); ) {
+						topped = Math.max(topped, Integer.parseInt(m.group(1)));
+					}
+					boolean there = c.bot().position().distanceTo(c.arena().at(30, Arena.SURFACE, 0).getBottomCenter()) <= 3;
+					// Up to TOP_UP, less the few it lays climbing out of the pits it digs.
+					if (there && topped >= com.vale.helperbot.path.BuildingBlocks.TOP_UP - 8) {
+						return Scenario.Outcome.pass("补到 " + topped + " 个，接着走到了");
+					}
+					return c.ended() ? Scenario.Outcome.fail((there ? "到了" : "没到") + "，补到 " + topped + " 个") : null;
+				}),
+
 				// The same log, walking: a lava lake wider than the widest window, too few blocks to
 				// bridge it, the ground all round to dig for more.
-				new Scenario("PP2", "比 ±64 还宽的岩浆湖挡住 400 格外的目标，身上 2 块圆石：不在湖边来回走", 3 * MINUTE, (a, bot, me) -> {
+				new Scenario("PP2", "比 ±64 还宽的岩浆湖挡住 400 格外的目标，身上 2 块圆石：不在湖边来回走", 8 * MINUTE, (a, bot, me) -> {
 					a.fill(8, Arena.SURFACE - 2, -100, 90, Arena.SURFACE - 1, 100, Blocks.LAVA); // 83 wide, 201 long, 2 deep
 					teleport(bot, a, 3, Arena.SURFACE, 0);
 					give(bot, Items.COBBLESTONE, 2);

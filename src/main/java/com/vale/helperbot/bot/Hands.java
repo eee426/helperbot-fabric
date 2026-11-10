@@ -215,6 +215,7 @@ public final class Hands {
 			// If it did, whatever is there next (sand falling in from above) is a fresh block.
 			if (level.getBlockState(pos) != state) {
 				breakAttempts = 0;
+				laid.remove(pos.asLong()); // whatever is there next isn't its own
 				brokeLast = pos;
 				brokeAt = bot.tickCount;
 			}
@@ -292,6 +293,17 @@ public final class Hands {
 	 * through here. The caller has asked {@link Placement#check}; this adds what only the live world
 	 * can tell. Null if it's there now, otherwise why not.
 	 */
+	/** Where it has put blocks down itself (bridges, pillars, tables), until mined again. */
+	private final it.unimi.dsi.fastutil.longs.LongOpenHashSet laid = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+
+	/**
+	 * Did it put this block down itself? A restock digs the ground, never its own bridge: the dirt it
+	 * had laid over a chasm was the nearest dirt there was, and it dug it out from under its feet.
+	 */
+	public boolean laid(BlockPos pos) {
+		return laid.contains(pos.asLong());
+	}
+
 	public Placement.Refusal place(BlockPos pos, int slot) {
 		ServerLevel level = bot.level();
 		if (slot < 0) {
@@ -324,7 +336,11 @@ public final class Hands {
 					new BlockHitResult(hit, face, against, false));
 			bot.setShiftKeyDown(false);
 			bot.swing(InteractionHand.MAIN_HAND);
-			return level.getBlockState(pos).getCollisionShape(level, pos).isEmpty() ? Placement.Refusal.NOT_PLACED : null;
+			if (level.getBlockState(pos).getCollisionShape(level, pos).isEmpty()) {
+				return Placement.Refusal.NOT_PLACED;
+			}
+			laid.add(pos.asLong());
+			return null;
 		}
 		return Placement.Refusal.NOTHING_BESIDE;
 	}

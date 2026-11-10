@@ -6,7 +6,6 @@ import com.vale.helperbot.guard.ProtectionZones;
 import com.vale.helperbot.guard.Rules;
 import com.vale.helperbot.guard.ZoneExit;
 import com.vale.helperbot.path.Air;
-import com.vale.helperbot.path.BreakTimes;
 import com.vale.helperbot.path.Escape;
 import com.vale.helperbot.path.BuildingBlocks;
 import com.vale.helperbot.path.LocalPathfinder;
@@ -18,7 +17,6 @@ import com.vale.helperbot.path.PathStep;
 import com.vale.helperbot.path.TravelEstimate;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.server.level.ServerLevel;
@@ -32,7 +30,6 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
-import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -64,8 +61,6 @@ public final class MovementController {
 	private static final int FROZEN_TICKS = 40;
 	private static final int MAX_RECOVERIES = 4;
 	/** Gather blocks when fewer than this are left and no path exists. */
-	static final int LOW_BLOCKS = 8;
-	private static final int GATHER_TARGET = 32;
 
 	final BotPlayer bot;
 	/** Which search to run, and what to make of it (see RouteSearch). */
@@ -98,11 +93,6 @@ public final class MovementController {
 	private Vec3 lastPosition = Vec3.ZERO;
 	private int frozenTicks;
 	private int recoveries;
-
-
-	boolean gathering;
-	private int gatherWait;
-	final Set<BlockPos> gatherRejected = new HashSet<>();
 
 	MovementController(BotPlayer bot) {
 		this.bot = bot;
@@ -300,7 +290,7 @@ public final class MovementController {
 		routes.wayTargets = null;
 		goal = null;
 		target = null;
-		gathering = false;
+		wantsBlocks = false;
 		resetStep();
 	}
 
@@ -327,7 +317,7 @@ public final class MovementController {
 			case ARRIVED -> "已到达";
 			case FAILED -> "失败：" + failReason;
 			case MOVING -> routes.search != null ? "思考中（搜索范围 ±" + routes.search.limits().radiusXZ() + " 格）"
-					: gathering ? "方块不够，正在就地收集（现有 " + BuildingBlocks.count(bot.getInventory()) + "）"
+					: wantsBlocks ? "方块不够，等补方块（现有 " + BuildingBlocks.count(bot.getInventory()) + "）"
 					: hands.breaking() != null ? "正在挖 " + hands.breaking().toShortString()
 					: path == null ? "规划路线中" : "移动中（第 " + (index + 1) + "/" + path.size() + " 步）";
 		};
@@ -536,7 +526,7 @@ public final class MovementController {
 	}
 
 	private void tickMoving() {
-		// Gravity first, whatever it's busy with (mining, gathering, thinking): only the movement
+		// Gravity first, whatever it's busy with (mining, waiting, thinking): only the movement
 		// part of a step moves it vertically itself. If the floor went (e.g. a player dug it out
 		// mid-mining), drop what it was doing and re-plan from wherever it lands.
 		if (!stepStarted && !body.isSupported()) {
@@ -546,9 +536,8 @@ public final class MovementController {
 			body.fall(status == Status.ARRIVED);
 			return;
 		}
-		if (gathering) {
-			gatherTick();
-			return;
+		if (wantsBlocks) {
+			return; // the restock reflex is on it (see BotPlayer#restock)
 		}
 		if (routes.wayTargets != null && routes.search == null && !engaged) {
 			if (headUnderwater() && Air.budget(bot) < Air.UNLIMITED) {
@@ -656,12 +645,10 @@ public final class MovementController {
 			airRequested = true;
 			return;
 		}
-		if (Rules.open() && BuildingBlocks.count(bot.getInventory()) < LOW_BLOCKS && !body.isInWater()) {
-			// Maybe a bridge or pillar would work: get some blocks first. (After the small windows,
-			// which prove nothing: see gatherTick.)
+		if (askForBlocks()) {
+			// Maybe a bridge or pillar would work: get some blocks first (see wantsBlocks). After the
+			// small windows, which prove nothing.
 			routes.exhaustedForBlocks = false;
-			gathering = true;
-			gatherRejected.clear();
 			return;
 		}
 		if (++emptyPlans >= MAX_EMPTY_PLANS) {
@@ -749,7 +736,7 @@ public final class MovementController {
 		failReason = reason;
 		status = Status.FAILED;
 		path = null;
-		gathering = false;
+		wantsBlocks = false;
 		resetStep();
 	}
 
@@ -952,57 +939,122 @@ public final class MovementController {
 		resetStep();
 	}
 
-	// ---- gathering building blocks ------------------------------------------------------
+	// ---- waiting for building blocks, and lending to the restock reflex ------------------
 
-	/** Mine solid blocks right around the body (so the drops land on us) until we have enough. */
-	private void gatherTick() {
-		if (hands.breaking() != null) {
-			mine(hands.breaking(), bot.level().getBlockState(hands.breaking()));
-			if (hands.breaking() == null) {
-				gatherWait = 15; // item pickup delay
-			}
-			return;
-		}
-		if (gatherWait > 0) {
-			gatherWait--;
-			return;
-		}
-		if (BuildingBlocks.count(bot.getInventory()) >= GATHER_TARGET) {
-			gathering = false;
-			emptyPlans = 0;
-			return;
-		}
-		BlockPos next = nextGatherBlock();
-		if (next == null) {
-			gathering = false;
-			if (++emptyPlans >= MAX_EMPTY_PLANS) {
-				// The whole search went through everything (see RouteSearch#endLocked) and blocks to
-				// build a way were all it wanted: not "no way there", a way it can't lay yet.
-				if (routes.exhaustedForBlocks) {
-					shortOfBlocksAt = feet();
-				}
-				fail("没有路可走，身边也挖不到可以用来搭路的方块");
-			}
-			return;
-		}
-		hands.resetAttempts();
-		mine(next, bot.level().getBlockState(next));
+	/**
+	 * No way but perhaps by building, and too few blocks to build it: the movement waits, and the
+	 * restock reflex (see BotPlayer#restock) tops up from the ground around through the gathering task,
+	 * then gives the movement back with {@link #takeBack}. It used to dig the dozen cells next to its
+	 * feet itself, and only those: on a ledge by a lava lake there was nothing it might dig.
+	 */
+	private boolean wantsBlocks;
+
+	public boolean wantsBlocks() {
+		return wantsBlocks;
 	}
 
-	private BlockPos nextGatherBlock() {
-		ServerLevel level = bot.level();
-		BlockPos f = feet();
-		for (Direction d : Direction.Plane.HORIZONTAL) {
-			for (BlockPos c : new BlockPos[]{f.relative(d).above(), f.relative(d), f.relative(d).below()}) {
-				BlockState state = level.getBlockState(c);
-				if (!gatherRejected.contains(c) && state.isCollisionShapeFullBlock(level, c)
-						&& Guard.canBreak(level, c, state) && BreakTimes.estimateTicks(bot.getInventory(), level, c, state) < 100) {
-					gatherRejected.add(c);
-					return c;
+	/** The reflex found no ground in reach to dig: as good as trying and getting none. */
+	public void noBlocksAround() {
+		wantsBlocks = false;
+		if (++emptyPlans >= MAX_EMPTY_PLANS) {
+			// The whole search went through everything (see RouteSearch#endLocked) and blocks to
+			// build a way were all it wanted: not "no way there", a way it can't lay yet.
+			if (routes.exhaustedForBlocks) {
+				shortOfBlocksAt = feet();
+			}
+			fail("没有路可走，附近也挖不到可以用来搭路的方块");
+		}
+	}
+
+	/** Waiting for blocks, if building might give a way (see {@link #wantsBlocks}). False if not worth it. */
+	boolean askForBlocks() {
+		// Lent to the restock itself: it's what would answer, and it waits on this (they waited on each other).
+		if (!Rules.open() || engaged || lent || body.isInWater() || BuildingBlocks.count(bot.getInventory()) >= BuildingBlocks.TOP_UP) {
+			return false;
+		}
+		wantsBlocks = true;
+		return true;
+	}
+
+	/** What the task had the movement doing, while the restock reflex borrows it. */
+	public record Lent(PathGoal goal, BlockPos target, Mode mode, Status status, boolean horizontalOnly, boolean locked,
+					   double goalWork, int lockNodes, int emptyPlans, boolean wantedBlocks, BlockPos provenFrom, BlockPos shortOfBlocksAt) {
+	}
+
+	/**
+	 * Between steps on firm ground of the world's own (not out on a bridge or pillar it laid), nothing
+	 * being dug, dived for, fought over or walked out of a zone: it may be lent. Halfway across a chasm
+	 * the restock went off digging, from its own bridge.
+	 */
+	public boolean mayLend() {
+		return !engaged && !paused && hands.breaking() == null && !stepStarted && breakIndex == 0 && !placed
+				&& body.isGrounded() && !body.isInWater() && !onOwnBlocks()
+				&& routes.wayTargets == null && leaving == null && !routes.zoneRoute;
+	}
+
+	/** Lent to the restock reflex, between {@link #lend} and {@link #takeBack}. */
+	private boolean lent;
+
+	/** Lend it to the restock reflex: what it was doing, to give back with {@link #takeBack}; meanwhile it's free. */
+	public Lent lend() {
+		Lent was = new Lent(goal, target, mode, status, horizontalOnly, locked, goalWork, routes.lockNodes, emptyPlans,
+				wantsBlocks, provenFrom, shortOfBlocksAt);
+		stop();
+		lent = true;
+		return was;
+	}
+
+	/** Lent, and the task it was lent from is gone: nothing to give back, it's just free again. */
+	public void dropLend() {
+		stop();
+		lent = false;
+	}
+
+	/** Out on a bridge or pillar of its own: no restock from here (see {@link #mayLend}). */
+	public boolean onOwnBlocks() {
+		return hands.laid(feet().below());
+	}
+
+	/**
+	 * Back to what the task had it doing (planning again from here, if it was on its way), as the fight
+	 * layer gives it back (see {@link #disengage}): the task never sees it was lent. Lent while waiting
+	 * for blocks and none came: as if it had tried itself (see {@link #noBlocksAround}).
+	 */
+	public void takeBack(Lent lent, boolean gotBlocks) {
+		stop();
+		this.lent = false;
+		goal = lent.goal();
+		target = lent.target();
+		mode = lent.mode();
+		status = lent.status();
+		horizontalOnly = lent.horizontalOnly();
+		locked = lent.locked();
+		goalWork = lent.goalWork();
+		routes.lockNodes = lent.lockNodes();
+		provenFrom = lent.provenFrom();
+		shortOfBlocksAt = lent.shortOfBlocksAt();
+		emptyPlans = lent.emptyPlans();
+		bestDistance = Double.MAX_VALUE;
+		ticksWithoutProgress = 0;
+		recoveries = 0;
+		if (status != Status.MOVING) {
+			return;
+		}
+		if (lent.wantedBlocks()) {
+			if (gotBlocks) {
+				emptyPlans = 0;
+			} else {
+				noBlocksAround();
+				if (status != Status.MOVING) {
+					return;
 				}
 			}
 		}
-		return null;
+		replan("补完方块，回到原来的事");
+	}
+
+	public Mode mode() {
+		return mode;
 	}
 
 	// ---- mining and placing -------------------------------------------------------------
@@ -1049,7 +1101,7 @@ public final class MovementController {
 	}
 
 	private void mine(BlockPos pos, BlockState state) {
-		if (hands.mine(pos, state, Hands.AUTO_TOOL) == Hands.MineResult.FAILED && !gathering) {
+		if (hands.mine(pos, state, Hands.AUTO_TOOL) == Hands.MineResult.FAILED) {
 			replan("挖不动 " + pos.toShortString());
 		}
 	}

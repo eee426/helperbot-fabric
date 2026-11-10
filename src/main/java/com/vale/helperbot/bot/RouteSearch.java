@@ -226,7 +226,7 @@ final class RouteSearch {
 	}
 
 	/** What {@link #startLocked} came to. No is only believed with the head out: see {@link #provenFrom}. */
-	/** The whole search that sent it gathering blocks had gone through everything (see MovementController#gatherTick). */
+	/** The whole search that sent it waiting for blocks had gone through everything (see MovementController#noBlocksAround). */
 	boolean exhaustedForBlocks;
 
 	private void endLocked() {
@@ -257,12 +257,10 @@ final class RouteSearch {
 		if (startZoneSearch()) {
 			return;
 		}
-		if (Rules.open() && c.emptyPlans == 0 && BuildingBlocks.count(c.bot.getInventory()) < MovementController.LOW_BLOCKS && !c.body.isInWater()) {
-			// Maybe a bridge or pillar would work: get some blocks first.
+		if (c.emptyPlans == 0 && c.askForBlocks()) {
+			// Maybe a bridge or pillar would work: get some blocks first (see MovementController#wantsBlocks).
 			exhaustedForBlocks = !job.hitNodeLimit();
 			c.emptyPlans++;
-			c.gathering = true;
-			c.gatherRejected.clear();
 			return;
 		}
 		c.provenFrom = c.feet();
