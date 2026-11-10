@@ -101,11 +101,11 @@ public final class Interactions {
 				add(built, new Way(Kind.SOLIDIFY, concrete.asItem(), block.asItem(), block, concrete, Set.of(), Set.of()));
 			}
 		}
-		// Buckets: of every fluid's source (water has its own step, see CraftPlanner.Fill), and of
-		// every block a bucket picks up as a block (powder snow).
+		// Buckets: of every fluid's source (water, lava), and of every block a bucket picks up as a
+		// block (powder snow).
 		for (Fluid fluid : BuiltInRegistries.FLUID) {
 			Item bucket = fluid.getBucket();
-			if (bucket == Items.AIR || bucket == Items.WATER_BUCKET || !fluid.isSource(fluid.defaultFluidState())) {
+			if (bucket == Items.AIR || !fluid.isSource(fluid.defaultFluidState())) {
 				continue;
 			}
 			Block source = fluid.defaultFluidState().createLegacyBlock().getBlock();

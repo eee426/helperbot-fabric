@@ -169,10 +169,6 @@ public final class WhereFrom {
 		if (MobDrops.sources(overworld, player, item).keySet().stream().anyMatch(mobs::contains)) {
 			return true;
 		}
-		// Water: the planner's own step for it (see CraftPlanner.Fill); there's water in the Overworld.
-		if (item == net.minecraft.world.item.Items.WATER_BUCKET && yes.contains(net.minecraft.world.item.Items.BUCKET)) {
-			return true;
-		}
 		for (RecipeIndex.Craft craft : RecipeIndex.craftsFor(overworld, item)) {
 			if (craft.ingredients().stream().allMatch(ing -> any(ing, yes))) {
 				return true;

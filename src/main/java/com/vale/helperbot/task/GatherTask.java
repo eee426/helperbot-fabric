@@ -1,7 +1,5 @@
 package com.vale.helperbot.task;
 
-import com.mojang.datafixers.util.Pair;
-import com.vale.helperbot.HelperBot;
 import com.vale.helperbot.bot.BotPlayer;
 import com.vale.helperbot.bot.BotTask;
 import com.vale.helperbot.bot.Hands;
@@ -44,7 +42,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Collect N of any item that comes from breaking a block: works out which blocks drop it and
@@ -55,9 +52,7 @@ public class GatherTask implements BotTask {
 	private static final int SCAN_CHUNKS = 6;
 	private static final int TRAVEL_SCAN_CHUNKS = 3;
 	private static final int TRAVEL_SCAN_INTERVAL = 100;
-	private static final int MAX_DISTANCE = FetchWaterTask.MAX_DISTANCE;
 	/** Looked through when already standing in the right biome (about the usual view distance). */
-	private static final int WIDE_SCAN_CHUNKS = 10;
 	private static final int MAX_TRAVEL_FAILURES = 4;
 
 	private enum Phase {
@@ -118,7 +113,7 @@ public class GatherTask implements BotTask {
 
 	private Set<Holder<Biome>> biomes;
 	private boolean triedBiome;
-	private CompletableFuture<Pair<BlockPos, Holder<Biome>>> locating;
+	private FarBiome locating;
 	private BlockPos travelTarget;
 	private int travelTicks;
 	private int travelFailures;
@@ -289,19 +284,11 @@ public class GatherTask implements BotTask {
 		// Items on the ground: sources like the blocks, on the same scale (see DropFetch). If they
 		// make up what's still missing, no more mining.
 		int needed = wanted - collected(bot);
-		net.minecraft.world.entity.item.ItemEntity bestItem = null;
-		double bestItemCost = Double.MAX_VALUE;
-		int lying = 0;
+		DropFetch.Best lyingBest = drops.best(bot, item, DROP_RANGE, needed);
+		net.minecraft.world.entity.item.ItemEntity bestItem = lyingBest.item();
+		double bestItemCost = lyingBest.cost();
 		Escape escape = bot.movement().newEscape();
-		for (net.minecraft.world.entity.item.ItemEntity e : drops.nearby(bot, item, DROP_RANGE)) {
-			lying += e.getItem().getCount();
-			double c = DropFetch.cost(bot, e, needed);
-			if (c < bestItemCost) {
-				bestItemCost = c;
-				bestItem = e;
-			}
-		}
-		if (bestItem != null && lying >= needed) {
+		if (bestItem != null && lyingBest.lying() >= needed) {
 			return fetch(bot, bestItem);
 		}
 		// Also drops ones that changed since the scan (berries picked, crop trampled).
@@ -385,15 +372,7 @@ public class GatherTask implements BotTask {
 				wayTo.put(p, MineSpot.reachGoal(p, MineSpot.reach(bot), bot.getEyeHeight(), MineSpot.exposed(level, p), false));
 			}
 		}
-		List<PathGoal> goals = List.copyOf(wayTo.values());
-		bot.movement().findWay(List.copyOf(wayTo.keySet()), (w, p) -> {
-			for (PathGoal g : goals) {
-				if (g.test(w, p)) {
-					return true;
-				}
-			}
-			return false;
-		}, mode);
+		bot.movement().findWay(List.copyOf(wayTo.keySet()), PathGoal.anyOf(wayTo.values()), mode);
 		bot.movement().limitSearch(budget);
 		phase = Phase.WAY;
 		return Status.RUNNING;
@@ -515,38 +494,34 @@ public class GatherTask implements BotTask {
 		if (!seaOnly()) {
 			wantedBiomes.removeIf(Explorer::water);
 		}
-		// Samples world-gen noise only (no chunk loading), so it can run off-thread.
-		locating = CompletableFuture.supplyAsync(() -> level.findClosestBiome3d(wantedBiomes::contains,
-				origin, MAX_DISTANCE, 64, 64));
+		locating = new FarBiome(level, wantedBiomes::contains, origin, 64);
 		phase = Phase.LOCATE;
 		return Status.RUNNING;
 	}
 
 	private Status locate(BotPlayer bot) {
-		if (!locating.isDone()) {
-			return Status.RUNNING;
+		switch (locating.poll()) {
+			case SEARCHING -> {
+				return Status.RUNNING;
+			}
+			case ERROR -> {
+				return giveUp(bot, FarBiome.errorText());
+			}
+			case NONE -> {
+				return giveUp(bot, Explorer.FAR + " 格内没有会生成它的群系");
+			}
+			case FOUND -> {
+			}
 		}
-		Pair<BlockPos, Holder<Biome>> found;
-		try {
-			found = locating.join();
-		} catch (RuntimeException e) {
-			HelperBot.LOGGER.error("Biome search failed", e);
-			found = null;
-		}
-		if (found == null) {
-			return giveUp(bot, MAX_DISTANCE + " 格内没有会生成它的群系");
-		}
-		BlockPos at = found.getFirst();
-		int distance = (int) Math.sqrt(horizontalDistSq(bot.blockPosition(), at));
-		if (distance < 48) {
+		if (locating.here()) {
 			// Already in that biome: look through everything that's loaded around us, then stop.
-			targets = scan(bot, WIDE_SCAN_CHUNKS);
+			targets = scan(bot, FarBiome.WIDE_SCAN_CHUNKS);
 			return targets.isEmpty()
 					? giveUp(bot, "就在会生成它的群系里，但已加载的区域里没找到")
 					: nextTarget(bot);
 		}
-		String name = found.getSecond().unwrapKey().map(k -> k.identifier().getPath()).orElse("?");
-		bot.say(requester, "最近的 " + name + " 在 " + at.getX() + ", " + at.getZ() + "，约 " + distance + " 格，出发。");
+		BlockPos at = locating.at();
+		bot.say(requester, "最近的 " + locating.biomeName() + " 在 " + at.getX() + ", " + at.getZ() + "，约 " + locating.distance() + " 格，出发。");
 		startTravel(bot, at);
 		return Status.RUNNING;
 	}
@@ -947,16 +922,10 @@ public class GatherTask implements BotTask {
 		return inv.getFreeSlot() < 0 && inv.getSlotWithRemainingSpace(new ItemStack(item)) < 0;
 	}
 
-	private static long horizontalDistSq(BlockPos a, BlockPos b) {
-		long dx = a.getX() - b.getX();
-		long dz = a.getZ() - b.getZ();
-		return dx * dx + dz * dz;
-	}
-
 	@Override
 	public void onEnd(BotPlayer bot, Status status) {
 		if (locating != null) {
-			locating.cancel(false);
+			locating.cancel();
 		}
 		if (asStep) {
 			return;

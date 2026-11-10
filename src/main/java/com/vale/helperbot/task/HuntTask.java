@@ -1,6 +1,5 @@
 package com.vale.helperbot.task;
 
-import com.mojang.datafixers.util.Pair;
 import com.vale.helperbot.bot.BotPlayer;
 import com.vale.helperbot.bot.BotTask;
 import com.vale.helperbot.bot.MovementController;
@@ -31,7 +30,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * One step of a plan: kill mobs that drop the item until enough has been picked up. Fights like a
@@ -266,23 +264,13 @@ final class HuntTask {
 		target = nearestPrey(bot, SCAN_RADIUS);
 		// What lies on the ground (its kills' drops, or anyone's) against the nearest mob, on one scale.
 		int needed = wanted - (count(bot.getInventory()) - startCount);
-		net.minecraft.world.entity.item.ItemEntity bestItem = null;
-		double bestItemCost = Double.MAX_VALUE;
-		int lying = 0;
-		for (net.minecraft.world.entity.item.ItemEntity e : drops.nearby(bot, item, SCAN_RADIUS)) {
-			lying += e.getItem().getCount();
-			double c = DropFetch.cost(bot, e, needed);
-			if (c < bestItemCost) {
-				bestItemCost = c;
-				bestItem = e;
-			}
-		}
-		if (bestItem != null) {
+		DropFetch.Best lyingBest = drops.best(bot, item, SCAN_RADIUS, needed);
+		if (lyingBest.item() != null) {
 			double preyCost = target == null ? Double.MAX_VALUE
 					: (bot.distanceTo(target) * 5 + KILL_TICKS) / Math.max(0.01, sources.getOrDefault(target.getType(), 1.0));
-			if (lying >= needed || bestItemCost <= preyCost) {
+			if (lyingBest.lying() >= needed || lyingBest.cost() <= preyCost) {
 				target = null;
-				drops.start(bot, bestItem, mode);
+				drops.start(bot, lyingBest.item(), mode);
 				setPhase(Phase.FETCH);
 				return BotTask.Status.RUNNING;
 			}
@@ -347,15 +335,8 @@ final class HuntTask {
 						&& MobDrops.mayHunt(m) && !ProtectionZones.isProtected(level, m.blockPosition()) && m.isUnderWater())) {
 			wayTo.put(m, com.vale.helperbot.bot.Sight.attackSpot(bot, m));
 		}
-		List<com.vale.helperbot.path.PathGoal> goals = List.copyOf(wayTo.values());
-		bot.movement().findWay(wayTo.keySet().stream().map(Mob::blockPosition).toList(), (w, p) -> {
-			for (com.vale.helperbot.path.PathGoal g : goals) {
-				if (g.test(w, p)) {
-					return true;
-				}
-			}
-			return false;
-		}, mode);
+		bot.movement().findWay(wayTo.keySet().stream().map(Mob::blockPosition).toList(),
+				com.vale.helperbot.path.PathGoal.anyOf(wayTo.values()), mode);
 		bot.movement().workAtGoal(FIGHT_UNDERWATER_TICKS);
 		setPhase(Phase.WAY);
 		return BotTask.Status.RUNNING;
@@ -450,10 +431,8 @@ final class HuntTask {
 
 	/** Nowhere in range: the nearest biome that has them, wherever it is. Then it looks around there. */
 	private BotTask.Status startFarSearch(BotPlayer bot) {
-		ServerLevel level = bot.level();
-		Map<Holder<Biome>, Double> worth = worth(level);
-		BlockPos from = bot.blockPosition();
-		locating = CompletableFuture.supplyAsync(() -> level.findClosestBiome3d(b -> worth.getOrDefault(b, 0.0) > 0, from, Explorer.FAR, 32, 64));
+		Map<Holder<Biome>, Double> worth = worth(bot.level());
+		locating = new FarBiome(bot.level(), b -> worth.getOrDefault(b, 0.0) > 0, bot.blockPosition(), 32);
 		setPhase(Phase.LOCATE);
 		return BotTask.Status.RUNNING;
 	}
@@ -462,23 +441,35 @@ final class HuntTask {
 		if (locating == null) {
 			return explorer.ready() ? lookFurther(bot) : BotTask.Status.RUNNING;
 		}
-		if (!locating.isDone()) {
+		FarBiome search = locating;
+		FarBiome.Result result = search.poll();
+		if (result == FarBiome.Result.SEARCHING) {
 			return BotTask.Status.RUNNING;
 		}
-		Pair<BlockPos, Holder<Biome>> found;
-		try {
-			found = locating.join();
-		} catch (RuntimeException e) {
-			found = null;
-		}
 		locating = null;
-		if (found == null) {
+		if (result == FarBiome.Result.ERROR) {
+			return fail(bot, FarBiome.errorText());
+		}
+		if (result == FarBiome.Result.NONE) {
 			return fail(bot, Explorer.FAR + " 格内没有" + names().getString() + "的群系");
 		}
-		BlockPos t = found.getFirst();
-		int distance = (int) Math.sqrt(horizontalDistSq(t, bot.blockPosition()));
-		bot.say(requester, Component.literal("附近没有").append(names()).append("，去 " + distance + " 格外的 "
-				+ biomeName(found.getSecond()) + " 找。"));
+		if (search.here()) {
+			// It stands in such a biome, a patch the explorer's map stepped over: no trip to where it
+			// already is (it used to set off for it, "arrive" at once and give up all the same). It
+			// looks through what's loaded around here instead, as gathering does.
+			Mob seen = nearestPrey(bot, FarBiome.WIDE_SCAN_CHUNKS * 16);
+			if (seen != null) {
+				target = seen;
+				return lockOn(bot);
+			}
+			if (!anyAnimals(bot.level()) && !waitedAlready) {
+				return startWait(bot);
+			}
+			return fail(bot, "就在" + names().getString() + "会出现的群系（" + search.biomeName() + "）里，但附近没看到");
+		}
+		BlockPos t = search.at();
+		bot.say(requester, Component.literal("附近没有").append(names()).append("，去 " + search.distance() + " 格外的 "
+				+ search.biomeName() + " 找。"));
 		waypoint = t;
 		farTrip = true;
 		headFor(bot, t);
@@ -519,7 +510,9 @@ final class HuntTask {
 	private boolean triedFar;
 	/** On the way to a biome past the explorer's range: there, a new one takes over. */
 	private boolean farTrip;
-	private CompletableFuture<Pair<BlockPos, Holder<Biome>>> locating;
+	/** Times the far trip was blocked on the way (see FarBiome#TRIP_RETRIES). */
+	private int farTripFailures;
+	private FarBiome locating;
 
 	// ---- exploring ----------------------------------------------------------------------
 
@@ -546,6 +539,13 @@ final class HuntTask {
 			}
 			bot.movement().stop();
 			setPhase(Phase.FIND);
+		} else if (farTrip && (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE)
+				&& ++farTripFailures <= FarBiome.TRIP_RETRIES) {
+			// The one trip far off: the way there was blocked from here, not the place; from where it
+			// got to, the next stretch may well go.
+			bot.log("去 " + waypoint.getX() + ", " + waypoint.getZ() + " 的路上受阻（" + bot.movement().failReason() + "），从这里再走（第 "
+					+ farTripFailures + " 次）");
+			headFor(bot, waypoint);
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
 			bot.log("去不了那里（" + bot.movement().failReason() + "），换一处");
 			explorer.leavePlace();
@@ -807,12 +807,6 @@ final class HuntTask {
 		return n;
 	}
 
-	private static long horizontalDistSq(BlockPos a, BlockPos b) {
-		long dx = a.getX() - b.getX();
-		long dz = a.getZ() - b.getZ();
-		return dx * dx + dz * dz;
-	}
-
 	String describe() {
 		String what = new ItemStack(item).getHoverName().getString();
 		return switch (phase) {
@@ -831,7 +825,7 @@ final class HuntTask {
 
 	void onEnd(BotPlayer bot) {
 		if (locating != null) {
-			locating.cancel(false);
+			locating.cancel();
 		}
 	}
 }

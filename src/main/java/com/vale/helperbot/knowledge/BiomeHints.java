@@ -33,7 +33,7 @@ import java.util.Set;
 /**
  * How much of each block a chunk of each biome of this dimension has, by how the game makes it:
  * worked out from the world-generation data, so other mods' biomes and features count the same as
- * vanilla's as long as they use the game's own kinds of feature. Three sources:
+ * vanilla's as long as they use the game's own kinds of feature. Four sources:
  *
  * <ul>
  * <li><b>Features</b> (ores, trees, flowers, ice...): how often per chunk they're placed, from
@@ -49,6 +49,8 @@ import java.util.Set;
  * sand in badlands, mycelium on mushroom islands): a whole chunk's worth, the surface being made of it.
  * <li><b>Freezing</b>: cold biomes get snow on top, and ice on their water if they're oceans or
  * rivers (from each biome's temperature: under 0.15, as the game freezes it).
+ * <li><b>The sea</b>: oceans and rivers lie under the dimension's sea level, filled with its
+ * default fluid (from its generator settings).
  * </ul>
  *
  * <p>Built once per dimension. It says what a biome has, on average: what a particular place has,
@@ -181,7 +183,30 @@ public final class BiomeHints {
 				freezing(biome);
 			}
 			surfaceRules(biomes);
+			sea(biomes);
 			return new Index(perChunk, steps, onSurface);
+		}
+
+		/**
+		 * The sea: below its sea level the dimension's terrain is filled with its default fluid, and
+		 * the biomes the game tags as oceans and rivers are the ones whose ground lies under it, so
+		 * their whole surface is that fluid (water in the Overworld). No feature places it, so without
+		 * this an ocean had no more water than a desert: the springs and lakes every biome has.
+		 */
+		private void sea(Set<Holder<Biome>> biomes) {
+			if (!(level.getChunkSource().getGenerator() instanceof NoiseBasedChunkGenerator noise)) {
+				return;
+			}
+			Block fluid = noise.generatorSettings().value().defaultFluid().getBlock();
+			if (fluid.defaultBlockState().getFluidState().isEmpty()) {
+				return;
+			}
+			for (Holder<Biome> biome : biomes) {
+				if (biome.is(BiomeTags.IS_OCEAN) || biome.is(BiomeTags.IS_RIVER)) {
+					add(fluid, biome, WHOLE_CHUNK);
+					onSurface.add(fluid);
+				}
+			}
 		}
 
 		private void add(Block block, Holder<Biome> biome, double n) {

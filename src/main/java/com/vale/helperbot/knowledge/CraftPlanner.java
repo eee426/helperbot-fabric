@@ -52,7 +52,7 @@ import java.util.Set;
  * and plans again from the real inventory, which absorbs any surprises.
  */
 public final class CraftPlanner {
-	public sealed interface Action permits Gather, Hunt, Craft, Smelt, Fill, Use {
+	public sealed interface Action permits Gather, Hunt, Craft, Smelt, Use {
 	}
 
 	public record Gather(Item item, int count) implements Action {
@@ -66,10 +66,6 @@ public final class CraftPlanner {
 	}
 
 	public record Smelt(RecipeIndex.Smelt recipe, int count) implements Action {
-	}
-
-	/** Fill {@code count} empty buckets with water. */
-	public record Fill(int count) implements Action {
 	}
 
 	/**
@@ -98,9 +94,7 @@ public final class CraftPlanner {
 	private static final int MAX_SITES = 64;
 	/** From one source to the next, where they are, when it doesn't know them yet. */
 	private static final int BETWEEN_SOURCES_BLOCKS = 8;
-	/** Going to water, when it isn't known where any is. */
-	private static final int WATER_TRIP_BLOCKS = 100;
-	/** Filling one bucket, once there (see FetchWaterTask). */
+	/** Filling one container, once there (see ScoopStep). */
 	private static final double FILL_PER_ITEM = 5;
 	/** A drop flying into the bag, from the block or the mob. */
 	private static final double PICKUP_TICKS = 10;
@@ -326,16 +320,6 @@ public final class CraftPlanner {
 				if (!Double.isNaN(trip)) {
 					t.cost += trip;
 					t.actions.add(new Gather(item, n));
-					best = t;
-				}
-			}
-		}
-		if (item == Items.WATER_BUCKET) {
-			State t = s.copy();
-			if (acquire(t, Items.BUCKET, n, depth + 1, resolving)) {
-				t.cost += ticks(WATER_TRIP_BLOCKS) + FILL_PER_ITEM * n;
-				t.actions.add(new Fill(n));
-				if (t.beats(best)) {
 					best = t;
 				}
 			}
@@ -924,9 +908,6 @@ public final class CraftPlanner {
 			}
 			estimates.put(item, Est.NONE);
 			items.add(item);
-			if (item == Items.WATER_BUCKET) {
-				queue.add(Items.BUCKET);
-			}
 			for (Interactions.Way way : usable(item)) {
 				queue.add(way.input());
 				queue.addAll(useTools(way));
@@ -973,10 +954,6 @@ public final class CraftPlanner {
 				tool = Math.min(tool, estimates.getOrDefault(t, Est.NONE).total());
 			}
 			best = new Est(gather.unit(), gather.once() + tool);
-		}
-		if (item == Items.WATER_BUCKET) {
-			Est bucket = estimates.getOrDefault(Items.BUCKET, Est.NONE);
-			best = cheaper(best, new Est(bucket.unit() + FILL_PER_ITEM, bucket.once() + ticks(WATER_TRIP_BLOCKS)));
 		}
 		for (Interactions.Way way : usable(item)) {
 			Est input = estimates.getOrDefault(way.input(), Est.NONE);
@@ -1206,9 +1183,6 @@ public final class CraftPlanner {
 			if (!Double.isNaN(g)) {
 				best = g;
 			}
-		}
-		if (item == Items.WATER_BUCKET) {
-			best = Math.min(best, ticks(WATER_TRIP_BLOCKS) + FILL_PER_ITEM * count + floor(Items.BUCKET, count));
 		}
 		for (Interactions.Way way : usable(item)) {
 			best = Math.min(best, useFloor(way, count));

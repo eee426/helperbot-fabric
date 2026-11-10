@@ -73,6 +73,26 @@ final class DropFetch {
 		return n;
 	}
 
+	/** Of what lies around, the cheapest to get (null: none), its cost, and how many lie there in all. */
+	record Best(ItemEntity item, double cost, int lying) {
+	}
+
+	/** The cheapest of {@link #nearby} by {@link #cost}, for a task weighing it against its other sources. */
+	Best best(BotPlayer bot, Item item, double radius, int needed) {
+		ItemEntity best = null;
+		double bestCost = Double.MAX_VALUE;
+		int lying = 0;
+		for (ItemEntity e : nearby(bot, item, radius)) {
+			lying += e.getItem().getCount();
+			double c = cost(bot, e, needed);
+			if (c < bestCost) {
+				bestCost = c;
+				best = e;
+			}
+		}
+		return new Best(best, bestCost, lying);
+	}
+
 	/**
 	 * What getting it takes, per item, on the scale of a block's cost (MineCost#cost): the way there.
 	 * Under water, it used to be a whole dive from the surface, with the bot right next to it: a squid

@@ -11,4 +11,17 @@ import net.minecraft.world.level.BlockGetter;
 @FunctionalInterface
 public interface PathGoal {
 	boolean test(BlockGetter world, BlockPos feet);
+
+	/** Ends at any of these: for one search to many targets (see MovementController#findWay). */
+	static PathGoal anyOf(java.util.Collection<PathGoal> goals) {
+		java.util.List<PathGoal> all = java.util.List.copyOf(goals);
+		return (w, p) -> {
+			for (PathGoal g : all) {
+				if (g.test(w, p)) {
+					return true;
+				}
+			}
+			return false;
+		};
+	}
 }

@@ -46,7 +46,7 @@ final class ScoopStep {
 	private static final int MAX_TRIES = 8;
 
 	private enum Stage {
-		FIND, MAP, TRAVEL, GOTO
+		FIND, MAP, LOCATE, TRAVEL, GOTO
 	}
 
 	private final ServerPlayer requester;
@@ -58,6 +58,12 @@ final class ScoopStep {
 	private Stage stage = Stage.FIND;
 	private BlockPos target;
 	private Explorer exploring;
+	/** The one trip past the explorer's range (see FarBiome): tried once a step. */
+	private FarBiome locating;
+	private boolean triedFar;
+	/** Where the trip far off goes (null when not on it), and times it was blocked on the way. */
+	private BlockPos farTarget;
+	private int farTripFailures;
 	private int travelTicks;
 	private int before = -1;
 	private String failure;
@@ -96,6 +102,7 @@ final class ScoopStep {
 		return switch (stage) {
 			case FIND -> find(bot);
 			case MAP -> map(bot);
+			case LOCATE -> locate(bot);
 			case TRAVEL -> travel(bot);
 			case GOTO -> approach(bot);
 		};
@@ -128,9 +135,8 @@ final class ScoopStep {
 		ServerLevel level = bot.level();
 		Explorer explorer = explorers.computeIfAbsent(way.result(), i -> {
 			Map<Holder<Biome>, Double> worth = new HashMap<>(BiomeHints.perChunk(level, way.at()));
-			boolean water = way.at().stream().allMatch(b -> b.defaultBlockState().getFluidState().is(net.minecraft.tags.FluidTags.WATER));
 			return new Explorer(level, bot.blockPosition(), worth, BiomeHints.layerFor(level, way.at()) != Habitat.Layer.SURFACE,
-					!water, SCAN_CHUNKS * 16, mode.speed());
+					!water(), SCAN_CHUNKS * 16, mode.speed());
 		});
 		if (!explorer.ready()) {
 			return BotTask.Status.RUNNING;
@@ -138,16 +144,72 @@ final class ScoopStep {
 		explorer.look(bot.blockPosition());
 		BlockPos next = explorer.timeUp() ? null : explorer.next(level, bot.blockPosition(), null, count);
 		if (next == null) {
+			if (explorer.nowhereInRange() && !triedFar) {
+				// None in range: the nearest biome that has it, wherever it is.
+				triedFar = true;
+				java.util.Set<Holder<Biome>> wanted = new java.util.HashSet<>(BiomeHints.biomesFor(level, way.at()));
+				if (!water()) {
+					wanted.removeIf(Explorer::water);
+				}
+				locating = new FarBiome(level, wanted::contains, bot.blockPosition(), 64);
+				stage = Stage.LOCATE;
+				return BotTask.Status.RUNNING;
+			}
 			return fail("方圆 " + Explorer.RADIUS + " 格内找不到能装" + CraftPlanner.name(way.result()).getString() + "的地方");
 		}
 		bot.log("附近没有能装" + CraftPlanner.name(way.result()).getString() + "的，去 " + next.getX() + ", " + next.getZ() + " 找");
 		exploring = explorer;
+		headFor(bot, next);
+		return BotTask.Status.RUNNING;
+	}
+
+	/** What it's used on is water (a bucket or a bottle of it): the sea is where to go, not what to keep out of. */
+	private boolean water() {
+		return way.at().stream().allMatch(b -> b.defaultBlockState().getFluidState().is(net.minecraft.tags.FluidTags.WATER));
+	}
+
+	private BotTask.Status locate(BotPlayer bot) {
+		FarBiome.Result result = locating.poll();
+		String what = CraftPlanner.name(way.result()).getString();
+		switch (result) {
+			case SEARCHING -> {
+				return BotTask.Status.RUNNING;
+			}
+			case ERROR -> {
+				return fail(FarBiome.errorText());
+			}
+			case NONE -> {
+				return fail(Explorer.FAR + " 格内没有能装" + what + "的群系");
+			}
+			case FOUND -> {
+			}
+		}
+		if (locating.here()) {
+			// Already in such a biome: look through everything that's loaded around here, then stop.
+			target = scan(bot, FarBiome.WIDE_SCAN_CHUNKS);
+			if (target == null) {
+				return fail("就在有" + what + "的群系里，但已加载的区域里没找到能装的地方");
+			}
+			startApproach(bot);
+			return BotTask.Status.RUNNING;
+		}
+		BlockPos at = locating.at();
+		bot.say(requester, "附近没有能装" + what + "的地方，最近的 " + locating.biomeName() + " 在 " + at.getX() + ", " + at.getZ()
+				+ "，约 " + locating.distance() + " 格，出发。");
+		exploring = null;
+		farTarget = at;
+		headFor(bot, at);
+		return BotTask.Status.RUNNING;
+	}
+
+	/** Off towards that x/z, at the height what it's after is found at (see Habitat). */
+	private void headFor(BotPlayer bot, BlockPos xz) {
+		ServerLevel level = bot.level();
 		Habitat.Layer layer = BiomeHints.layerFor(level, way.at());
-		bot.movement().goTo(Habitat.arrived(next, 16, layer), Habitat.target(level, next, layer, bot.blockPosition()), mode,
+		bot.movement().goTo(Habitat.arrived(xz, 16, layer), Habitat.target(level, xz, layer, bot.blockPosition()), mode,
 				!Habitat.heightKnown(layer));
 		travelTicks = 0;
 		stage = Stage.TRAVEL;
-		return BotTask.Status.RUNNING;
 	}
 
 	private BotTask.Status travel(BotPlayer bot) {
@@ -164,11 +226,23 @@ final class ScoopStep {
 			}
 		}
 		MovementController.Status status = bot.movement().status();
+		if (farTarget != null && (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE)
+				&& ++farTripFailures <= FarBiome.TRIP_RETRIES) {
+			// Blocked on the way, not the place: from where it got to, the next stretch may well go.
+			bot.log("去 " + farTarget.getX() + ", " + farTarget.getZ() + " 的路上受阻（" + bot.movement().failReason() + "），从这里再走（第 "
+					+ farTripFailures + " 次）");
+			headFor(bot, farTarget);
+			return BotTask.Status.RUNNING;
+		}
 		if (status == MovementController.Status.ARRIVED || status == MovementController.Status.FAILED
 				|| status == MovementController.Status.IDLE || (exploring != null && exploring.timeUp())) {
 			if (exploring != null) {
 				exploring.leavePlace();
+			} else {
+				explorers.remove(way.result()); // the trip further off: from there it looks around anew
 			}
+			exploring = null;
+			farTarget = null;
 			stage = Stage.FIND;
 		}
 		return BotTask.Status.RUNNING;

@@ -52,7 +52,6 @@ public final class PlanBench {
 					steps.append(switch (a) {
 						case CraftPlanner.Gather g -> "gather " + g.item() + "x" + g.count();
 						case CraftPlanner.Hunt h -> "hunt " + h.item() + "x" + h.count();
-						case CraftPlanner.Fill f -> "fill x" + f.count();
 						case CraftPlanner.Use u -> "use " + u.way() + "x" + u.count();
 						case CraftPlanner.Craft c -> "craft " + c.recipe().result() + "x" + c.times() * c.recipe().resultCount();
 						case CraftPlanner.Smelt s -> "smelt " + s.recipe().result() + "x" + s.count() * s.recipe().resultCount();

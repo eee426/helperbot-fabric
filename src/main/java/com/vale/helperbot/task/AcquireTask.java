@@ -32,7 +32,7 @@ public class AcquireTask implements BotTask {
 	private static final int MAX_PROBLEMS_SHOWN = 4;
 
 	private enum Phase {
-		PLAN, GATHER, HUNT, FILL, USE, SCOOP, CRAFT, SMELT, LEAVE_ZONE, RETURN
+		PLAN, GATHER, HUNT, USE, SCOOP, CRAFT, SMELT, LEAVE_ZONE, RETURN
 	}
 
 	private final ServerPlayer requester;
@@ -68,7 +68,6 @@ public class AcquireTask implements BotTask {
 	private Item huntItem;
 	private CraftStep craft;
 	private SmeltStep smelt;
-	private FetchWaterTask fill;
 	private UseStep use;
 	private ScoopStep scoop;
 	private Item useItem;
@@ -126,16 +125,6 @@ public class AcquireTask implements BotTask {
 					}
 					hunt = null;
 					phase = Phase.PLAN;
-				}
-				yield Status.RUNNING;
-			}
-			case FILL -> {
-				Status s = fill.tick(bot);
-				if (s != Status.RUNNING) {
-					fill.onEnd(bot, s);
-					fill = null;
-					phase = Phase.PLAN;
-					failedHere |= s == Status.FAILED;
 				}
 				yield Status.RUNNING;
 			}
@@ -354,10 +343,6 @@ public class AcquireTask implements BotTask {
 				hunt = new HuntTask(requester, h.item(), h.count(), mode, h.sources(), explorers, null, unreachableMobs, shortOfBlocksMobs, structuresTried);
 				phase = Phase.HUNT;
 			}
-			case CraftPlanner.Fill f -> {
-				fill = new FetchWaterTask(requester, mode, true);
-				phase = Phase.FILL;
-			}
 			case CraftPlanner.Use u -> {
 				useItem = u.way().result();
 				switch (u.way().kind()) {
@@ -396,7 +381,6 @@ public class AcquireTask implements BotTask {
 		return switch (action) {
 			case CraftPlanner.Gather g -> g.item();
 			case CraftPlanner.Hunt h -> h.item();
-			case CraftPlanner.Fill f -> Items.WATER_BUCKET;
 			case CraftPlanner.Use u -> u.way().result();
 			case CraftPlanner.Craft c -> c.recipe().result();
 			case CraftPlanner.Smelt s -> s.recipe().result();
@@ -411,10 +395,6 @@ public class AcquireTask implements BotTask {
 			switch (action) {
 				case CraftPlanner.Gather g -> planItems.add(g.item());
 				case CraftPlanner.Hunt h -> planItems.add(h.item());
-				case CraftPlanner.Fill f -> {
-					planItems.add(Items.BUCKET);
-					planItems.add(Items.WATER_BUCKET);
-				}
 				case CraftPlanner.Use u -> {
 					planItems.add(u.way().result());
 					planItems.add(u.way().input());
@@ -443,7 +423,6 @@ public class AcquireTask implements BotTask {
 			switch (actions.get(i)) {
 				case CraftPlanner.Gather g -> text.append("采集 ").append(name(g.item())).append(" ×" + g.count());
 				case CraftPlanner.Hunt h -> text.append("打猎 ").append(name(h.item())).append(" ×" + h.count());
-				case CraftPlanner.Fill f -> text.append("装水 ").append(name(Items.WATER_BUCKET)).append(" ×" + f.count());
 				case CraftPlanner.Use u -> text.append(UseStep.verb(u.way())).append(name(u.way().result())).append(" ×" + u.count());
 				case CraftPlanner.Craft c -> text.append("合成 ").append(name(c.recipe().result()))
 						.append(" ×" + c.times() * c.recipe().resultCount());
@@ -512,7 +491,6 @@ public class AcquireTask implements BotTask {
 			case GATHER -> "获取 " + what + " → " + gather.describe();
 			case HUNT -> "获取 " + what + " → " + hunt.describe();
 			case CRAFT -> "获取 " + what + " → " + craft.describe().getString();
-			case FILL -> "获取 " + what + " → " + fill.describe();
 			case USE -> "获取 " + what + " → " + use.describe().getString();
 			case SCOOP -> "获取 " + what + " → " + scoop.describe().getString();
 			case SMELT -> "获取 " + what + " → " + smelt.describe().getString();
