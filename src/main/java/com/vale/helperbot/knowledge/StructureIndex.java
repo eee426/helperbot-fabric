@@ -26,6 +26,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.levelgen.structure.Structure;
 import net.minecraft.world.level.levelgen.structure.StructureSet;
 import net.minecraft.world.level.levelgen.structure.StructureSpawnOverride;
+import net.minecraft.world.level.levelgen.structure.StructureType;
 import net.minecraft.world.level.levelgen.structure.placement.RandomSpreadStructurePlacement;
 import net.minecraft.world.level.levelgen.structure.pools.StructureTemplatePool;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate;
@@ -53,9 +54,10 @@ import java.util.regex.Pattern;
  * piece a structure can have. A template lists its blocks, and its spawners and mobs.
  * <li>The older structures are built by code, which can't be read. Their parts go by name: all
  * the words of the structure's id in the name of a template folder ({@code mansion} and
- * {@code woodland_mansion/...}), and structures of one structure set are
- * variants of each other ({@code shipwreck}, {@code shipwreck_beached}). A name that doesn't
- * match is left out: a place it doesn't know beats sending it to the wrong one.
+ * {@code woodland_mansion/...}); one that still has nothing borrows from its own kind in its
+ * structure set ({@code shipwreck_beached} from {@code shipwreck}). A name that doesn't match is
+ * left out: a place it doesn't know beats sending it to the wrong one. The fortress alone is
+ * written out (see {@link #FORTRESS_BLOCKS}).
  * <li>Mobs also come from each structure's own spawn lists.
  * </ul>
  *
@@ -319,10 +321,11 @@ public final class StructureIndex {
 	}
 
 	/**
-	 * The structures code builds: by name (see the class comment). Variants in one structure set
-	 * share what their templates have; not their spawn rules. (The Nether's fortress and bastion
-	 * share a set, one or the other at each spot: the bastion had the fortress's wither skeletons
-	 * and blazes, and it went to a bastion for them.)
+	 * The structures code builds: by name (see the class comment), and the fortress written out (see
+	 * {@link #FORTRESS_BLOCKS}). One with nothing of its own borrows what its kind in the same set
+	 * has (see below); spawn rules are never shared. (The Nether's fortress and bastion share a set,
+	 * one or the other at each spot: the bastion had the fortress's wither skeletons and blazes, and
+	 * it went to a bastion for them.)
 	 */
 	private static void matchByName(ServerLevel level, Map<Holder<Structure>, Contents> built,
 									Set<Identifier> templateIds, StructureTemplateManager templates, Map<Identifier, Set<Identifier>> templateIdsIn) {
@@ -341,24 +344,45 @@ public final class StructureIndex {
 				}
 			}
 		});
-		level.registryAccess().lookupOrThrow(Registries.STRUCTURE_SET).listElements().forEach(set -> {
-			Contents shared = new Contents();
-			for (StructureSet.StructureSelectionEntry entry : set.value().structures()) {
-				Contents c = built.get(entry.structure());
-				if (c != null) {
-					shared.blocks.addAll(c.blocks);
-					shared.mobs.addAll(c.mobs);
-				}
+		built.forEach((holder, c) -> {
+			if (holder.value().type() == StructureType.FORTRESS) {
+				c.blocks.addAll(FORTRESS_BLOCKS);
 			}
+		});
+		// Only what has nothing of its own borrows, and only from its own kind (the same structure
+		// type: a beached shipwreck from a shipwreck). A set holds what may stand at one spot, not
+		// one kind of thing: the fortress had the bastion's blocks (and was where it went for gold),
+		// and each of the five villages had all five villages' (each has its own pools, read above).
+		level.registryAccess().lookupOrThrow(Registries.STRUCTURE_SET).listElements().forEach(set -> {
 			for (StructureSet.StructureSelectionEntry entry : set.value().structures()) {
 				Contents c = built.get(entry.structure());
-				if (c != null) {
-					c.blocks.addAll(shared.blocks);
-					c.mobs.addAll(shared.mobs);
+				if (c == null || !c.blocks.isEmpty()) {
+					continue;
+				}
+				for (StructureSet.StructureSelectionEntry other : set.value().structures()) {
+					Contents o = built.get(other.structure());
+					if (o != null && o != c && other.structure().value().type() == entry.structure().value().type()) {
+						c.blocks.addAll(o.blocks);
+						c.mobs.addAll(o.mobs);
+					}
 				}
 			}
 		});
 	}
+
+	/**
+	 * What the Nether fortress is built of. It's put together by code (NetherFortressPieces), with
+	 * no template to read, so this is written out: every block its pieces place, as read from the
+	 * 1.21.11 code (javap: nether bricks, fences and stairs everywhere; soul sand and nether wart in
+	 * the stalk room; lava in the entrance's well; a spawner, which can't be had). Chests come from
+	 * the shared piece code and aren't counted. The one structure written out by hand: it's where
+	 * nether wart comes from, and with nothing known of it the bastion (one layout in four) was all
+	 * there was.
+	 */
+	private static final Set<Block> FORTRESS_BLOCKS = Set.of(
+			net.minecraft.world.level.block.Blocks.NETHER_BRICKS, net.minecraft.world.level.block.Blocks.NETHER_BRICK_FENCE,
+			net.minecraft.world.level.block.Blocks.NETHER_BRICK_STAIRS, net.minecraft.world.level.block.Blocks.SOUL_SAND,
+			net.minecraft.world.level.block.Blocks.NETHER_WART, net.minecraft.world.level.block.Blocks.LAVA);
 
 	private static Set<String> words(String path) {
 		return new HashSet<>(Arrays.asList(path.split("[_/]")));

@@ -430,6 +430,20 @@ public final class Scenarios {
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
+				new Scenario("SI2", "地狱里哪些结构有地狱疣、镶金黑石：要塞有地狱疣（代码生成，手写），镶金黑石只在堡垒，不再算到要塞头上（玩家报告：找地狱疣去了堡垒；同一结构组的方块被共享了）（只查知识）", 20, (a, bot, me) -> {
+					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+					java.util.function.Function<net.minecraft.world.level.block.Block, List<String>> where = b ->
+							com.vale.helperbot.knowledge.StructureIndex.holding(nether, List.of(b)).stream()
+									.map(h -> h.unwrapKey().map(k -> k.identifier().getPath()).orElse("?")).sorted().toList();
+					var wart = where.apply(Blocks.NETHER_WART);
+					var gilded = where.apply(Blocks.GILDED_BLACKSTONE);
+					PLAN_RESULT[0] = !wart.contains("fortress") ? "要塞里没有地狱疣：" + wart
+							: gilded.contains("fortress") ? "镶金黑石还算在要塞头上：" + gilded
+							: !gilded.contains("bastion_remnant") ? "堡垒里没有镶金黑石：" + gilded : null;
+					PLAN_RESULT[1] = "地狱疣 " + wart + "，镶金黑石 " + gilded;
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
 				new Scenario("NE4", "在地狱一个基岩封死的空腔里，站在中间一格基岩上，底下是岩浆，身上没方块，要烈焰棒：说被困住了，不在几个要塞之间来回试（玩家报告）", 3 * MINUTE, (a, bot, me) -> {
 					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
 					BlockPos c0 = new BlockPos(0, 90, 2000);
