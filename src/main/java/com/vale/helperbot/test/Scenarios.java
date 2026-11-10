@@ -1531,6 +1531,16 @@ public final class Scenarios {
 					return null;
 				}, Scenarios::placementReasons),
 
+				// 2026-11-10 player's log (the Nether, a lava lake by a cliff, a few blocks in the bag):
+				// "规划出 5 步（先走一段，方块不够）" over and over for two minutes, getting nowhere.
+				new Scenario("PP1", "沟太宽、身上方块不够搭过去，远处的目标：寻路说的“近了多少”要按真正返回的那段路算（只寻路）", MINUTE, (a, bot, me) -> {
+					a.fill(7, 19, -70, 14, 40, 70, Blocks.BEDROCK); // walls and floor it can't dig through
+					a.fill(8, 20, -70, 13, 40, 70, Blocks.AIR); // a ravine 6 wide, 21 deep, past any window's sides
+					teleport(bot, a, 3, 41, 0);
+					give(bot, Items.COBBLESTONE, 2);
+					return null;
+				}, Scenarios::partialProgress),
+
 				new Scenario("W43", "要 4 块黏土：3 格深的水底有（浮在水面够得着），25 格外的岸上也有：去岸上", 4 * MINUTE, (a, bot, me) -> {
 					// Reachable from the surface, head out: no dives, but floating it mines 5x slower.
 					a.fill(6, 38, -3, 12, 40, 3, Blocks.WATER);
@@ -2082,6 +2092,35 @@ public final class Scenarios {
 			}
 		}
 		return Scenario.Outcome.pass("原因都对");
+	}
+
+	/**
+	 * One windowed search towards a target far off, across a ravine it has too few blocks to bridge:
+	 * the progress it reports is what walking the steps it returns gains, by the same estimate.
+	 * (A path running out of blocks is cut short of its first bridge block; the progress used to be
+	 * that of the far end it was cut from, so a few steps along the edge looked worth taking.)
+	 */
+	private static Scenario.Outcome partialProgress(Scenario.Context c) {
+		Arena a = c.arena();
+		BotPlayer bot = c.bot();
+		BlockPos start = bot.blockPosition();
+		BlockPos target = a.at(400, Arena.SURFACE, 0);
+		var search = new com.vale.helperbot.path.LocalPathfinder(a.level, bot.getInventory(), Mode.NORMAL,
+				Mode.NORMAL.maxDropFor(bot.getHealth()), start, bot.getY(), (w, p) -> p.equals(target), target, true,
+				com.vale.helperbot.path.LocalPathfinder.LEVELS[0], k -> false, bot.movement().airProfile(), k -> false);
+		while (!search.step(50_000_000L)) {
+			// on this thread, to the end
+		}
+		var steps = search.result().steps();
+		if (search.blocksShort() == 0) {
+			return Scenario.Outcome.fail("场景没搭对：没有哪条路因为方块不够被放弃");
+		}
+		BlockPos end = steps.isEmpty() ? start : steps.get(steps.size() - 1).to();
+		var travel = new com.vale.helperbot.path.TravelEstimate(a.level, bot.getInventory(), Mode.NORMAL, target, true);
+		double real = (travel.ticks(start) - travel.ticks(end)) * Mode.NORMAL.speed();
+		double said = search.progressBlocks();
+		String what = String.format(java.util.Locale.ROOT, "说近了 %.1f 格，返回的 %d 步走完近了 %.1f 格", said, steps.size(), real);
+		return Math.abs(said - real) < 0.01 ? Scenario.Outcome.pass(what) : Scenario.Outcome.fail(what);
 	}
 
 	/** Is there really nowhere to mine it from? Null if so, otherwise where. */

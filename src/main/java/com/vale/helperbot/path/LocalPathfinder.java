@@ -362,7 +362,13 @@ public final class LocalPathfinder implements Planner {
 		}
 		Node end = partialEnd();
 		result = end == startNode ? Result.EMPTY : beforeBuilding(reconstruct(end, false), end.blocks);
-		progress = (heuristic(origin) - heuristic(end.pos)) / walkCost;
+		// What walking the steps it hands back gains: they may stop short of the node they were made
+		// for (its last tenth, or the bridge it hasn't the blocks to finish). Measured at that node, a
+		// few steps along the edge of a lava lake it couldn't bridge counted as getting well closer, and
+		// were walked again and again for two minutes.
+		List<PathStep> walked = result.steps();
+		BlockPos reached = walked.isEmpty() ? origin : walked.get(walked.size() - 1).to();
+		progress = (heuristic(origin) - heuristic(reached)) / walkCost;
 		return true;
 	}
 
