@@ -420,6 +420,39 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.INK_SAC, 1, Mode.NORMAL);
 				}, Scenario.has(Items.INK_SAC, 1)),
 
+				new Scenario("SI1", "地狱里哪些结构刷凋零骷髅：下界要塞有，猪灵堡垒没有（玩家报告：找凋零骷髅去了堡垒；两者在同一个结构组里，刷怪规则被共享了）（只查知识）", 20, (a, bot, me) -> {
+					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+					var where = com.vale.helperbot.knowledge.StructureIndex.spawning(nether, EntityType.WITHER_SKELETON).stream()
+							.map(h -> h.unwrapKey().map(k -> k.identifier().getPath()).orElse("?")).sorted().toList();
+					PLAN_RESULT[0] = !where.contains("fortress") ? "要塞里没有凋零骷髅：" + where
+							: where.contains("bastion_remnant") ? "堡垒也算刷凋零骷髅：" + where : null;
+					PLAN_RESULT[1] = where.toString();
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
+				new Scenario("NE4", "在地狱一个基岩封死的空腔里，站在中间一格基岩上，底下是岩浆，身上没方块，要烈焰棒：说被困住了，不在几个要塞之间来回试（玩家报告）", 3 * MINUTE, (a, bot, me) -> {
+					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+					BlockPos c0 = new BlockPos(0, 90, 2000);
+					nether.getChunk(c0.getX() >> 4, c0.getZ() >> 4);
+					for (BlockPos p : BlockPos.betweenClosed(c0.offset(-5, -5, -5), c0.offset(5, 5, 5))) {
+						boolean shell = Math.abs(p.getX() - c0.getX()) == 5 || Math.abs(p.getY() - c0.getY()) == 5 || Math.abs(p.getZ() - c0.getZ()) == 5;
+						nether.setBlock(p, (shell ? Blocks.BEDROCK : p.getY() <= c0.getY() - 3 ? Blocks.LAVA : Blocks.AIR).defaultBlockState(), 3);
+					}
+					for (int y = -4; y <= -1; y++) {
+						nether.setBlock(c0.offset(0, y, 0), Blocks.BEDROCK.defaultBlockState(), 3);
+					}
+					bot.teleportTo(nether, c0.getX() + 0.5, c0.getY(), c0.getZ() + 0.5, Set.of(), 0, 0, true);
+					bot.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE, 20 * 600));
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.BLAZE_ROD, 1, Mode.NORMAL);
+				}, c -> {
+					if (c.log().contains("这次不去找了")) {
+						return Scenario.Outcome.fail("在几个要塞之间来回试完才放弃");
+					}
+					return c.log().contains("被困在这里了") ? Scenario.Outcome.pass("说了被困住了") : null;
+				}),
+
 				new Scenario("ST4", "同上，但手里一个能垫的方块都没有", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
 					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);

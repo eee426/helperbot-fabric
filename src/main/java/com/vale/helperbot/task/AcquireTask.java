@@ -47,6 +47,8 @@ public class AcquireTask implements BotTask {
 	private final Map<java.util.UUID, Double> unreachableMobs = new java.util.HashMap<>();
 	/** Mobs it could only get to by building, with the blocks it had then (see HuntTask). */
 	private final Map<java.util.UUID, Integer> shortOfBlocksMobs = new java.util.HashMap<>();
+	/** Structures a hunt has gone to, the whole order long (see HuntTask). */
+	private final List<net.minecraft.core.BlockPos> structuresTried = new java.util.ArrayList<>();
 	private final Set<Item> planItems = new HashSet<>();
 	private final OutOfReach outOfReach = new OutOfReach();
 	private final Map<Item, Explorer> explorers = new java.util.HashMap<>();
@@ -248,6 +250,7 @@ public class AcquireTask implements BotTask {
 			noHunt.clear();
 			unreachableMobs.clear();
 			shortOfBlocksMobs.clear();
+			structuresTried.clear();
 			lastFailure = null;
 			lastAction = null;
 			repeats = 0;
@@ -348,7 +351,7 @@ public class AcquireTask implements BotTask {
 			}
 			case CraftPlanner.Hunt h -> {
 				huntItem = h.item();
-				hunt = new HuntTask(requester, h.item(), h.count(), mode, h.sources(), explorers, null, unreachableMobs, shortOfBlocksMobs);
+				hunt = new HuntTask(requester, h.item(), h.count(), mode, h.sources(), explorers, null, unreachableMobs, shortOfBlocksMobs, structuresTried);
 				phase = Phase.HUNT;
 			}
 			case CraftPlanner.Fill f -> {
@@ -360,7 +363,7 @@ public class AcquireTask implements BotTask {
 				switch (u.way().kind()) {
 					case MOB -> {
 						huntItem = useItem;
-						hunt = new HuntTask(requester, useItem, u.count(), mode, u.mobs(), explorers, u.way().input(), unreachableMobs, shortOfBlocksMobs);
+						hunt = new HuntTask(requester, useItem, u.count(), mode, u.mobs(), explorers, u.way().input(), unreachableMobs, shortOfBlocksMobs, structuresTried);
 						phase = Phase.HUNT;
 					}
 					case SCOOP -> {

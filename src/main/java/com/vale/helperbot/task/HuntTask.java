@@ -123,7 +123,7 @@ final class HuntTask {
 	private int nightWaited;
 
 	HuntTask(ServerPlayer requester, Item item, int wanted, Mode mode, Map<EntityType<?>, Double> sources, Map<Item, Explorer> explorers) {
-		this(requester, item, wanted, mode, sources, explorers, null, new HashMap<>(), new HashMap<>());
+		this(requester, item, wanted, mode, sources, explorers, null, new HashMap<>(), new HashMap<>(), new java.util.ArrayList<>());
 	}
 
 	/**
@@ -131,8 +131,9 @@ final class HuntTask {
 	 * Interactions). Finding and getting to them is the same as for a hunt.
 	 */
 	HuntTask(ServerPlayer requester, Item item, int wanted, Mode mode, Map<EntityType<?>, Double> sources, Map<Item, Explorer> explorers,
-			 Item use, Map<UUID, Double> unreachable, Map<UUID, Integer> shortOfBlocks) {
+			 Item use, Map<UUID, Double> unreachable, Map<UUID, Integer> shortOfBlocks, List<BlockPos> structuresSeen) {
 		this.use = use;
+		this.structuresSeen = structuresSeen;
 		this.unreachable = unreachable;
 		this.shortOfBlocks = shortOfBlocks;
 		this.explorers = explorers;
@@ -302,6 +303,8 @@ final class HuntTask {
 			BlockPos at = com.vale.helperbot.knowledge.StructureIndex.nearest(level, where, bot.blockPosition(), structuresSeen);
 			if (at != null) {
 				structuresSeen.add(at);
+				tripFrom = bot.blockPosition();
+				bot.log("去 " + at.getX() + ", " + at.getZ() + " 的结构里找（这一单第 " + structuresSeen.size() + " 个）");
 				bot.say(requester, Component.literal("附近没有").append(names()).append("，去 " + at.getX() + ", " + at.getZ() + " 的结构里找。"));
 				headFor(bot, at);
 				setPhase(Phase.STRUCTURE);
@@ -483,7 +486,12 @@ final class HuntTask {
 		return BotTask.Status.RUNNING;
 	}
 
-	private final List<BlockPos> structuresSeen = new java.util.ArrayList<>();
+	/** Structures tried for what no biome has, the whole order long (see AcquireTask): a new hunt doesn't go round the same ones again. */
+	private final List<BlockPos> structuresSeen;
+	/** Where it set off for the structure from: a trip that fails without getting anywhere means it's stuck where it is. */
+	private BlockPos tripFrom;
+	/** Moved less than this on a trip that failed: it never got going. */
+	private static final int STUCK_BLOCKS = 4;
 	private static final int MAX_STRUCTURES = 3;
 
 	private BotTask.Status toStructure(BotPlayer bot) {
@@ -494,7 +502,15 @@ final class HuntTask {
 		}
 		MovementController.Status status = bot.movement().status();
 		if (status != MovementController.Status.MOVING) {
+			String why = bot.movement().failReason();
+			boolean stuck = status == MovementController.Status.FAILED && tripFrom != null
+					&& bot.blockPosition().distManhattan(tripFrom) < STUCK_BLOCKS;
 			bot.movement().stop();
+			if (stuck) {
+				// It never got going: that's where it stands, not the structure. Trying the next
+				// one from the same spot fails the same way (it went round three, hunt after hunt).
+				return fail(bot, "被困在这里了，哪个方向都走不出去（" + why + "）。给我一些能垫路的方块（圆石、泥土、地狱岩、黑石……），或者帮我挖开一条路");
+			}
 			setPhase(Phase.FIND);
 		}
 		return BotTask.Status.RUNNING;

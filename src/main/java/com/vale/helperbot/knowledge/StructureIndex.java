@@ -71,7 +71,10 @@ public final class StructureIndex {
 	/** What one structure can have. */
 	private static final class Contents {
 		final Set<Block> blocks = new HashSet<>();
+		/** Mobs its templates name. */
 		final Set<EntityType<?>> mobs = new HashSet<>();
+		/** Mobs its own spawn rules bring (a fortress's blazes): its alone, never shared with the rest of its set. */
+		final Set<EntityType<?>> spawned = new HashSet<>();
 	}
 
 	private static Map<Holder<Structure>, Contents> contents;
@@ -106,7 +109,7 @@ public final class StructureIndex {
 		Set<Holder<Structure>> found = new HashSet<>();
 		for (Holder<Structure> structure : present(level)) {
 			Contents c = contents.get(structure);
-			if (c != null && c.mobs.contains(type)) {
+			if (c != null && (c.mobs.contains(type) || c.spawned.contains(type))) {
 				found.add(structure);
 			}
 		}
@@ -245,7 +248,7 @@ public final class StructureIndex {
 	private static void readSpawnLists(Structure structure, Contents c) {
 		for (StructureSpawnOverride override : structure.spawnOverrides().values()) {
 			for (Weighted<MobSpawnSettings.SpawnerData> entry : override.spawns().unwrap()) {
-				c.mobs.add(entry.value().type());
+				c.spawned.add(entry.value().type());
 			}
 		}
 	}
@@ -317,7 +320,9 @@ public final class StructureIndex {
 
 	/**
 	 * The structures code builds: by name (see the class comment). Variants in one structure set
-	 * share what any of them found.
+	 * share what their templates have; not their spawn rules. (The Nether's fortress and bastion
+	 * share a set, one or the other at each spot: the bastion had the fortress's wither skeletons
+	 * and blazes, and it went to a bastion for them.)
 	 */
 	private static void matchByName(ServerLevel level, Map<Holder<Structure>, Contents> built,
 									Set<Identifier> templateIds, StructureTemplateManager templates, Map<Identifier, Set<Identifier>> templateIdsIn) {

@@ -180,7 +180,7 @@ const CHAINS = [
  further:{k:"q",t:"它是动物还是怪物？",d:"看生物的出现方式。",c:"HuntTask.lookFurther",n:[["动物","exp"],["怪物","wait"],["都不刷","no"]]},
  exp:{k:"a",t:"探索",d:"去它最多的群系，路上每 2 秒看一次。",c:"HuntTask.explore",n:[["看到","find"],["找遍了","no"]]},
  wait:{k:"a",t:"原地等刷新",d:"白天露天就等天黑，最多 5 分钟。",c:"HuntTask.waitForSpawns",n:[["刷出来了","find"],["等不到","no"]]},
- no:{k:"b",t:"这一步失败",d:"说明原因。",c:"HuntTask.fail",n:[]}
+ no:{k:"b",t:"这一步失败",d:"说明原因。去结构的路上一步都没走出去（失败时离出发点不到 4 格），就是被困住了：直接说“被困在这里了”，要方块或者挖路，不再换下一个结构。去过的结构整单记着。",c:"HuntTask.fail",n:[]}
 }},
 {id:"drop", group:"任务", title:"捡掉落物", lead:"掉落物和方块同等价值，成本只算距离。", start:"start", nodes:{
  start:{k:"a",t:"全量搜索到它旁边",d:"能到才出发。",c:"DropFetch.start",n:[["能到","track"],["到不了","skip"]]},
