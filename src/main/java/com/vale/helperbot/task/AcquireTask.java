@@ -43,8 +43,10 @@ public class AcquireTask implements BotTask {
 	private final Set<Item> noGather = new HashSet<>();
 	/** Apart from gathering: spiders it couldn't get to are no reason to leave the cobwebs alone. */
 	private final Set<Item> noHunt = new HashSet<>();
-	/** Mobs a search proved out of reach, the whole order long (see HuntTask). */
-	private final Set<java.util.UUID> unreachableMobs = new HashSet<>();
+	/** Mobs a search proved out of reach, the whole order long, and how far off (see HuntTask). */
+	private final Map<java.util.UUID, Double> unreachableMobs = new java.util.HashMap<>();
+	/** Mobs it could only get to by building, with the blocks it had then (see HuntTask). */
+	private final Map<java.util.UUID, Integer> shortOfBlocksMobs = new java.util.HashMap<>();
 	private final Set<Item> planItems = new HashSet<>();
 	private final OutOfReach outOfReach = new OutOfReach();
 	private final Map<Item, Explorer> explorers = new java.util.HashMap<>();
@@ -245,6 +247,7 @@ public class AcquireTask implements BotTask {
 			noGather.clear();
 			noHunt.clear();
 			unreachableMobs.clear();
+			shortOfBlocksMobs.clear();
 			lastFailure = null;
 			lastAction = null;
 			repeats = 0;
@@ -345,7 +348,7 @@ public class AcquireTask implements BotTask {
 			}
 			case CraftPlanner.Hunt h -> {
 				huntItem = h.item();
-				hunt = new HuntTask(requester, h.item(), h.count(), mode, h.sources(), explorers, null, unreachableMobs);
+				hunt = new HuntTask(requester, h.item(), h.count(), mode, h.sources(), explorers, null, unreachableMobs, shortOfBlocksMobs);
 				phase = Phase.HUNT;
 			}
 			case CraftPlanner.Fill f -> {
@@ -357,7 +360,7 @@ public class AcquireTask implements BotTask {
 				switch (u.way().kind()) {
 					case MOB -> {
 						huntItem = useItem;
-						hunt = new HuntTask(requester, useItem, u.count(), mode, u.mobs(), explorers, u.way().input(), unreachableMobs);
+						hunt = new HuntTask(requester, useItem, u.count(), mode, u.mobs(), explorers, u.way().input(), unreachableMobs, shortOfBlocksMobs);
 						phase = Phase.HUNT;
 					}
 					case SCOOP -> {

@@ -124,6 +124,7 @@ public final class MovementController {
 		stop();
 		this.leaving = null;
 		this.provenFrom = null;
+		this.shortOfBlocksAt = null;
 		this.goal = goal;
 		this.target = target;
 		this.mode = mode;
@@ -199,6 +200,16 @@ public final class MovementController {
 	public BlockPos provenFrom() {
 		return provenFrom;
 	}
+
+	/**
+	 * Where it stood when a whole search found a way only by building, and it had no blocks for it
+	 * and none to dig around it; null if not. Not out of reach: with blocks it may well get there.
+	 */
+	public BlockPos shortOfBlocks() {
+		return shortOfBlocksAt;
+	}
+
+	private BlockPos shortOfBlocksAt;
 
 	/**
 	 * Is there a way to any of these, with the way as it is? One search through all of it, from the
@@ -966,10 +977,9 @@ public final class MovementController {
 			gathering = false;
 			if (++emptyPlans >= MAX_EMPTY_PLANS) {
 				// The whole search went through everything (see RouteSearch#endLocked) and blocks to
-				// build a way were all it could have wanted: with none to be had, that's out of reach
-				// from here, as much as if it had had them and still found nothing.
+				// build a way were all it wanted: not "no way there", a way it can't lay yet.
 				if (routes.exhaustedForBlocks) {
-					provenFrom = feet();
+					shortOfBlocksAt = feet();
 				}
 				fail("没有路可走，身边也挖不到可以用来搭路的方块");
 			}

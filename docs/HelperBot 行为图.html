@@ -77,7 +77,7 @@ svg.wires{position:absolute;inset:0;pointer-events:none}
 </style>
 
 <h1>HelperBot 行为图</h1>
-<p class="sub">按任务链看它实际怎么走。点方块看说明，点右边的分支走下去。内容按提交 dfa3a8c 的代码写；覆盖率来自 91b3c9f 时 134 个测试场景的那次统计（之后只有打猎、寻路的小改动）。</p>
+<p class="sub">按任务链看它实际怎么走。点方块看说明，点右边的分支走下去。内容按提交 dfa3a8c 之后（打猎黑名单按距离解除、缺方块单独处理）的代码写；覆盖率来自 91b3c9f 时 134 个测试场景的那次统计（之后只有打猎、寻路的小改动）。</p>
 <div class="app">
   <nav id="nav" aria-label="任务链"></nav>
   <div class="mid">
@@ -171,11 +171,12 @@ const CHAINS = [
 {id:"hunt", group:"任务", title:"打猎", lead:"找猎物，内核确认能到，追上去打，捡掉落物。", start:"find", nodes:{
  find:{k:"a",t:"找猎物和掉落物",d:"周围 64 格。地上的和最近的猎物比成本。哪些怪在哪刷，按所在维度自己的刷怪表。",c:"HuntTask.find",n:[["掉落物更划算","jump:drop"],["猎物在水下，头在水外","jump:flood"],["有猎物","lock"],["都没有","further"]]},
  lock:{k:"a",t:"盯上最近的",d:"拿武器。",c:"HuntTask.lockOn",n:[["开始追","chase"]]},
- chase:{k:"q",t:"离猎物 16 格内？",d:"远时走完整路线，猎物动了也不换。近时先等全面搜索说能到，才开始小窗口追（搜索还在跑时重新瞄准，会把它取消，永远判不出到不了）。“到不了”只认这只怪自己那次搜索的结果。",c:"HuntTask.chase",n:[["否，走完整路线","far"],["是，小窗口追","near"],["查实到不了","reject"]]},
+ chase:{k:"q",t:"离猎物 16 格内？",d:"远时走完整路线，猎物动了也不换。近时先等全面搜索说能到，才开始小窗口追（搜索还在跑时重新瞄准，会把它取消，永远判不出到不了）。“到不了”只认这只怪自己那次搜索的结果。",c:"HuntTask.chase",n:[["否，走完整路线","far"],["是，小窗口追","near"],["查实到不了","reject"],["要垫方块，身上不够","short"]]},
  far:{k:"a",t:"全量搜索",d:"路线要留 4 秒打架的气。",c:"HuntTask.chase",n:[["看寻路","jump:goto"],["到了","chase"]]},
  near:{k:"q",t:"够得着又看得见？",d:"进 16 格后追超过 60 秒就换一只。",c:"HuntTask.chase",n:[["是","hit"],["否","near"],["超时","reject"]]},
  hit:{k:"a",t:"打，或者用东西",d:"蓄满力才挥。要的是牛奶、鱼桶这类，就拿桶对它用，不打；什么也没拿到（幼崽）就换一只。",c:"HuntTask.chase",n:[["打死了 / 拿到了","find"]]},
- reject:{k:"a",t:"这一单不再打它",d:"全面搜索证明到不了，进整单的黑名单：打猎失败重来也不再锁它（以前每次打猎都锁回海底洞里那只蜘蛛）。进 16 格后追了 60 秒追不上的，只在这次打猎里不打。换下一只。",c:"HuntTask.chase",n:[["继续","find"]]},
+ reject:{k:"a",t:"这一单不再打它",d:"全面搜索证明到不了，进整单的黑名单，记下当时离它多远：打猎失败重来也不再锁它（以前每次打猎都锁回海底洞里那只蜘蛛）。只有离它近到一半以内、而且近了 8 格以上，才再看一次；再不行就以新的距离为准。进 16 格后追了 60 秒追不上的，只在这次打猎里不打。换下一只。",c:"HuntTask.chase",n:[["继续","find"]]},
+ short:{k:"a",t:"有了方块再打它",d:"路是有的，只是要垫方块，身上的不够、身边也挖不到。记下当时有几个方块，身上的多了就重新算它。不算到不了。",c:"HuntTask.chase",n:[["继续","find"]]},
  further:{k:"q",t:"它是动物还是怪物？",d:"看生物的出现方式。",c:"HuntTask.lookFurther",n:[["动物","exp"],["怪物","wait"],["都不刷","no"]]},
  exp:{k:"a",t:"探索",d:"去它最多的群系，路上每 2 秒看一次。",c:"HuntTask.explore",n:[["看到","find"],["找遍了","no"]]},
  wait:{k:"a",t:"原地等刷新",d:"白天露天就等天黑，最多 5 分钟。",c:"HuntTask.waitForSpawns",n:[["刷出来了","find"],["等不到","no"]]},
@@ -235,7 +236,7 @@ const CHAINS = [
  drop:{k:"b",t:"这条路不要",d:"继续搜别的。",n:[["继续","astar"]]},
  goal:{k:"q",t:"结果？",d:"",c:"RouteSearch.endLocked",n:[["到终点","walk"],["头在水下搜不到","up"],["方块不够","blocks"],["查实到不了","no"]]},
  up:{k:"a",t:"先上去，再搜一次",d:"水下的结果不算数。",c:"RouteSearch.endLocked",n:[["看换气","jump:breath"],["上来了","kind"]]},
- blocks:{k:"a",t:"就地收集方块再试",d:"一次。全面搜索已经搜完、缺的只是搭路的方块，身边又挖不到：也算查实到不了。",c:"MovementController.gatherTick",n:[["再试","kind"]]},
+ blocks:{k:"a",t:"就地收集方块再试",d:"一次。全面搜索已经搜完、缺的只是搭路的方块，身边又挖不到：不算到不了，告诉任务“缺方块”（打猎会等有了方块再试）。",c:"MovementController.gatherTick",n:[["再试","kind"]]},
  walk:{k:"g",t:"走路线",d:"世界变了才重算。",c:"MovementController.adopt",n:[["看移动","jump:step"]]},
  no:{k:"b",t:"记下到不了",d:"任务写进记忆本 OutOfReach，换目标。",c:"RouteSearch.endLocked",n:[]}
 }},

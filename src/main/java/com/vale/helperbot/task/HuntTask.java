@@ -80,11 +80,21 @@ final class HuntTask {
 	private final Item use;
 	private final Set<UUID> rejected = new HashSet<>();
 	/**
-	 * Mobs a search proved out of reach, for the whole order (see AcquireTask): a new hunt doesn't
-	 * go back to them. (Only this hunt's own list, it locked on to the one spider in a cave under
-	 * the sea, hunt after hunt.) They may move; it doesn't look again, there are others.
+	 * Mobs a whole search proved out of reach, for the whole order (see AcquireTask), with how far
+	 * off each was then: a new hunt doesn't go back to them. (Only this hunt's own list, it locked
+	 * on to the one spider in a cave under the sea, hunt after hunt.) One more look only once it's
+	 * as close as never before: at most half as far, and at least {@link #CLOSER} blocks closer
+	 * (dug down under the sea bed, or the blaze came down); each look that fails sets the bar
+	 * there, so a mob gets two or three looks at most however it moves. 0: never again (a pocket
+	 * under water).
 	 */
-	private final Set<UUID> unreachable;
+	private final Map<UUID, Double> unreachable;
+	private static final double CLOSER = 8;
+	/**
+	 * Mobs a whole search could only get to by building, with no blocks for it: with how many
+	 * blocks it had then. Back on the list once it has more: there is a way, it couldn't lay it.
+	 */
+	private final Map<UUID, Integer> shortOfBlocks;
 	/** Under water: the mobs this far from one found out of reach are taken to be in the same pocket. */
 	private static final int SAME_POCKET = 4;
 	private Phase phase = Phase.FIND;
@@ -113,7 +123,7 @@ final class HuntTask {
 	private int nightWaited;
 
 	HuntTask(ServerPlayer requester, Item item, int wanted, Mode mode, Map<EntityType<?>, Double> sources, Map<Item, Explorer> explorers) {
-		this(requester, item, wanted, mode, sources, explorers, null, new HashSet<>());
+		this(requester, item, wanted, mode, sources, explorers, null, new HashMap<>(), new HashMap<>());
 	}
 
 	/**
@@ -121,9 +131,10 @@ final class HuntTask {
 	 * Interactions). Finding and getting to them is the same as for a hunt.
 	 */
 	HuntTask(ServerPlayer requester, Item item, int wanted, Mode mode, Map<EntityType<?>, Double> sources, Map<Item, Explorer> explorers,
-			 Item use, Set<UUID> unreachable) {
+			 Item use, Map<UUID, Double> unreachable, Map<UUID, Integer> shortOfBlocks) {
 		this.use = use;
 		this.unreachable = unreachable;
+		this.shortOfBlocks = shortOfBlocks;
 		this.explorers = explorers;
 		this.requester = requester;
 		this.item = item;
@@ -207,10 +218,23 @@ final class HuntTask {
 
 	// ---- finding ------------------------------------------------------------------------
 
+	/** Out of the running for now: proven out of reach and not much closer since, or short of blocks and still so. */
+	private boolean ruledOut(BotPlayer bot, Mob m) {
+		Double then = unreachable.get(m.getUUID());
+		if (then != null) {
+			double now = bot.distanceTo(m);
+			if (!(now <= then / 2 && now <= then - CLOSER)) {
+				return true;
+			}
+		}
+		Integer blocks = shortOfBlocks.get(m.getUUID());
+		return blocks != null && com.vale.helperbot.path.BuildingBlocks.count(bot.getInventory()) <= blocks;
+	}
+
 	private Mob nearestPrey(BotPlayer bot, int radius) {
 		ServerLevel level = bot.level();
 		List<Mob> mobs = level.getEntitiesOfClass(Mob.class, bot.getBoundingBox().inflate(radius),
-				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID()) && !unreachable.contains(m.getUUID())
+				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID()) && !ruledOut(bot, m)
 						&& MobDrops.mayHunt(m) && !ProtectionZones.isProtected(level, m.blockPosition()));
 		Mob best = null;
 		for (Mob m : mobs) {
@@ -316,7 +340,7 @@ final class HuntTask {
 		ServerLevel level = bot.level();
 		wayTo.clear();
 		for (Mob m : level.getEntitiesOfClass(Mob.class, bot.getBoundingBox().inflate(SCAN_RADIUS),
-				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID()) && !unreachable.contains(m.getUUID())
+				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID()) && !ruledOut(bot, m)
 						&& MobDrops.mayHunt(m) && !ProtectionZones.isProtected(level, m.blockPosition()) && m.isUnderWater())) {
 			wayTo.put(m, com.vale.helperbot.bot.Sight.attackSpot(bot, m));
 		}
@@ -364,7 +388,7 @@ final class HuntTask {
 			if (nearest != null && m.getType() == nearest.getType()
 					&& Math.abs(m.getBlockX() - nearest.getBlockX()) <= SAME_POCKET && Math.abs(m.getBlockY() - nearest.getBlockY()) <= SAME_POCKET
 					&& Math.abs(m.getBlockZ() - nearest.getBlockZ()) <= SAME_POCKET) {
-				unreachable.add(m.getUUID());
+				unreachable.put(m.getUUID(), 0.0); // under water: not again this order
 				out++;
 			} else {
 				left++;
@@ -693,10 +717,20 @@ final class HuntTask {
 		// Only what its own search for this one found: before it has set off, what the movement
 		// remembers is about the last target (a drop it couldn't get to), and every mob it picked
 		// after that was "out of reach" without a search, one after another, the lot.
+		if (aimedAt != null && bot.movement().shortOfBlocks() != null) {
+			int blocks = com.vale.helperbot.path.BuildingBlocks.count(bot.getInventory());
+			bot.log(target.getType().getDescription().getString() + " 要垫方块才过得去，身上的不够（" + blocks + " 个），有了更多方块再打它，先换一只");
+			shortOfBlocks.put(target.getUUID(), blocks);
+			target = null;
+			bot.movement().stop();
+			setPhase(Phase.FIND);
+			return BotTask.Status.RUNNING;
+		}
 		if (aimedAt != null && bot.movement().provenFrom() != null) {
-			bot.log(target.getType().getDescription().getString() + " 到不了，这一单不再打它，换一只");
+			double far = bot.distanceTo(target);
+			bot.log(target.getType().getDescription().getString() + " 到不了（" + (int) far + " 格外），除非离它近一半而且近 8 格以上，这一单不再打它，换一只");
 			rejected.add(target.getUUID());
-			unreachable.add(target.getUUID());
+			unreachable.put(target.getUUID(), far);
 			target = null;
 			bot.movement().stop();
 			setPhase(Phase.FIND);
