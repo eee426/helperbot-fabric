@@ -221,6 +221,15 @@ public final class MovementController {
 		routes.wayDug = false;
 	}
 
+	/**
+	 * Still finding out, by the whole search, whether it can get there at all (no route yet). Re-aimed
+	 * in the meantime it drops to the small windows, which never prove anything: a spider shuffling
+	 * about a sealed cave was never out of reach, only chased till the time ran out, hunt after hunt.
+	 */
+	public boolean deciding() {
+		return locked && path == null && status == Status.MOVING;
+	}
+
 	public boolean findingWay() {
 		return routes.wayTargets != null;
 	}
@@ -637,7 +646,9 @@ public final class MovementController {
 			return;
 		}
 		if (Rules.open() && BuildingBlocks.count(bot.getInventory()) < LOW_BLOCKS && !body.isInWater()) {
-			// Maybe a bridge or pillar would work: get some blocks first.
+			// Maybe a bridge or pillar would work: get some blocks first. (After the small windows,
+			// which prove nothing: see gatherTick.)
+			routes.exhaustedForBlocks = false;
 			gathering = true;
 			gatherRejected.clear();
 			return;
@@ -954,6 +965,12 @@ public final class MovementController {
 		if (next == null) {
 			gathering = false;
 			if (++emptyPlans >= MAX_EMPTY_PLANS) {
+				// The whole search went through everything (see RouteSearch#endLocked) and blocks to
+				// build a way were all it could have wanted: with none to be had, that's out of reach
+				// from here, as much as if it had had them and still found nothing.
+				if (routes.exhaustedForBlocks) {
+					provenFrom = feet();
+				}
 				fail("没有路可走，身边也挖不到可以用来搭路的方块");
 			}
 			return;

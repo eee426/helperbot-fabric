@@ -333,7 +333,8 @@ public final class Scenarios {
 					a.fill(-2, Arena.SURFACE - 2, -8, 16, Arena.SURFACE - 2, 8, Blocks.STONE);
 					a.fill(2, Arena.SURFACE - 1, -7, 15, Arena.SURFACE - 1, 7, Blocks.LAVA);
 					a.fill(2, Arena.SURFACE - 1, 0, 11, Arena.SURFACE - 1, 0, Blocks.STONE);
-					a.fill(11, Arena.SURFACE - 1, -1, 13, Arena.SURFACE - 1, 1, Blocks.STONE);
+					// A 5x5 island, the ore in the middle: what it drops lands on stone, not in the lava.
+					a.fill(11, Arena.SURFACE - 1, -2, 15, Arena.SURFACE - 1, 2, Blocks.STONE);
 					a.set(13, Arena.SURFACE, 0, Blocks.IRON_ORE);
 					teleport(bot, a, 0, Arena.SURFACE, 0);
 					give(bot, Items.STONE_PICKAXE, 1);
@@ -384,6 +385,40 @@ public final class Scenarios {
 					}
 					return c.bot().getInventory().countItem(Items.RAW_IRON) >= 1 ? Scenario.Outcome.pass("挖到了，中途“不在起点”" + replans + " 次") : null;
 				}),
+
+				new Scenario("HU2", "唯一一只蜘蛛关在海底基岩封死的干洞里（玩家报告：打猎失败重来后，又锁回这只到不了的蜘蛛）：判过到不了就这一单不再锁它", 14 * MINUTE, (a, bot, me) -> {
+					a.fill(4, Arena.SURFACE - 12, -6, 16, Arena.SURFACE - 1, 6, Blocks.WATER);
+					a.fill(8, Arena.SURFACE - 10, -2, 12, Arena.SURFACE - 6, 2, Blocks.BEDROCK);
+					a.fill(9, Arena.SURFACE - 9, -1, 11, Arena.SURFACE - 7, 1, Blocks.AIR);
+					a.spawn(EntityType.SPIDER, 10, Arena.SURFACE - 9, 0);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.SPIDER_EYE, 1, Mode.NORMAL);
+				}, c -> {
+					long locks = c.log().lines().filter(l -> l.contains("盯上了 Spider")).count();
+					if (locks >= 2) {
+						return Scenario.Outcome.fail("又锁回了那只到不了的蜘蛛（盯上了 " + locks + " 次）");
+					}
+					boolean huntFailed = c.log().contains("失败（第 1 次）");
+					return huntFailed && c.ticks() >= 13 * MINUTE ? Scenario.Outcome.pass("打猎重来后没再锁它（盯上了 " + locks + " 次）") : null;
+				}),
+
+				new Scenario("W70", "两只鱿鱼关在附近基岩封死的水洞里（最近），另一边 55 格外、石头围住的水洞里有一只（游不进去，能挖进去，在第一次挖掘搜索的范围外）：最近的到不了，不把别处的一起放弃，挖进去打", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(-14, Arena.SURFACE - 8, -3, -8, Arena.SURFACE - 1, 3, Blocks.BEDROCK);
+					a.fill(-13, Arena.SURFACE - 7, -2, -9, Arena.SURFACE - 2, 2, Blocks.WATER);
+					a.spawn(EntityType.SQUID, -11, Arena.SURFACE - 5, 0);
+					a.spawn(EntityType.SQUID, -11, Arena.SURFACE - 4, 1);
+					// Walled in by stone: no swimming in, but it can be dug into.
+					a.fill(51, Arena.SURFACE - 5, -4, 59, Arena.SURFACE - 1, 4, Blocks.STONE);
+					a.fill(52, Arena.SURFACE - 4, -3, 58, Arena.SURFACE - 2, 3, Blocks.WATER);
+					a.spawn(EntityType.SQUID, 55, Arena.SURFACE - 3, 0);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.INK_SAC, 1, Mode.NORMAL);
+				}, Scenario.has(Items.INK_SAC, 1)),
 
 				new Scenario("ST4", "同上，但手里一个能垫的方块都没有", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);

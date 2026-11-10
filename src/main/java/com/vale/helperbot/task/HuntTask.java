@@ -79,6 +79,14 @@ final class HuntTask {
 	/** What's used on them instead of a weapon; null for a hunt. */
 	private final Item use;
 	private final Set<UUID> rejected = new HashSet<>();
+	/**
+	 * Mobs a search proved out of reach, for the whole order (see AcquireTask): a new hunt doesn't
+	 * go back to them. (Only this hunt's own list, it locked on to the one spider in a cave under
+	 * the sea, hunt after hunt.) They may move; it doesn't look again, there are others.
+	 */
+	private final Set<UUID> unreachable;
+	/** Under water: the mobs this far from one found out of reach are taken to be in the same pocket. */
+	private static final int SAME_POCKET = 4;
 	private Phase phase = Phase.FIND;
 	/** Items on the ground are sources too (a kill's drops, say): the one it's fetching, in FETCH (see DropFetch). */
 	private final DropFetch drops = new DropFetch();
@@ -105,15 +113,17 @@ final class HuntTask {
 	private int nightWaited;
 
 	HuntTask(ServerPlayer requester, Item item, int wanted, Mode mode, Map<EntityType<?>, Double> sources, Map<Item, Explorer> explorers) {
-		this(requester, item, wanted, mode, sources, explorers, null);
+		this(requester, item, wanted, mode, sources, explorers, null, new HashSet<>());
 	}
 
 	/**
 	 * Not killing them: using {@code use} on them (a bucket on a cow, a water bucket on a fish, see
 	 * Interactions). Finding and getting to them is the same as for a hunt.
 	 */
-	HuntTask(ServerPlayer requester, Item item, int wanted, Mode mode, Map<EntityType<?>, Double> sources, Map<Item, Explorer> explorers, Item use) {
+	HuntTask(ServerPlayer requester, Item item, int wanted, Mode mode, Map<EntityType<?>, Double> sources, Map<Item, Explorer> explorers,
+			 Item use, Set<UUID> unreachable) {
 		this.use = use;
+		this.unreachable = unreachable;
 		this.explorers = explorers;
 		this.requester = requester;
 		this.item = item;
@@ -200,7 +210,7 @@ final class HuntTask {
 	private Mob nearestPrey(BotPlayer bot, int radius) {
 		ServerLevel level = bot.level();
 		List<Mob> mobs = level.getEntitiesOfClass(Mob.class, bot.getBoundingBox().inflate(radius),
-				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID())
+				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID()) && !unreachable.contains(m.getUUID())
 						&& MobDrops.mayHunt(m) && !ProtectionZones.isProtected(level, m.blockPosition()));
 		Mob best = null;
 		for (Mob m : mobs) {
@@ -306,8 +316,8 @@ final class HuntTask {
 		ServerLevel level = bot.level();
 		wayTo.clear();
 		for (Mob m : level.getEntitiesOfClass(Mob.class, bot.getBoundingBox().inflate(SCAN_RADIUS),
-				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID()) && MobDrops.mayHunt(m)
-						&& !ProtectionZones.isProtected(level, m.blockPosition()) && m.isUnderWater())) {
+				m -> sources.containsKey(m.getType()) && m.isAlive() && !rejected.contains(m.getUUID()) && !unreachable.contains(m.getUUID())
+						&& MobDrops.mayHunt(m) && !ProtectionZones.isProtected(level, m.blockPosition()) && m.isUnderWater())) {
 			wayTo.put(m, com.vale.helperbot.bot.Sight.attackSpot(bot, m));
 		}
 		List<com.vale.helperbot.path.PathGoal> goals = List.copyOf(wayTo.values());
@@ -340,9 +350,31 @@ final class HuntTask {
 		if (target != null) {
 			return lockOn(bot);
 		}
-		bot.log("水下的" + names().getString() + "到不了（" + wayTo.size() + " 只），不去");
-		bot.say(requester, Component.literal("附近水下的").append(names()).append("到不了（太深，一口气打不完，或者没有不用在水下挖的路），换地方找。有水下呼吸的话，深水也能去。"));
-		wayTo.keySet().forEach(m -> rejected.add(m.getUUID()));
+		// The way that digs was looked for to the nearest: that one is out of reach, and so, most
+		// likely, is the rest of its pocket. The others, off in other directions, get their turn
+		// (they all used to be given up on with it, five squid on five sides of it).
+		Mob nearest = null;
+		for (Mob m : wayTo.keySet()) {
+			if (nearest == null || m.distanceToSqr(bot) < nearest.distanceToSqr(bot)) {
+				nearest = m;
+			}
+		}
+		int left = 0, out = 0;
+		for (Mob m : wayTo.keySet()) {
+			if (nearest != null && m.getType() == nearest.getType()
+					&& Math.abs(m.getBlockX() - nearest.getBlockX()) <= SAME_POCKET && Math.abs(m.getBlockY() - nearest.getBlockY()) <= SAME_POCKET
+					&& Math.abs(m.getBlockZ() - nearest.getBlockZ()) <= SAME_POCKET) {
+				unreachable.add(m.getUUID());
+				out++;
+			} else {
+				left++;
+			}
+		}
+		bot.log("水下最近的" + names().getString() + "到不了，连同它附近的共 " + out + " 只这一单不打"
+				+ (left > 0 ? "；还有 " + left + " 只在别处，接着试" : ""));
+		if (left == 0) {
+			bot.say(requester, Component.literal("附近水下的").append(names()).append("到不了（太深，一口气打不完，或者没有不用在水下挖的路），换地方找。有水下呼吸的话，深水也能去。"));
+		}
 		setPhase(Phase.FIND);
 		return BotTask.Status.RUNNING;
 	}
@@ -662,8 +694,9 @@ final class HuntTask {
 		// remembers is about the last target (a drop it couldn't get to), and every mob it picked
 		// after that was "out of reach" without a search, one after another, the lot.
 		if (aimedAt != null && bot.movement().provenFrom() != null) {
-			bot.log(target.getType().getDescription().getString() + " 到不了，换一只");
+			bot.log(target.getType().getDescription().getString() + " 到不了，这一单不再打它，换一只");
 			rejected.add(target.getUUID());
+			unreachable.add(target.getUUID());
 			target = null;
 			bot.movement().stop();
 			setPhase(Phase.FIND);
@@ -679,7 +712,7 @@ final class HuntTask {
 			}
 			bot.movement().workAtGoal(FIGHT_UNDERWATER_TICKS);
 			aimedAt = at;
-		} else if (near && (aimedAt == null || aimedAt.distSqr(at) > 4)) {
+		} else if (near && (aimedAt == null || aimedAt.distSqr(at) > 4) && !bot.movement().deciding()) {
 			bot.movement().retarget(inReach, at);
 			aimedAt = at;
 		}
