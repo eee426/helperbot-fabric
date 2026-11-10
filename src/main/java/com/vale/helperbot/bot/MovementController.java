@@ -556,6 +556,14 @@ public final class MovementController {
 				path = null;
 				return;
 			}
+			// Dug out the floor of a step straight down, and gravity took it down before the step
+			// itself did: it's where the step ends, so that step is done. (Taken for "fell off the
+			// path", every block of a shaft re-planned the whole way, a second each.)
+			if (path != null && index < path.size() && path.get(index).type() == PathStep.Type.DESCEND
+					&& !feet().equals(path.get(index).from()) && feet().equals(path.get(index).to())) {
+				nextStep();
+				return;
+			}
 			// Not where the next step starts (fell into a hole someone dug, got pushed...): the rest
 			// of this path no longer applies.
 			if (path != null && index < path.size() && !feet().equals(path.get(index).from())) {

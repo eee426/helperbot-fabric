@@ -370,6 +370,21 @@ public final class Scenarios {
 					return c.ticks() >= 50 * 20 ? Scenario.Outcome.pass("50 秒没挖开堤（拿不到也行，不能拿命换）") : null;
 				}),
 
+				new Scenario("DG1", "铁矿在正下方 13 格的实心石头里：一路往下挖，每挖一格不重新规划（玩家报告：每挖一块都说“不在这一步的起点”）", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(-2, Arena.SURFACE - 15, -2, 2, Arena.SURFACE - 1, 2, Blocks.STONE);
+					a.set(0, Arena.SURFACE - 14, 0, Blocks.IRON_ORE);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.BREAD, 8);
+					return new AcquireTask(me, Items.RAW_IRON, 1, Mode.NORMAL);
+				}, c -> {
+					long replans = c.log().lines().filter(l -> l.contains("不在这一步的起点")).count();
+					if (replans >= 3) {
+						return Scenario.Outcome.fail("挖下去的路上重新规划了 " + replans + " 次（每挖一格掉下去就当成离开了路线）");
+					}
+					return c.bot().getInventory().countItem(Items.RAW_IRON) >= 1 ? Scenario.Outcome.pass("挖到了，中途“不在起点”" + replans + " 次") : null;
+				}),
+
 				new Scenario("ST4", "同上，但手里一个能垫的方块都没有", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.DIRT);
 					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
