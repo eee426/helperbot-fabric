@@ -4,10 +4,12 @@
 #   scripts\run-scenarios.ps1 W -Repeat 5     the W scenes 5 times over, each on a fresh world,
 #                                             then a pass count per scene (scenes with chance in
 #                                             them, fish and drifting drops, need more than one run)
+#   scripts\run-scenarios.ps1 NE5 -Seed 1   a fixed world seed: the Nether (made from the seed alone)
+#                                             is then the one of a player's world with that seed
 #   scripts/run-scenarios.ps1 -Coverage       then gradlew coverageReport: build/reports/jacoco/coverageReport/html/index.html
 # The report is written to run\scenario-report.md (with -Repeat: run\repeat\report-N.md and
 # run\repeat\summary.md). Scenes: src\main\java\com\vale\helperbot\test\Scenarios.java
-param([string[]]$Only = @("all"), [int]$Repeat = 1, [switch]$Coverage)
+param([string[]]$Only = @("all"), [int]$Repeat = 1, [switch]$Coverage, [string]$Seed = "")
 
 $root = Split-Path -Parent $PSScriptRoot
 $run = Join-Path $root "run"
@@ -19,6 +21,7 @@ Set-Content -Encoding ascii (Join-Path $run "eula.txt") "eula=true"
 $flat = '{"layers":[{"block":"minecraft:bedrock","height":1},{"block":"minecraft:stone","height":100},{"block":"minecraft:dirt","height":3},{"block":"minecraft:grass_block","height":1}],"biome":"minecraft:plains","structure_overrides":[]}'
 @"
 online-mode=false
+level-seed=$Seed
 level-name=scenarios
 level-type=minecraft\:flat
 generator-settings=$($flat.Replace(':', '\:'))

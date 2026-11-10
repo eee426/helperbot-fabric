@@ -1541,6 +1541,105 @@ public final class Scenarios {
 					return null;
 				}, Scenarios::partialProgress),
 
+				// The same log, walking: a lava lake wider than the widest window, too few blocks to
+				// bridge it, the ground all round to dig for more.
+				new Scenario("PP2", "比 ±64 还宽的岩浆湖挡住 400 格外的目标，身上 2 块圆石：不在湖边来回走", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(8, Arena.SURFACE - 2, -100, 90, Arena.SURFACE - 1, 100, Blocks.LAVA); // 83 wide, 201 long, 2 deep
+					teleport(bot, a, 3, Arena.SURFACE, 0);
+					give(bot, Items.COBBLESTONE, 2);
+					give(bot, Items.BREAD, 16);
+					BlockPos far = a.at(400, Arena.SURFACE, 0);
+					return new com.vale.helperbot.bot.BotTask() {
+						private boolean sent;
+
+						@Override
+						public Status tick(BotPlayer b) {
+							if (!sent) {
+								sent = true;
+								b.movement().goTo(com.vale.helperbot.knowledge.Habitat.arrived(far, 16, com.vale.helperbot.knowledge.Habitat.Layer.ANY),
+										far, Mode.AGGRESSIVE, true);
+							}
+							var status = b.movement().status();
+							if (status == com.vale.helperbot.bot.MovementController.Status.FAILED) {
+								b.log("（场景）移动失败：" + b.movement().failReason());
+								return Status.FAILED;
+							}
+							return status == com.vale.helperbot.bot.MovementController.Status.ARRIVED ? Status.DONE : Status.RUNNING;
+						}
+
+						@Override
+						public void onEnd(BotPlayer b, Status status) {
+						}
+
+						@Override
+						public String describe() {
+							return "去 400 格外";
+						}
+					};
+				}, c -> {
+					int widest = c.logCount("±64 格，先走一段");
+					int x = c.bot().blockPosition().getX() - c.arena().origin.getX();
+					String seen = "最大窗口的半截路线 " + widest + " 次，现在 x=" + x + "，用了 " + c.ticks() / 20 + " 秒";
+					if (!c.bot().isAlive()) {
+						return Scenario.Outcome.fail("死了；" + seen);
+					}
+					if (x > 90) {
+						return Scenario.Outcome.pass("过了湖；" + seen);
+					}
+					if (widest >= 8) {
+						return Scenario.Outcome.fail("在湖边来回走；" + seen);
+					}
+					return c.ended() ? Scenario.Outcome.pass("停下来说明了原因（" + c.bot().lastTaskStatus() + "）；" + seen) : null;
+				}),
+
+				// The same, but a chasm instead of lava: over air it may bridge, so partial routes that
+				// run out of blocks half way across come back from every search.
+				new Scenario("PP3", "比 ±64 还宽的深沟挡住 400 格外的目标，身上 2 块圆石：不在沟边来回走", 3 * MINUTE, (a, bot, me) -> {
+					a.fill(7, 0, -100, 91, Arena.SURFACE - 1, 100, Blocks.BEDROCK); // walls and floor it can't dig through
+					a.fill(8, 1, -100, 90, Arena.SURFACE - 1, 100, Blocks.AIR); // 83 wide, 201 long, 40 deep
+					teleport(bot, a, 3, Arena.SURFACE, 0);
+					give(bot, Items.COBBLESTONE, 2);
+					give(bot, Items.BREAD, 16);
+					return farTrip(a.at(400, Arena.SURFACE, 0), Mode.NORMAL);
+				}, Scenarios::notPacingTheEdge),
+
+				// The player's world itself: run with -Seed -8287987321081270424 (新的世界 (2)), whose Nether this
+				// is, block for block as generated. From where the player found it (a fortress, by the log)
+				// towards the next one, with no blocks to build with.
+				new Scenario("NE5", "玩家的地狱（种子 -8287987321081270424）：从第一个要塞 -512, 51, 304 去 80, 16，身上没方块：不在悬崖边来回走", 5 * MINUTE, (a, bot, me) -> {
+					if (a.level.getSeed() != PLAYER_SEED) {
+						return null; // another Nether: nothing to rebuild (see the check)
+					}
+					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+					bot.teleportTo(nether, -511.5, 51.5, 304.5, Set.of(), 0, 0, true);
+					bot.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE, 20 * 600));
+					bot.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.RESISTANCE, 20 * 600, 4));
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.BREAD, 16);
+					return farTrip(new BlockPos(80, 38, 16), Mode.AGGRESSIVE);
+				}, c -> {
+					if (c.arena().level.getSeed() != PLAYER_SEED) {
+						return Scenario.Outcome.pass("跳过：要用 -Seed " + PLAYER_SEED + " 跑才是玩家那个地狱");
+					}
+					int widest = c.logCount("±64 格，先走一段");
+					BlockPos p = c.bot().blockPosition();
+					double gone = Math.sqrt(Math.pow(-512 - 80, 2) + Math.pow(304 - 16, 2))
+							- Math.sqrt(Math.pow(p.getX() - 80, 2) + Math.pow(p.getZ() - 16, 2));
+					String seen = String.format(java.util.Locale.ROOT, "最大窗口的半截路线 %d 次，在 %s %s，朝目标走近了 %.0f 格，用了 %d 秒",
+							widest, c.bot().level().dimension().identifier().getPath(), p.toShortString(), gone, c.ticks() / 20);
+					if (!c.bot().isAlive()) {
+						return Scenario.Outcome.fail("死了；" + seen);
+					}
+					if (gone > 250) {
+						return Scenario.Outcome.pass("走出去了；" + seen);
+					}
+					if (widest >= 8 && gone < 30) {
+						return Scenario.Outcome.fail("在原地来回走；" + seen);
+					}
+					return c.ended() ? Scenario.Outcome.pass("停下来说明了原因（" + c.bot().lastTaskStatus() + "）；" + seen) : null;
+				}),
+
 				new Scenario("W43", "要 4 块黏土：3 格深的水底有（浮在水面够得着），25 格外的岸上也有：去岸上", 4 * MINUTE, (a, bot, me) -> {
 					// Reachable from the surface, head out: no dives, but floating it mines 5x slower.
 					a.fill(6, 38, -3, 12, 40, 3, Blocks.WATER);
@@ -2121,6 +2220,57 @@ public final class Scenarios {
 		double said = search.progressBlocks();
 		String what = String.format(java.util.Locale.ROOT, "说近了 %.1f 格，返回的 %d 步走完近了 %.1f 格", said, steps.size(), real);
 		return Math.abs(said - real) < 0.01 ? Scenario.Outcome.pass(what) : Scenario.Outcome.fail(what);
+	}
+
+	/** The seed of the player's world 新的世界 (2), whose Nether NE5 walks (2026-11-09 log). */
+	private static final long PLAYER_SEED = -8287987321081270424L;
+
+	/** Off to {@code far} and nothing else; ends when the movement arrives or fails (and logs why). */
+	private static com.vale.helperbot.bot.BotTask farTrip(BlockPos far, Mode mode) {
+		return new com.vale.helperbot.bot.BotTask() {
+			private boolean sent;
+
+			@Override
+			public Status tick(BotPlayer b) {
+				if (!sent) {
+					sent = true;
+					b.movement().goTo(com.vale.helperbot.knowledge.Habitat.arrived(far, 16, com.vale.helperbot.knowledge.Habitat.Layer.ANY),
+							far, mode, true);
+				}
+				var status = b.movement().status();
+				if (status == com.vale.helperbot.bot.MovementController.Status.FAILED) {
+					b.log("（场景）移动失败：" + b.movement().failReason());
+					return Status.FAILED;
+				}
+				return status == com.vale.helperbot.bot.MovementController.Status.ARRIVED ? Status.DONE : Status.RUNNING;
+			}
+
+			@Override
+			public void onEnd(BotPlayer b, Status status) {
+			}
+
+			@Override
+			public String describe() {
+				return "去远处";
+			}
+		};
+	}
+
+	/** Across the obstacle from x=8 to x=90, or stopped saying why; not pacing its edge with partial routes from the widest window. */
+	private static Scenario.Outcome notPacingTheEdge(Scenario.Context c) {
+		int widest = c.logCount("±64 格，先走一段");
+		int x = c.bot().blockPosition().getX() - c.arena().origin.getX();
+		String seen = "最大窗口的半截路线 " + widest + " 次，现在 x=" + x + "，用了 " + c.ticks() / 20 + " 秒";
+		if (!c.bot().isAlive()) {
+			return Scenario.Outcome.fail("死了；" + seen);
+		}
+		if (x > 90) {
+			return Scenario.Outcome.pass("过去了；" + seen);
+		}
+		if (widest >= 8) {
+			return Scenario.Outcome.fail("在边上来回走；" + seen);
+		}
+		return c.ended() ? Scenario.Outcome.pass("停下来说明了原因（" + c.bot().lastTaskStatus() + "）；" + seen) : null;
 	}
 
 	/** Is there really nowhere to mine it from? Null if so, otherwise where. */
