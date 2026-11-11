@@ -59,7 +59,7 @@ public final class MineSpot {
 	 * again, breath after breath, with a planner that could find nowhere to mine it from.
 	 */
 	public static boolean isSpot(BlockGetter level, BlockPos q, BlockPos p, Vec3 center, double reach, double eyeHeight, boolean mustSee) {
-		Vec3 eye = new Vec3(q.getX() + 0.5, q.getY() + eyeHeight, q.getZ() + 0.5);
+		Vec3 eye = eyeAt(level, q, eyeHeight);
 		return !q.equals(p) && eye.distanceTo(center) <= reach && !Double.isNaN(LocalPathfinder.floorHeight(level, q))
 				&& !ProtectionZones.isProtected(level, q) && (!mustSee || blockerOf(level, eye, p) == null);
 	}
@@ -107,13 +107,25 @@ public final class MineSpot {
 	 * A spot to mine {@code block} from: within reach, not in a protected chunk, if {@code mustSee}
 	 * with it in sight, and if {@code headOut} with the head out of the water.
 	 */
+	/**
+	 * Where the eye is, standing with the feet in {@code q}: over the floor it really stands on there,
+	 * not the cell's bottom. On a dirt path (its top 15/16 up the cell) the eye is nearly a block higher
+	 * than the cell's bottom says: an ore two down and two along was in reach by the plan (3.86) and out
+	 * of it for the mining (4.63), which sent it back to the plan, which said it was there, every tick,
+	 * for minutes. Where it can't stand (water), the cell's bottom.
+	 */
+	public static Vec3 eyeAt(BlockGetter level, BlockPos q, double eyeHeight) {
+		double floor = LocalPathfinder.floorHeight(level, q);
+		return new Vec3(q.getX() + 0.5, (Double.isNaN(floor) ? q.getY() : floor) + eyeHeight, q.getZ() + 0.5);
+	}
+
 	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee, boolean headOut) {
 		Vec3 center = Vec3.atCenterOf(block);
 		return (w, p) -> {
 			if (p.equals(block) || ProtectionZones.isProtected(w, p)) {
 				return false;
 			}
-			Vec3 eye = new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5);
+			Vec3 eye = eyeAt(w, p, eyeHeight);
 			return eye.distanceTo(center) <= reach && (!mustSee || blockerOf(w, eye, block) == null)
 					&& (!headOut || Air.breathable(w, p));
 		};

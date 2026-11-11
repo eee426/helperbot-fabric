@@ -44,6 +44,6 @@ public final class Sight {
 		double reach = bot.entityInteractionRange() - 0.3;
 		// Not from inside a protected chunk: it's a ghost there and can't hit anything.
 		return (w, p) -> !com.vale.helperbot.guard.ProtectionZones.isProtected(w, p)
-				&& canHitFrom(w, new Vec3(p.getX() + 0.5, p.getY() + eyeHeight, p.getZ() + 0.5), box, targetEye, reach);
+				&& canHitFrom(w, com.vale.helperbot.path.MineSpot.eyeAt(w, p, eyeHeight), box, targetEye, reach);
 	}
 }

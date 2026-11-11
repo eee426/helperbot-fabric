@@ -685,15 +685,32 @@ public class GatherTask implements BotTask {
 		return Status.RUNNING;
 	}
 
+	/** Times in a row it was sent back to walk to a block it had just arrived at (see #mine). */
+	private int reachBounces;
+	private static final int MAX_REACH_BOUNCES = 3;
+
 	private Status mine(BotPlayer bot) {
 		ServerLevel level = bot.level();
 		Vec3 eye = bot.getEyePosition();
 		Vec3 center = Vec3.atCenterOf(current);
 		if (eye.distanceTo(center) > bot.blockInteractionRange()) {
+			// Just "arrived" and out of reach all the same, again and again: the plan's idea of where
+			// it can mine from isn't what the mining finds. A bug to fix there; here, said out loud and
+			// left, instead of going between the two without a word (it stood still for minutes so).
+			if (++reachBounces > MAX_REACH_BOUNCES) {
+				bot.log("异常：规划说站在这里够得着 " + current.toShortString() + "，实际差 "
+						+ String.format(java.util.Locale.ROOT, "%.2f", eye.distanceTo(center) - bot.blockInteractionRange())
+						+ " 格（机器人 " + String.format(java.util.Locale.ROOT, "%.2f, %.2f, %.2f", bot.getX(), bot.getY(), bot.getZ())
+						+ "）。这是 bug，请把这段日志发给开发者；先换下一个");
+				reachBounces = 0;
+				dropTarget(bot);
+				return nextTarget(bot);
+			}
 			goNear(bot, current);
 			phase = Phase.APPROACH;
 			return Status.RUNNING;
 		}
+		reachBounces = 0;
 		BlockPos blocker = MineSpot.blockerOf(level, eye, current);
 		if (blocker != null) {
 			return clearTheView(bot, blocker);

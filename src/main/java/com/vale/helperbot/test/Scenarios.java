@@ -444,6 +444,20 @@ public final class Scenarios {
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
+				// 2026-11-10 player's game: "正在挖 … 这一步已 0.0 秒" for minutes, nothing in the log. It stood on
+				// a dirt path (saved at y 62.9375), ore at one across, two down, two along. The plan's "within
+				// reach" put the eye on the cell's bottom (3.86 off: in reach), the mining on the path's top
+				// (4.63: out): "go there", "you're there", every tick.
+				new Scenario("RE1", "站在土径上（脚比格子底高 15/16），铁矿在斜下方：“够得着”规划和挖用同一个眼睛高度，不原地来回，挖到（玩家报告）", MINUTE, (a, bot, me) -> {
+					a.set(0, Arena.SURFACE, 0, Blocks.DIRT_PATH);
+					a.set(-1, Arena.SURFACE - 2, 2, Blocks.IRON_ORE);
+					// Buried (dirt over it): no line of sight to ask for, only how far.
+					bot.teleportTo(a.level, a.origin.getX() + 0.5, Arena.SURFACE + 0.9375, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.RAW_IRON, 1, Mode.NORMAL);
+				}, Scenario.has(Items.RAW_IRON, 1)),
+
 				new Scenario("SO1", "结构里有它的机会（开服时让游戏在内存里拼 100 次统计）：地狱疣在要塞里大多有，在堡垒里约四分之一（只查知识）", 20, (a, bot, me) -> {
 					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
 					var reg = nether.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.STRUCTURE);
