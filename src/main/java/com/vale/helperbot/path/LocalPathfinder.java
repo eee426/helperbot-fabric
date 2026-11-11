@@ -299,7 +299,7 @@ public final class LocalPathfinder implements Planner {
 			if (reachOnly && cell(node.pos)[bucket(node.air)] != node) {
 				continue; // a route with more air came along while this one waited
 			}
-			if (goal.test(level, node.pos) && airForWork(node)) {
+			if (goal.test(level, node.pos, node.floor) && airForWork(node)) {
 				result = reconstruct(node, true);
 				progress = (heuristic(origin) - heuristic(node.pos)) / walkCost;
 				return true;
@@ -508,9 +508,9 @@ public final class LocalPathfinder implements Planner {
 	 * Cells a route dug that the water has come into by the time it's further on: the world it plans
 	 * on still has the block (ice over a shallow sea bed, the bank of a lake), and taken for the dry
 	 * hole it would be anywhere else, the plan dug on down from there with its head "out of the water",
-	 * at full speed, while the bot floated in what the ice had turned into, five times slower, the
-	 * step ran out of time just before the block went, and it tried the next patch of ice, over and
-	 * over (player's report). The air rules already knew (see {@link #airAfter}); the cells around
+	 * into what the ice had turned into, where its next dig had the head under and the hand refused it,
+	 * and it tried the next patch of ice, over and over (player's report; with the steps' own way of
+	 * taking water for a block still there, see MovementController#executeStep). The air rules already knew (see {@link #airAfter}); the cells around
 	 * a node, what it may dig from there and how fast, didn't. Only the cells near the route's end are
 	 * kept: further back they don't touch what it does next.
 	 */
@@ -1077,8 +1077,7 @@ public final class LocalPathfinder implements Planner {
 	 * the feet in this cell (a full block, or a fence or wall half a block up into it), as a player
 	 * stands in water a block deep, else afloat. It used to be afloat whatever was under: a little
 	 * over the bottom of a shallow sea, never on the ground, it dug five times slower than planned and
-	 * couldn't dig down or build from there (player's report: ice broken over the sea bed turns into
-	 * water). Under something lower (a slab, a chest) the feet are down in that cell, not this one.
+	 * couldn't dig down or build from there. Under something lower (a slab, a chest) the feet are down in that cell, not this one.
 	 */
 	static double surfaceFeet(BlockGetter level, BlockPos c) {
 		BlockState in = level.getBlockState(c);

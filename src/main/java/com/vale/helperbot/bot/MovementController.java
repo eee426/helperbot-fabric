@@ -554,7 +554,7 @@ public final class MovementController {
 		}
 		boolean atStepBoundary = !stepStarted && breakIndex == 0 && hands.breaking() == null;
 		if (atStepBoundary) {
-			if (goal.test(bot.level(), feet())) {
+			if (goal.test(bot.level(), feet(), bot.getY())) {
 				// Arrived means at the middle of the cell, which is where plans and goals take it to
 				// stand (what it sees and reaches from there). Pushed or shuffled off it (after picking
 				// something up, say), it saw a block from the middle that was hidden from where it was.
@@ -1074,7 +1074,11 @@ public final class MovementController {
 		}
 		while (breakIndex < step.toBreak().size()) {
 			BlockPos pos = step.toBreak().get(breakIndex);
-			if (LocalPathfinder.isPassable(level, pos)) {
+			// Open is open, water too: ice broken over the ground turns into water, and the water
+			// beside it comes into a block dug out. Taken for a block still there, it hit the water,
+			// which never breaks, till the step timed out, then tried the next patch of ice, over and
+			// over (player's report: it stood on the shore "mining", not a crack in the dirt).
+			if (LocalPathfinder.isPassable(level, pos) || LocalPathfinder.isOpenWater(level, pos)) {
 				hands.abortBreaking();
 				breakIndex++;
 				hands.resetAttempts();

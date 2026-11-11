@@ -99,7 +99,7 @@ final class RouteSearch {
 			PathGoal original = c.goal;
 			BlockPos to = c.target;
 			double now = flatDistSq(from, to);
-			searchGoal = (w, p) -> original.test(w, p) || (exit.outside(w, p) && flatDistSq(p, to) < now);
+			searchGoal = PathGoal.atFloor((w, p, f) -> original.test(w, p, f) || (exit.outside(w, p) && flatDistSq(p, to) < now));
 		}
 		int radius = Math.min(reach, (c.bot.level().getServer().getPlayerList().getViewDistance() + 1) * 16);
 		LocalPathfinder.Limits last = LocalPathfinder.LEVELS[2];

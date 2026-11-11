@@ -115,20 +115,34 @@ public final class MineSpot {
 	 * for minutes. Where it can't stand (water), the cell's bottom.
 	 */
 	public static Vec3 eyeAt(BlockGetter level, BlockPos q, double eyeHeight) {
-		double floor = LocalPathfinder.floorHeight(level, q);
+		return eyeAt(level, q, Double.NaN, eyeHeight);
+	}
+
+	/** {@link #eyeAt(BlockGetter, BlockPos, double)} with the feet at {@code floor} in that cell, if known. */
+	public static Vec3 eyeAt(BlockGetter level, BlockPos q, double floor, double eyeHeight) {
+		if (Double.isNaN(floor)) {
+			floor = LocalPathfinder.floorHeight(level, q);
+		}
 		return new Vec3(q.getX() + 0.5, (Double.isNaN(floor) ? q.getY() : floor) + eyeHeight, q.getZ() + 0.5);
 	}
 
+	/**
+	 * In reach of {@code block} from there, at the height the feet are at (see PathGoal#test with a
+	 * floor). Where the bot is, that's where it really is: under water, left by the last move most of
+	 * a block over the cell's bottom (it doesn't sink while it works), it was "there" by the cell and a
+	 * kelp stalk the cell's bottom had in reach was just out of it from its real eye, three times, and
+	 * the stalk was given up (W31, about one run in four).
+	 */
 	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee, boolean headOut) {
 		Vec3 center = Vec3.atCenterOf(block);
-		return (w, p) -> {
+		return PathGoal.atFloor((w, p, floor) -> {
 			if (p.equals(block) || ProtectionZones.isProtected(w, p)) {
 				return false;
 			}
-			Vec3 eye = eyeAt(w, p, eyeHeight);
+			Vec3 eye = eyeAt(w, p, floor, eyeHeight);
 			return eye.distanceTo(center) <= reach && (!mustSee || blockerOf(w, eye, block) == null)
 					&& (!headOut || Air.breathable(w, p));
-		};
+		});
 	}
 
 	/**
