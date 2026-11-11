@@ -49,6 +49,8 @@ public class AcquireTask implements BotTask {
 	private final Map<java.util.UUID, Integer> shortOfBlocksMobs = new java.util.HashMap<>();
 	/** Structures a hunt has gone to, the whole order long (see HuntTask). */
 	private final List<net.minecraft.core.BlockPos> structuresTried = new java.util.ArrayList<>();
+	/** For gathering: per item, the structures done with this order (see GatherTask#structuresDone). */
+	private final Map<Item, List<net.minecraft.core.BlockPos>> structuresDone = new java.util.HashMap<>();
 	private final Set<Item> planItems = new HashSet<>();
 	private final OutOfReach outOfReach = new OutOfReach();
 
@@ -245,6 +247,7 @@ public class AcquireTask implements BotTask {
 			unreachableMobs.clear();
 			shortOfBlocksMobs.clear();
 			structuresTried.clear();
+			structuresDone.clear();
 			lastFailure = null;
 			lastAction = null;
 			repeats = 0;
@@ -340,7 +343,8 @@ public class AcquireTask implements BotTask {
 		switch (next) {
 			case CraftPlanner.Gather g -> {
 				gatherItem = g.item();
-				gather = new GatherTask(requester, g.item(), g.count(), mode, true, outOfReach, explorers);
+				gather = new GatherTask(requester, g.item(), g.count(), mode, true, outOfReach, explorers,
+						structuresDone.computeIfAbsent(g.item(), i -> new java.util.ArrayList<>()), null);
 				phase = Phase.GATHER;
 			}
 			case CraftPlanner.Hunt h -> {

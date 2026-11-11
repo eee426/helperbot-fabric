@@ -135,7 +135,12 @@ public class GatherTask implements BotTask {
 	}
 
 	GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode, boolean asStep, OutOfReach unreachable, Map<Item, Explorer> explorers) {
-		this(requester, item, wanted, mode, asStep, unreachable, explorers, null);
+		this(requester, item, wanted, mode, asStep, unreachable, explorers, new java.util.ArrayList<>(), null);
+	}
+
+	GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode, boolean asStep, OutOfReach unreachable, Map<Item, Explorer> explorers,
+			   Set<Block> onlyFrom) {
+		this(requester, item, wanted, mode, asStep, unreachable, explorers, new java.util.ArrayList<>(), onlyFrom);
 	}
 
 	/**
@@ -144,8 +149,10 @@ public class GatherTask implements BotTask {
 	 *                 it, it gathers near here only: when what's around runs out, it's done with what
 	 *                 it has, never off to explore.
 	 */
+	/** @param structuresDone see {@link #structuresDone}: the order's, for this item */
 	GatherTask(ServerPlayer requester, Item item, int wanted, Mode mode, boolean asStep, OutOfReach unreachable, Map<Item, Explorer> explorers,
-			   Set<Block> onlyFrom) {
+			   List<BlockPos> structuresDone, Set<Block> onlyFrom) {
+		this.structuresDone = structuresDone;
 		this.onlyFrom = onlyFrom;
 		this.unreachable = unreachable;
 		this.explorers = explorers;
@@ -464,12 +471,16 @@ public class GatherTask implements BotTask {
 		if (biomes.isEmpty()) {
 			// No biome generates it: the structures built with it, nearest first.
 			var built = com.vale.helperbot.knowledge.StructureIndex.holding(level, toolFor.keySet());
-			BlockPos at = structuresSeen.size() >= MAX_STRUCTURES ? null
-					: com.vale.helperbot.knowledge.StructureIndex.nearest(level, built, bot.blockPosition(), structuresSeen);
+			if (structureTrip != null) {
+				// Back to looking further after going there: nothing (more) to be had from it.
+				doneWith(bot, "那里没有（更多）能采的了");
+			}
+			BlockPos at = structuresDone.size() >= MAX_STRUCTURES ? null
+					: com.vale.helperbot.knowledge.StructureIndex.nearest(level, built, bot.blockPosition(), structuresDone);
 			if (at == null) {
 				return giveUp(bot, built.isEmpty() ? "附近已加载的区域里没有，也不知道该去哪找" : "去过的结构里都没找到");
 			}
-			structuresSeen.add(at);
+			structureTrip = at;
 			bot.say(requester, Component.literal("它在结构里才有，去 " + at.getX() + ", " + at.getZ() + " 找。"));
 			startTravel(bot, at);
 			return Status.RUNNING;
@@ -511,9 +522,25 @@ public class GatherTask implements BotTask {
 		return toolFor.keySet().stream().allMatch(b -> Guard.ofTheSea(b.defaultBlockState()));
 	}
 
-	/** Structures tried for what no biome has, and how many it tries. */
-	private final List<BlockPos> structuresSeen = new java.util.ArrayList<>();
+	/**
+	 * Structures done with for this item, the whole order long: got there and found none it could
+	 * take, or never got there (the way kept being blocked: a lava lake its windows couldn't see
+	 * round, say; maybe there's a way, but not one it finds). Not the ones it got some from: another
+	 * step may go back for more. It used to be this step's alone: a new step after a failed one went
+	 * back to the bastion it had just been through, then on to the one it couldn't reach, and round.
+	 * The next order starts afresh.
+	 */
+	private final List<BlockPos> structuresDone;
+	/** The structure it's on its way to or at, until it's done with it (see #doneWith). */
+	private BlockPos structureTrip;
+	/** Most structures tried for one item in an order. */
 	private static final int MAX_STRUCTURES = 3;
+
+	private void doneWith(BotPlayer bot, String why) {
+		bot.log("这一单不再去 " + structureTrip.getX() + ", " + structureTrip.getZ() + " 的结构找" + itemName().getString() + "（" + why + "）");
+		structuresDone.add(structureTrip);
+		structureTrip = null;
+	}
 
 	private boolean announcedExplore;
 	/** Set while on the way to one of the explorer's places (not the one trip further off). */
@@ -618,6 +645,9 @@ public class GatherTask implements BotTask {
 			phase = Phase.FIND;
 		} else if (status == MovementController.Status.FAILED || status == MovementController.Status.IDLE) {
 			if (++travelFailures > MAX_TRAVEL_FAILURES) {
+				if (structureTrip != null) {
+					doneWith(bot, "去不了，路上多次受阻");
+				}
 				return giveUp(bot, "路上多次受阻（" + bot.movement().failReason() + "）");
 			}
 			startTravel(bot, travelTarget);
