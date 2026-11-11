@@ -132,17 +132,69 @@ public final class MineSpot {
 	 * a block over the cell's bottom (it doesn't sink while it works), it was "there" by the cell and a
 	 * kelp stalk the cell's bottom had in reach was just out of it from its real eye, three times, and
 	 * the stalk was given up (W31, about one run in four).
+	 *
+	 * <p>And in sight: what's in the way is the route's last step, mined from there (see
+	 * PathGoal#toClear), so the plan answers for that too. With a face open to air or water
+	 * ({@code mustSee}) only from where it's already in sight: within reach isn't enough from the
+	 * bottom of a hole, with the floor in between. {@code tools}: what to mine one of those with.
 	 */
-	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee, boolean headOut) {
+	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee, boolean headOut,
+									 java.util.function.ToIntFunction<net.minecraft.world.level.block.state.BlockState> tools) {
 		Vec3 center = Vec3.atCenterOf(block);
-		return PathGoal.atFloor((w, p, floor) -> {
-			if (p.equals(block) || ProtectionZones.isProtected(w, p)) {
-				return false;
+		return new PathGoal() {
+			private boolean inReach(BlockGetter w, BlockPos p, Vec3 eye) {
+				return !p.equals(block) && !ProtectionZones.isProtected(w, p) && eye.distanceTo(center) <= reach
+						&& (!headOut || Air.breathable(w, p));
 			}
-			Vec3 eye = eyeAt(w, p, floor, eyeHeight);
-			return eye.distanceTo(center) <= reach && (!mustSee || blockerOf(w, eye, block) == null)
-					&& (!headOut || Air.breathable(w, p));
-		});
+
+			@Override
+			public boolean test(BlockGetter w, BlockPos p) {
+				return test(w, p, Double.NaN);
+			}
+
+			@Override
+			public boolean test(BlockGetter w, BlockPos p, double floor) {
+				Vec3 eye = eyeAt(w, p, floor, eyeHeight);
+				return inReach(w, p, eye) && blockerOf(w, eye, block) == null;
+			}
+
+			@Override
+			public java.util.List<BlockPos> toClear(BlockGetter w, BlockPos p, double floor) {
+				if (mustSee) {
+					return null;
+				}
+				Vec3 eye = eyeAt(w, p, floor, eyeHeight);
+				return inReach(w, p, eye) ? blockersOf(w, eye, block) : null;
+			}
+
+			@Override
+			public int toolFor(net.minecraft.world.level.block.state.BlockState state) {
+				return tools == null ? ANY_TOOL : tools.applyAsInt(state);
+			}
+		};
+	}
+
+	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee, boolean headOut) {
+		return reachGoal(block, reach, eyeHeight, mustSee, headOut, null);
+	}
+
+	/**
+	 * Every block in the line of sight from {@code eye} to {@code block}, nearest first: what
+	 * {@link #blockerOf} would find, one after another as each is mined.
+	 */
+	public static java.util.List<BlockPos> blockersOf(BlockGetter world, Vec3 eye, BlockPos block) {
+		Vec3 to = Vec3.atCenterOf(block);
+		java.util.List<BlockPos> found = new java.util.ArrayList<>(4);
+		BlockGetter.traverseBlocks(eye, to, found, (list, pos) -> {
+			if (pos.equals(block)) {
+				return Boolean.TRUE;
+			}
+			if (world.getBlockState(pos).getShape(world, pos).clip(eye, to, pos) != null) {
+				list.add(pos.immutable());
+			}
+			return null;
+		}, list -> Boolean.TRUE);
+		return found;
 	}
 
 	/**

@@ -1074,11 +1074,7 @@ public final class MovementController {
 		}
 		while (breakIndex < step.toBreak().size()) {
 			BlockPos pos = step.toBreak().get(breakIndex);
-			// Open is open, water too: ice broken over the ground turns into water, and the water
-			// beside it comes into a block dug out. Taken for a block still there, it hit the water,
-			// which never breaks, till the step timed out, then tried the next patch of ice, over and
-			// over (player's report: it stood on the shore "mining", not a crack in the dirt).
-			if (LocalPathfinder.isPassable(level, pos) || LocalPathfinder.isOpenWater(level, pos)) {
+			if (cleared(level, pos, step)) {
 				hands.abortBreaking();
 				breakIndex++;
 				hands.resetAttempts();
@@ -1089,7 +1085,11 @@ public final class MovementController {
 				replan("要挖的方块不允许挖：" + state.getBlock().getName().getString());
 				return;
 			}
-			mine(pos, state);
+			mine(pos, state, step.type() == PathStep.Type.MINE ? toolFor(state) : Hands.AUTO_TOOL);
+			return;
+		}
+		if (step.type() == PathStep.Type.MINE) {
+			nextStep(); // mined from where it stands: nowhere to go
 			return;
 		}
 		if (step.place() != null && !step.type().placesWhileMoving && !placed) {
@@ -1104,10 +1104,30 @@ public final class MovementController {
 		move(step);
 	}
 
-	private void mine(BlockPos pos, BlockState state) {
-		if (hands.mine(pos, state, Hands.AUTO_TOOL) == Hands.MineResult.FAILED) {
+	private void mine(BlockPos pos, BlockState state, int tool) {
+		if (hands.mine(pos, state, tool) == Hands.MineResult.FAILED) {
 			replan("挖不动 " + pos.toShortString());
 		}
+	}
+
+	/** What the goal would have one of its blocks in the way mined with (see PathGoal#toolFor). */
+	private int toolFor(BlockState state) {
+		int tool = goal == null ? PathGoal.ANY_TOOL : goal.toolFor(state);
+		return tool == PathGoal.ANY_TOOL ? Hands.AUTO_TOOL : tool;
+	}
+
+	/**
+	 * Nothing left to mine there. On the way: open enough to go through, or water (ice broken over
+	 * the ground turns into water, and the water beside a block dug out comes in: taken for a block
+	 * still there, it hit the water, which never breaks, till the step timed out, then tried the next
+	 * patch of ice, over and over; player's report, it stood on the shore "mining", not a crack in
+	 * the dirt). In the way of the eye (MINE): nothing there for it to hit, a flower included.
+	 */
+	private static boolean cleared(ServerLevel level, BlockPos pos, PathStep step) {
+		if (step.type() == PathStep.Type.MINE) {
+			return level.getBlockState(pos).getShape(level, pos).isEmpty();
+		}
+		return LocalPathfinder.isPassable(level, pos) || LocalPathfinder.isOpenWater(level, pos);
 	}
 
 	// ---- movement -----------------------------------------------------------------------
@@ -1163,7 +1183,9 @@ public final class MovementController {
 			PathStep.Type.ASCEND, WalkStep.INSTANCE,
 			PathStep.Type.DESCEND, WalkStep.INSTANCE,
 			PathStep.Type.PILLAR, PillarStep.INSTANCE,
-			PathStep.Type.WAIT, BreatheStep.INSTANCE));
+			PathStep.Type.WAIT, BreatheStep.INSTANCE,
+			// (Never moves: executeStep ends it once what it mines is gone.)
+			PathStep.Type.MINE, (m, step, ty) -> m.nextStep()));
 
 	private static StepExecutor executor(PathStep step) {
 		return EXECUTORS.get(step.type());

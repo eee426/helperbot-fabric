@@ -144,6 +144,8 @@ public final class LocalPathfinder implements Planner {
 		int blocks;
 		/** Cells near here this route dug that are water by now (see {@link Wet}). */
 		Wet wet;
+		/** Its last step is the work in place the goal asked for (see {@link #workHere}): reaching it is the end. */
+		boolean finished;
 
 		Node(BlockPos pos, double floor, double g, double h, Node parent, PathStep step, int air) {
 			this.pos = pos;
@@ -296,6 +298,14 @@ public final class LocalPathfinder implements Planner {
 				return false;
 			}
 			Node node = open.poll();
+			if (node.finished) {
+				if (airForWork(node)) {
+					result = reconstruct(node, true);
+					progress = (heuristic(origin) - heuristic(node.pos)) / walkCost;
+					return true;
+				}
+				continue;
+			}
 			if (reachOnly && cell(node.pos)[bucket(node.air)] != node) {
 				continue; // a route with more air came along while this one waited
 			}
@@ -323,6 +333,12 @@ public final class LocalPathfinder implements Planner {
 				break;
 			}
 			List<Candidate> steps = neighbours(node);
+			if (!reachOnly) {
+				List<BlockPos> clear = goal.toClear(level, node.pos, node.floor);
+				if (clear != null && !clear.isEmpty()) {
+					workHere(node, clear);
+				}
+			}
 			Candidate breath = breathe(node);
 			if (breath != null) {
 				steps.add(breath);
@@ -882,9 +898,21 @@ public final class LocalPathfinder implements Planner {
 
 	/** Every step out of {@code node}: each move the bot knows adds its own (see {@link Moves}). */
 	private List<Candidate> neighbours(Node node) {
+		List<Candidate> out = new ArrayList<>(16);
+		Move.From from = stance(node);
+		for (Move move : Moves.ALL) {
+			move.addSteps(this, node.pos, node.floor, from, out);
+		}
+		return out;
+	}
+
+	/**
+	 * What it can do from {@code node}, standing or afloat there: dig (and how fast), build. Sets
+	 * {@link #digsDry} for it.
+	 */
+	private Move.From stance(Node node) {
 		BlockPos p = node.pos;
 		double cur = node.floor;
-		List<Candidate> out = new ArrayList<>(16);
 		// Dug by the route and flooded since: water, whatever the world it plans on still has there (see Wet).
 		boolean flooded = Wet.has(node.wet, p);
 		boolean feetWet = flooded || isWater(level, p);
@@ -916,11 +944,78 @@ public final class LocalPathfinder implements Planner {
 		// Still in the water where it is, it may dig sideways as it always could from there (what
 		// it may mine is the hand's gate's to say: see Guard); only building and digging down need the floor.
 		// Mining in the water is five times slower unless it stands on something (vanilla).
-		Move.From from = new Move.From(feetWet && !standing ? 5 : 1, !ProtectionZones.isProtected(level, p), standing, feetWet);
-		for (Move move : Moves.ALL) {
-			move.addSteps(this, p, cur, from, out);
+		return new Move.From(feetWet && !standing ? 5 : 1, !ProtectionZones.isProtected(level, p), standing, feetWet);
+	}
+
+	/**
+	 * The goal's work in place from {@code node} (see PathGoal#toClear), as the route's last step,
+	 * held to every rule a dig on the way is: allowed, not by lava, with the head out of the water
+	 * when each block is mined (what's dug before it may have let the water in: see Wet), and in one
+	 * breath. Not its own floor: digging that out is a way down (DigDownMove), and it would no longer
+	 * stand where it reckoned to mine from. If it holds, the node with that step goes in the open set
+	 * like any other, at what it costs, and reaching it ends the search.
+	 *
+	 * <p>It was the gathering task's, after the route: each block in the way a job of its own, judged
+	 * on the world as it was then. Standing in shallow water over a buried block, it dug out its own
+	 * floor as "in the way", the shaft below filled with water, and the block was out of reach (IC2).
+	 */
+	private void workHere(Node node, List<BlockPos> clear) {
+		Move.From from = stance(node);
+		if (!from.canAct() || !(from.standing() || from.afloat())) {
+			return;
 		}
-		return out;
+		BlockPos p = node.pos;
+		BlockPos head = p.above();
+		Wet wet = node.wet;
+		List<BlockPos> breaks = new ArrayList<>(clear.size() + 2);
+		resetDig();
+		double cost = 0;
+		for (BlockPos b : clear) {
+			if (b.equals(p.below()) || b.equals(p) || b.equals(head) || nearLava(b)) {
+				return;
+			}
+			digsDry = !wet(head, wet);
+			if (passable(b)) {
+				// A flower, tall grass: nothing to walking, but in the way of the eye. Gone at a touch.
+				BlockState state = level.getBlockState(b);
+				if (!Guard.canBreak(level, b, state) || !digsDry && !Guard.ofTheSea(state)) {
+					return;
+				}
+				breaks.add(b);
+				continue;
+			}
+			int before = breaks.size();
+			double c = clearCost(b, breaks, from.digPenalty());
+			if (c < 0) {
+				return;
+			}
+			cost += c;
+			for (int i = before; i < breaks.size(); i++) {
+				BlockPos x = breaks.get(i);
+				if (floodsWhenDug(x, wet)) {
+					wet = new Wet(x, wet);
+					// Water spreads into the open cell of the head beside it, and falls into it from above.
+					if (x.equals(head.above()) || x.getY() == head.getY() && x.distManhattan(head) == 1) {
+						wet = new Wet(head, wet);
+					}
+				}
+			}
+		}
+		if (breaks.isEmpty()) {
+			return;
+		}
+		PathStep step = new PathStep(PathStep.Type.MINE, p, p, List.copyOf(breaks));
+		Candidate c = new Candidate(step, node.floor, cost, dugTicks());
+		int airLeft = airAfter(node, c, wet);
+		if (airLeft < 0) {
+			return;
+		}
+		Node done = new Node(p, node.floor, node.g + cost, 0, node, step, airLeft);
+		done.ticks = c.ticks();
+		done.blocks = node.blocks;
+		done.wet = wet;
+		done.finished = true;
+		open.add(done);
 	}
 
 	// ---- what moves ask of the search (see Planner) --------------------------------------

@@ -484,17 +484,8 @@ public final class Scenarios {
 					give(bot, Items.BREAD, 16);
 					WET[0] = false;
 					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
-				}, c -> {
-					// For now (see docs/BUGS.md): standing over the coal it digs out its own floor as "in the
-					// way", the shaft floods, and the coal is given up. Fine as long as nothing timed out.
-					if (c.logHas("比预计慢太多")) {
-						return Scenario.Outcome.fail("有一步超时");
-					}
-					if (c.bot().getInventory().countItem(Items.COAL) >= 1) {
-						return Scenario.Outcome.pass("拿到了");
-					}
-					return c.logHas("确定到不了") ? Scenario.Outcome.pass("放弃了这块（已知，等站在原地挖）") : c.ended() ? Scenario.Outcome.fail("没拿到也没放弃") : null;
-				}),
+				}, Scenario.has(Items.COAL, 1, c -> !(WET[0] |= c.bot().movement().headUnderwater()) && !c.logHas("比预计慢太多"),
+						"下水了，或者有一步超时")),
 
 				new Scenario("SO1", "结构里有它的机会（开服时让游戏在内存里拼 100 次统计）：地狱疣在要塞里大多有，在堡垒里约四分之一（只查知识）", 20, (a, bot, me) -> {
 					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
