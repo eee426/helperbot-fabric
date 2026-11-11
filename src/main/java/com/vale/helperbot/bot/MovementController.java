@@ -277,6 +277,7 @@ public final class MovementController {
 
 	public void stop() {
 		hands.abortBreaking();
+		work = null;
 		paused = false;
 		locked = false;
 		engaged = false;
@@ -306,6 +307,18 @@ public final class MovementController {
 	public Status status() {
 		return status;
 	}
+
+	/**
+	 * What the plan left to mine from where it arrived, in that order, for the goal to hold (see
+	 * PathGoal#toClear): checked by the search like every dig on the way, mined by the task (what with,
+	 * and what comes out of it, is the task's to say). Null if nothing, or not arrived.
+	 */
+	public List<BlockPos> work() {
+		return status == Status.ARRIVED ? work : null;
+	}
+
+	/** See {@link #work()}: the plan's, kept till another plan or destination. */
+	List<BlockPos> work;
 
 	public String failReason() {
 		return failReason;
@@ -554,7 +567,8 @@ public final class MovementController {
 		}
 		boolean atStepBoundary = !stepStarted && breakIndex == 0 && hands.breaking() == null;
 		if (atStepBoundary) {
-			if (goal.test(bot.level(), feet(), bot.getY())) {
+			// Where the plan leaves work to do (see work()) the goal holds once it's done: the route's end is the arrival.
+			if (goal.test(bot.level(), feet(), bot.getY()) || work != null && path != null && index >= path.size()) {
 				// Arrived means at the middle of the cell, which is where plans and goals take it to
 				// stand (what it sees and reaches from there). Pushed or shuffled off it (after picking
 				// something up, say), it saw a block from the middle that was hidden from where it was.
@@ -832,6 +846,7 @@ public final class MovementController {
 
 	void adopt(LocalPathfinder.Result result) {
 		path = result.steps();
+		work = result.work();
 		pathTicks = result.ticks();
 		pathAir = result.air();
 		stepBegan = bot.tickCount;
@@ -1074,7 +1089,11 @@ public final class MovementController {
 		}
 		while (breakIndex < step.toBreak().size()) {
 			BlockPos pos = step.toBreak().get(breakIndex);
-			if (cleared(level, pos, step)) {
+			// Open is open, water too: ice broken over the ground turns into water, and the water
+			// beside it comes into a block dug out. Taken for a block still there, it hit the water,
+			// which never breaks, till the step timed out, then tried the next patch of ice, over and
+			// over (player's report: it stood on the shore "mining", not a crack in the dirt).
+			if (LocalPathfinder.isPassable(level, pos) || LocalPathfinder.isOpenWater(level, pos)) {
 				hands.abortBreaking();
 				breakIndex++;
 				hands.resetAttempts();
@@ -1085,11 +1104,7 @@ public final class MovementController {
 				replan("要挖的方块不允许挖：" + state.getBlock().getName().getString());
 				return;
 			}
-			mine(pos, state, step.type() == PathStep.Type.MINE ? toolFor(state) : Hands.AUTO_TOOL);
-			return;
-		}
-		if (step.type() == PathStep.Type.MINE) {
-			nextStep(); // mined from where it stands: nowhere to go
+			mine(pos, state);
 			return;
 		}
 		if (step.place() != null && !step.type().placesWhileMoving && !placed) {
@@ -1104,30 +1119,10 @@ public final class MovementController {
 		move(step);
 	}
 
-	private void mine(BlockPos pos, BlockState state, int tool) {
-		if (hands.mine(pos, state, tool) == Hands.MineResult.FAILED) {
+	private void mine(BlockPos pos, BlockState state) {
+		if (hands.mine(pos, state, Hands.AUTO_TOOL) == Hands.MineResult.FAILED) {
 			replan("挖不动 " + pos.toShortString());
 		}
-	}
-
-	/** What the goal would have one of its blocks in the way mined with (see PathGoal#toolFor). */
-	private int toolFor(BlockState state) {
-		int tool = goal == null ? PathGoal.ANY_TOOL : goal.toolFor(state);
-		return tool == PathGoal.ANY_TOOL ? Hands.AUTO_TOOL : tool;
-	}
-
-	/**
-	 * Nothing left to mine there. On the way: open enough to go through, or water (ice broken over
-	 * the ground turns into water, and the water beside a block dug out comes in: taken for a block
-	 * still there, it hit the water, which never breaks, till the step timed out, then tried the next
-	 * patch of ice, over and over; player's report, it stood on the shore "mining", not a crack in
-	 * the dirt). In the way of the eye (MINE): nothing there for it to hit, a flower included.
-	 */
-	private static boolean cleared(ServerLevel level, BlockPos pos, PathStep step) {
-		if (step.type() == PathStep.Type.MINE) {
-			return level.getBlockState(pos).getShape(level, pos).isEmpty();
-		}
-		return LocalPathfinder.isPassable(level, pos) || LocalPathfinder.isOpenWater(level, pos);
 	}
 
 	// ---- movement -----------------------------------------------------------------------
@@ -1183,9 +1178,7 @@ public final class MovementController {
 			PathStep.Type.ASCEND, WalkStep.INSTANCE,
 			PathStep.Type.DESCEND, WalkStep.INSTANCE,
 			PathStep.Type.PILLAR, PillarStep.INSTANCE,
-			PathStep.Type.WAIT, BreatheStep.INSTANCE,
-			// (Never moves: executeStep ends it once what it mines is gone.)
-			PathStep.Type.MINE, (m, step, ty) -> m.nextStep()));
+			PathStep.Type.WAIT, BreatheStep.INSTANCE));
 
 	private static StepExecutor executor(PathStep step) {
 		return EXECUTORS.get(step.type());

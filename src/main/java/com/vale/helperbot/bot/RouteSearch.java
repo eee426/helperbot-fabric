@@ -240,6 +240,7 @@ final class RouteSearch {
 			if (result.steps().isEmpty()) {
 				c.status = MovementController.Status.ARRIVED;
 				c.path = null;
+				c.work = result.work();
 				return;
 			}
 			c.bot.log("规划出 " + result.steps().size() + " 步（全量，能到终点）");
@@ -437,6 +438,7 @@ final class RouteSearch {
 		if (result.reachesGoal() && result.steps().isEmpty()) {
 			c.status = MovementController.Status.ARRIVED; // it's already where the plan would have it
 			c.path = null;
+			c.work = result.work();
 			return;
 		}
 		if (result.steps().isEmpty()) {

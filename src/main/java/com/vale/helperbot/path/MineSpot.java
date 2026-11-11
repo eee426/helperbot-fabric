@@ -133,13 +133,12 @@ public final class MineSpot {
 	 * kelp stalk the cell's bottom had in reach was just out of it from its real eye, three times, and
 	 * the stalk was given up (W31, about one run in four).
 	 *
-	 * <p>And in sight: what's in the way is the route's last step, mined from there (see
+	 * <p>And in sight: what's in the way is planned with the route, to be mined from there (see
 	 * PathGoal#toClear), so the plan answers for that too. With a face open to air or water
 	 * ({@code mustSee}) only from where it's already in sight: within reach isn't enough from the
-	 * bottom of a hole, with the floor in between. {@code tools}: what to mine one of those with.
+	 * bottom of a hole, with the floor in between.
 	 */
-	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee, boolean headOut,
-									 java.util.function.ToIntFunction<net.minecraft.world.level.block.state.BlockState> tools) {
+	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee, boolean headOut) {
 		Vec3 center = Vec3.atCenterOf(block);
 		return new PathGoal() {
 			private boolean inReach(BlockGetter w, BlockPos p, Vec3 eye) {
@@ -164,18 +163,37 @@ public final class MineSpot {
 					return null;
 				}
 				Vec3 eye = eyeAt(w, p, floor, eyeHeight);
-				return inReach(w, p, eye) ? blockersOf(w, eye, block) : null;
-			}
-
-			@Override
-			public int toolFor(net.minecraft.world.level.block.state.BlockState state) {
-				return tools == null ? ANY_TOOL : tools.applyAsInt(state);
+				return inReach(w, p, eye) ? clearing(w, eye, block) : null;
 			}
 		};
 	}
 
-	public static PathGoal reachGoal(BlockPos block, double reach, double eyeHeight, boolean mustSee, boolean headOut) {
-		return reachGoal(block, reach, eyeHeight, mustSee, headOut, null);
+	/** How deep what's in the way of what's in the way is followed (see {@link #clearing}). */
+	private static final int CLEARING_DEPTH = 4;
+
+	/**
+	 * What to mine, in that order, for {@code block} to be in sight from {@code eye}: each block in
+	 * the way, after what's in the way of that one (its centre has to be in sight to be mined, and the
+	 * line to it isn't the line to the target: a corner of it in the way, the line to its middle goes
+	 * through another block). That other block wasn't in the list; mining went to it, found it wasn't
+	 * planned, planned again, got the same list, for three minutes (V1).
+	 */
+	public static java.util.List<BlockPos> clearing(BlockGetter world, Vec3 eye, BlockPos block) {
+		java.util.LinkedHashSet<BlockPos> order = new java.util.LinkedHashSet<>();
+		clearing(world, eye, block, order, 0);
+		return new java.util.ArrayList<>(order);
+	}
+
+	private static void clearing(BlockGetter world, Vec3 eye, BlockPos block, java.util.Set<BlockPos> order, int depth) {
+		for (BlockPos b : blockersOf(world, eye, block)) {
+			if (order.contains(b)) {
+				continue;
+			}
+			if (depth < CLEARING_DEPTH) {
+				clearing(world, eye, b, order, depth + 1);
+			}
+			order.add(b);
+		}
 	}
 
 	/**

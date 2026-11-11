@@ -2,7 +2,6 @@ package com.vale.helperbot.path;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockGetter;
-import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.List;
 
@@ -26,23 +25,13 @@ public interface PathGoal {
 
 	/**
 	 * Blocks to mine from there, standing still, for the goal to hold: what's between the eye and a
-	 * buried block (see MineSpot#reachGoal). The search makes them the route's last step (see
-	 * PathStep.Type.MINE) and holds that to every rule a dig on the way is held to. Null or empty:
-	 * no such work makes it the goal from there.
+	 * buried block (see MineSpot#reachGoal). The search holds them to every rule a dig on the way is
+	 * held to, and a route that ends there hands them over with it (see LocalPathfinder.Result#work):
+	 * whoever the goal is for mines them, the route doesn't. Null or empty: no such work makes it the
+	 * goal from there.
 	 */
 	default List<BlockPos> toClear(BlockGetter world, BlockPos feet, double floor) {
 		return null;
-	}
-
-	/** Any tool will do: the fastest (see Hands#AUTO_TOOL). */
-	int ANY_TOOL = -3;
-
-	/**
-	 * What to mine one of the {@link #toClear} blocks with: {@link #ANY_TOOL}, or a bag slot when it
-	 * matters what comes out of it (a block the task is after too, in the way of another).
-	 */
-	default int toolFor(BlockState state) {
-		return ANY_TOOL;
 	}
 
 	/** A goal that goes by the height of the feet (see {@link #test(BlockGetter, BlockPos, double)}). */
@@ -94,17 +83,6 @@ public interface PathGoal {
 				}
 				return null;
 			}
-
-			@Override
-			public int toolFor(BlockState state) {
-				for (PathGoal g : all) {
-					int tool = g.toolFor(state);
-					if (tool != ANY_TOOL) {
-						return tool;
-					}
-				}
-				return ANY_TOOL;
-			}
 		};
 	}
 
@@ -124,11 +102,6 @@ public interface PathGoal {
 			@Override
 			public List<BlockPos> toClear(BlockGetter world, BlockPos feet, double floor) {
 				return goal.toClear(world, feet, floor);
-			}
-
-			@Override
-			public int toolFor(BlockState state) {
-				return goal.toolFor(state);
 			}
 		};
 	}

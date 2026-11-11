@@ -98,9 +98,13 @@ public final class LocalPathfinder implements Planner {
 	 * @param ticks for each step, the real time it should take (no preferences): the walker gives
 	 *              up on a step that takes far longer than this (see MovementController)
 	 */
-	/** {@code air}: the breath budget the plan expects on arriving at the end of each step (see Air). */
-	public record Result(List<PathStep> steps, boolean reachesGoal, List<Double> ticks, List<Integer> air) {
-		static final Result EMPTY = new Result(List.of(), false, List.of(), List.of());
+	/**
+	 * {@code air}: the breath budget the plan expects on arriving at the end of each step (see Air).
+	 * {@code work}: what's to be mined from where it ends for the goal to hold, in that order (see
+	 * PathGoal#toClear), checked like the digs on the way; null if nothing.
+	 */
+	public record Result(List<PathStep> steps, boolean reachesGoal, List<Double> ticks, List<Integer> air, List<BlockPos> work) {
+		static final Result EMPTY = new Result(List.of(), false, List.of(), List.of(), null);
 	}
 
 	/**
@@ -144,8 +148,8 @@ public final class LocalPathfinder implements Planner {
 		int blocks;
 		/** Cells near here this route dug that are water by now (see {@link Wet}). */
 		Wet wet;
-		/** Its last step is the work in place the goal asked for (see {@link #workHere}): reaching it is the end. */
-		boolean finished;
+		/** The work in place the goal asked for from here, checked (see {@link #workHere}): reaching it is the end. */
+		List<BlockPos> work;
 
 		Node(BlockPos pos, double floor, double g, double h, Node parent, PathStep step, int air) {
 			this.pos = pos;
@@ -298,7 +302,7 @@ public final class LocalPathfinder implements Planner {
 				return false;
 			}
 			Node node = open.poll();
-			if (node.finished) {
+			if (node.work != null) {
 				if (airForWork(node)) {
 					result = reconstruct(node, true);
 					progress = (heuristic(origin) - heuristic(node.pos)) / walkCost;
@@ -864,13 +868,14 @@ public final class LocalPathfinder implements Planner {
 		for (int i = 0; i < partial.steps().size(); i++) {
 			if (partial.steps().get(i).place() != null) {
 				return i == 0 ? Result.EMPTY : new Result(new ArrayList<>(partial.steps().subList(0, i)), false,
-						new ArrayList<>(partial.ticks().subList(0, i)), new ArrayList<>(partial.air().subList(0, i)));
+						new ArrayList<>(partial.ticks().subList(0, i)), new ArrayList<>(partial.air().subList(0, i)), null);
 			}
 		}
 		return partial;
 	}
 
 	private static Result reconstruct(Node node, boolean reachesGoal) {
+		List<BlockPos> work = node.work;
 		List<PathStep> steps = new ArrayList<>();
 		List<Double> ticks = new ArrayList<>();
 		List<Integer> air = new ArrayList<>();
@@ -888,7 +893,7 @@ public final class LocalPathfinder implements Planner {
 			ticks = new ArrayList<>(ticks.subList(0, keep));
 			air = new ArrayList<>(air.subList(0, keep));
 		}
-		return new Result(steps, reachesGoal, ticks, air);
+		return new Result(steps, reachesGoal, ticks, air, work);
 	}
 
 	// ---- neighbours ---------------------------------------------------------------------
@@ -948,16 +953,19 @@ public final class LocalPathfinder implements Planner {
 	}
 
 	/**
-	 * The goal's work in place from {@code node} (see PathGoal#toClear), as the route's last step,
-	 * held to every rule a dig on the way is: allowed, not by lava, with the head out of the water
-	 * when each block is mined (what's dug before it may have let the water in: see Wet), and in one
-	 * breath. Not its own floor: digging that out is a way down (DigDownMove), and it would no longer
-	 * stand where it reckoned to mine from. If it holds, the node with that step goes in the open set
-	 * like any other, at what it costs, and reaching it ends the search.
+	 * The goal's work in place from {@code node} (see PathGoal#toClear), held to every rule a dig on
+	 * the way is: allowed, not by lava, with the head out of the water when each block is mined (what's
+	 * dug before it may have let the water in: see Wet), and in one breath. Not its own floor: digging
+	 * that out is a way down (DigDownMove), and it would no longer stand where it reckoned to mine
+	 * from. If it holds, a node for "there, with that done" goes in the open set at what it all costs,
+	 * and reaching it ends the search; the route ends where it stands, and the work goes with it
+	 * (Result#work) for whoever the goal is for to mine: what to mine it with and what comes out of it
+	 * is theirs to say, not the route's.
 	 *
-	 * <p>It was the gathering task's, after the route: each block in the way a job of its own, judged
-	 * on the world as it was then. Standing in shallow water over a buried block, it dug out its own
-	 * floor as "in the way", the shaft below filled with water, and the block was out of reach (IC2).
+	 * <p>It used to be planned by no one: the gathering task, after the route, took each block in the
+	 * way as it came, judged on the world as it was then. Standing in shallow water over a buried
+	 * block, it dug out its own floor as "in the way", the shaft below filled with water, and the
+	 * block was out of reach (IC2).
 	 */
 	private void workHere(Node node, List<BlockPos> clear) {
 		Move.From from = stance(node);
@@ -1004,17 +1012,17 @@ public final class LocalPathfinder implements Planner {
 		if (breaks.isEmpty()) {
 			return;
 		}
-		PathStep step = new PathStep(PathStep.Type.MINE, p, p, List.copyOf(breaks));
-		Candidate c = new Candidate(step, node.floor, cost, dugTicks());
-		int airLeft = airAfter(node, c, wet);
-		if (airLeft < 0) {
+		// Its breath, as for a step that stays put and mines that (the same rules: see airAfter).
+		PathStep stay = new PathStep(PathStep.Type.WAIT, p, p, List.copyOf(breaks));
+		if (airAfter(node, new Candidate(stay, node.floor, cost, dugTicks()), wet) < 0) {
 			return;
 		}
-		Node done = new Node(p, node.floor, node.g + cost, 0, node, step, airLeft);
-		done.ticks = c.ticks();
+		// The same place, the same way there, with the work done: a twin of the node.
+		Node done = new Node(p, node.floor, node.g + cost, 0, node.parent, node.step, node.air);
+		done.ticks = node.ticks;
 		done.blocks = node.blocks;
-		done.wet = wet;
-		done.finished = true;
+		done.wet = node.wet;
+		done.work = List.copyOf(breaks);
 		open.add(done);
 	}
 
