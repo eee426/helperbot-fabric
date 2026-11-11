@@ -46,6 +46,8 @@ public class HelperBot implements ModInitializer {
 			warmUp(server);
 		});
 
+		ServerLifecycleEvents.SERVER_STOPPING.register(server -> com.vale.helperbot.knowledge.StructureOdds.stop());
+
 		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
 			ProtectionZones.load(server);
 			com.vale.helperbot.guard.Restrictions.load(server);
@@ -54,9 +56,19 @@ public class HelperBot implements ModInitializer {
 			BiomeHints.biomesFor(server.overworld(), java.util.List.of()); // reads every world-gen feature once
 			com.vale.helperbot.knowledge.StructureIndex.warmUp(server.overworld());
 			com.vale.helperbot.knowledge.Interactions.warmUp(server.overworld());
+			// How likely each structure is to have what it can have: read from the world's data folder,
+			// or built in the background; no orders until then (see BotCommands).
+			com.vale.helperbot.knowledge.StructureOdds.start(server);
 			LOGGER.info("HelperBot drop, recipe, mob and biome indexes built in {} ms", (System.nanoTime() - start) / 1_000_000);
 			if (System.getenv("HELPERBOT_BENCH") != null) {
-				com.vale.helperbot.knowledge.PlanBench.run(server);
+				// Once the structure odds are there, as the bot itself waits for them (see StructureOdds).
+				boolean[] ran = {false};
+				net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register(s -> {
+					if (!ran[0] && com.vale.helperbot.knowledge.StructureOdds.ready()) {
+						ran[0] = true;
+						com.vale.helperbot.knowledge.PlanBench.run(s);
+					}
+				});
 			}
 			com.vale.helperbot.test.ScenarioRunner.startIfRequested(server);
 			if (Rules.open()) {

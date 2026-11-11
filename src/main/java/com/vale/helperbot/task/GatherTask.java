@@ -476,7 +476,9 @@ public class GatherTask implements BotTask {
 				doneWith(bot, "那里没有（更多）能采的了");
 			}
 			BlockPos at = structuresDone.size() >= MAX_STRUCTURES ? null
-					: com.vale.helperbot.knowledge.StructureIndex.nearest(level, built, bot.blockPosition(), structuresDone);
+					// Not just the nearest: the best by distance over the chance one has it (a bastion has
+					// nether wart one time in four, a fortress nine in ten; see StructureOdds).
+					: com.vale.helperbot.knowledge.StructureOdds.nearestWorthIt(level, built, toolFor.keySet(), bot.blockPosition(), structuresDone);
 			if (at == null) {
 				return giveUp(bot, built.isEmpty() ? "附近已加载的区域里没有，也不知道该去哪找" : "去过的结构里都没找到");
 			}

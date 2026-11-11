@@ -674,7 +674,9 @@ public final class CraftPlanner {
 				if (!quiet) problems.add(Component.literal("附近没有").append(name(item)).append("，也不知道该去哪找"));
 				return Double.NaN;
 			}
-			return ticks(nowhere ? StructureIndex.typicalDistance(level, built) : TRIP_BLOCKS) + Math.ceil(n / Math.max(1e-3, gatherRate(item))) * perSource(item);
+			// To a structure: as far as one that has it, by the chance one does (see StructureOdds).
+			return ticks(nowhere ? StructureOdds.typicalTrip(level, built, sourceBlocks.get(item)) : TRIP_BLOCKS)
+					+ Math.ceil(n / Math.max(1e-3, gatherRate(item))) * perSource(item);
 		}
 		int all = r.cost.length - 1;
 		for (int k = 1; k <= all; k++) {

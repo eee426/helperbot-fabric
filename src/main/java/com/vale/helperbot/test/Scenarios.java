@@ -444,6 +444,65 @@ public final class Scenarios {
 					return null;
 				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
 
+				new Scenario("SO1", "结构里有它的机会（开服时让游戏在内存里拼 100 次统计）：地狱疣在要塞里大多有，在堡垒里约四分之一（只查知识）", 20, (a, bot, me) -> {
+					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+					var reg = nether.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.STRUCTURE);
+					java.util.function.Function<String, Double> odds = name -> com.vale.helperbot.knowledge.StructureOdds.share(nether,
+							reg.get(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.STRUCTURE,
+									net.minecraft.resources.Identifier.withDefaultNamespace(name))).orElseThrow(), List.of(Blocks.NETHER_WART));
+					double fortress = odds.apply("fortress"), bastion = odds.apply("bastion_remnant");
+					PLAN_RESULT[1] = String.format(java.util.Locale.ROOT, "地狱疣：要塞 %.2f，堡垒 %.2f", fortress, bastion);
+					PLAN_RESULT[0] = fortress < 0.6 ? "要塞太少" : bastion < 0.1 || bastion > 0.45 ? "堡垒不像四分之一" : null;
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0] + "：" + PLAN_RESULT[1])),
+
+				new Scenario("SO2", "结构表存盘：写下来读得回；文件坏了、被删了都不用（重建），再写一次又好了（只查知识）", 20, (a, bot, me) -> {
+					var server = a.level.getServer();
+					var path = com.vale.helperbot.knowledge.StructureOdds.fileFor(server);
+					String why = null;
+					try {
+						if (!com.vale.helperbot.knowledge.StructureOdds.writeNow(server) || !com.vale.helperbot.knowledge.StructureOdds.fileReadable(server)) {
+							why = "写下来读不回";
+						} else if (java.nio.file.Files.exists(path.resolveSibling(path.getFileName() + ".tmp"))) {
+							why = "临时文件没收掉";
+						} else {
+							String whole = java.nio.file.Files.readString(path);
+							java.nio.file.Files.writeString(path, whole.substring(0, whole.length() / 2)); // cut off half way
+							if (com.vale.helperbot.knowledge.StructureOdds.fileReadable(server)) {
+								why = "写了一半的文件也拿来用了";
+							} else {
+								java.nio.file.Files.delete(path);
+								if (com.vale.helperbot.knowledge.StructureOdds.fileReadable(server)) {
+									why = "文件删了还说能用";
+								} else if (!com.vale.helperbot.knowledge.StructureOdds.writeNow(server) || !com.vale.helperbot.knowledge.StructureOdds.fileReadable(server)) {
+									why = "删了以后再写，读不回";
+								}
+							}
+						}
+					} catch (java.io.IOException e) {
+						why = e.toString();
+					}
+					PLAN_RESULT[0] = why;
+					PLAN_RESULT[1] = "写、读、写一半、删掉、再写，都对";
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
+				new Scenario("SO3", "资料没准备好时不接指令：/bot come 被拒绝、机器人不动；准备好以后同一条指令就接了", 20, (a, bot, me) -> {
+					var commands = a.level.getServer().getCommands();
+					com.vale.helperbot.knowledge.StructureOdds.holdBackForTest(true);
+					try {
+						commands.performPrefixedCommand(me.createCommandSourceStack(), "bot come");
+					} finally {
+						com.vale.helperbot.knowledge.StructureOdds.holdBackForTest(false);
+					}
+					boolean refused = bot.getTask() == null;
+					commands.performPrefixedCommand(me.createCommandSourceStack(), "bot come");
+					boolean taken = bot.getTask() != null;
+					PLAN_RESULT[0] = !refused ? "没准备好也接了" : !taken ? "准备好了也不接" : null;
+					PLAN_RESULT[1] = "没准备好时拒绝，好了以后接了";
+					return null;
+				}, c -> PLAN_RESULT[0] == null ? Scenario.Outcome.pass(PLAN_RESULT[1]) : Scenario.Outcome.fail(PLAN_RESULT[0])),
+
 				new Scenario("NE4", "在地狱一个基岩封死的空腔里，站在中间一格基岩上，底下是岩浆，身上没方块，要烈焰棒：说被困住了，不在几个要塞之间来回试（玩家报告）", 3 * MINUTE, (a, bot, me) -> {
 					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
 					BlockPos c0 = new BlockPos(0, 90, 2000);

@@ -21,6 +21,8 @@ Set-Content -Encoding ascii (Join-Path $run "eula.txt") "eula=true"
 $flat = '{"layers":[{"block":"minecraft:bedrock","height":1},{"block":"minecraft:stone","height":100},{"block":"minecraft:dirt","height":3},{"block":"minecraft:grass_block","height":1}],"biome":"minecraft:plains","structure_overrides":[]}'
 @"
 online-mode=false
+# No player joins: without this the server stops ticking after a minute (since 1.21).
+pause-when-empty-seconds=0
 level-seed=$Seed
 level-name=scenarios
 level-type=minecraft\:flat

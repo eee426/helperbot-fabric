@@ -176,7 +176,24 @@ public final class BotCommands {
 		return 1;
 	}
 
+	/**
+	 * What the game's data is turned into at start still being built (see StructureOdds): no
+	 * orders yet, so nothing is planned half-informed. Says so, with how far it's got; true then.
+	 * Looking at the bot (status, log), removing it and cancelling still work.
+	 */
+	private static boolean notReady(CommandContext<CommandSourceStack> ctx) {
+		if (com.vale.helperbot.knowledge.StructureOdds.ready()) {
+			return false;
+		}
+		ctx.getSource().sendFailure(Component.literal("机器人还在准备资料（" + com.vale.helperbot.knowledge.StructureOdds.progress()
+				+ "），第一次打开这个存档时要多等一会儿，好了以后再下指令。"));
+		return true;
+	}
+
 	private static int spawn(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+		if (notReady(ctx)) {
+			return 0;
+		}
 		ServerPlayer player = ctx.getSource().getPlayerOrException();
 		if (BotManager.get() != null) {
 			ctx.getSource().sendFailure(Component.literal("机器人已经在了。"));
@@ -231,6 +248,9 @@ public final class BotCommands {
 	}
 
 	private static int come(CommandContext<CommandSourceStack> ctx, Mode mode) throws CommandSyntaxException {
+		if (notReady(ctx)) {
+			return 0;
+		}
 		ServerPlayer player = ctx.getSource().getPlayerOrException();
 		BotPlayer bot = requireBot(ctx);
 		if (bot == null) {
@@ -241,6 +261,9 @@ public final class BotCommands {
 	}
 
 	private static int get(CommandContext<CommandSourceStack> ctx, int count, Mode mode) throws CommandSyntaxException {
+		if (notReady(ctx)) {
+			return 0;
+		}
 		ServerPlayer player = ctx.getSource().getPlayerOrException();
 		BotPlayer bot = requireBot(ctx);
 		if (bot == null) {
@@ -325,6 +348,9 @@ public final class BotCommands {
 	 * Everything else comes from the Overworld.
 	 */
 	private static int whereFrom(CommandContext<CommandSourceStack> ctx) {
+		if (notReady(ctx)) {
+			return 0;
+		}
 		var places = com.vale.helperbot.knowledge.WhereFrom.all(ctx.getSource().getServer());
 		StringBuilder n = new StringBuilder("n="), e = new StringBuilder(";e="), x = new StringBuilder(";x=");
 		places.forEach((item, place) -> {

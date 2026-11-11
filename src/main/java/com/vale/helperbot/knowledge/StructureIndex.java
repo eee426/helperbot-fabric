@@ -175,7 +175,7 @@ public final class StructureIndex {
 	}
 
 	/** The structures this level really generates (a flat world, or the other dimensions', don't count). */
-	private static Set<Holder<Structure>> present(ServerLevel level) {
+	static Set<Holder<Structure>> present(ServerLevel level) {
 		Set<Holder<Structure>> found = new HashSet<>();
 		for (Holder<StructureSet> set : level.getChunkSource().getGeneratorState().possibleStructureSets()) {
 			for (StructureSet.StructureSelectionEntry entry : set.value().structures()) {
@@ -379,6 +379,54 @@ public final class StructureIndex {
 	 * nether wart comes from, and with nothing known of it the bastion (one layout in four) was all
 	 * there was.
 	 */
+	/**
+	 * The same, piece by piece (the pieces' classes, as read from the code): every piece is nether
+	 * bricks and fences, and these add the rest. For the odds (see StructureOdds): which pieces a
+	 * fortress gets is the game's to draw.
+	 */
+	private static final Map<String, Set<Block>> FORTRESS_PIECES = Map.of(
+			"CastleCorridorStairsPiece", Set.of(net.minecraft.world.level.block.Blocks.NETHER_BRICK_STAIRS),
+			"CastleEntrance", Set.of(net.minecraft.world.level.block.Blocks.LAVA),
+			"CastleStalkRoom", Set.of(net.minecraft.world.level.block.Blocks.NETHER_BRICK_STAIRS,
+					net.minecraft.world.level.block.Blocks.SOUL_SAND, net.minecraft.world.level.block.Blocks.NETHER_WART));
+
+	/**
+	 * The blocks one piece of a generated structure puts down: what its saved form names (its
+	 * template and processor list, for a jigsaw or template piece; or blocks), or for the fortress,
+	 * by its piece (see FORTRESS_PIECES). Empty if it names nothing known (a piece other code
+	 * builds). For StructureOdds, off the server thread: it reads only what doesn't change, and
+	 * {@code cache} is the caller's own.
+	 */
+	static Set<Block> pieceBlocks(net.minecraft.world.level.levelgen.structure.StructurePiece piece,
+								  net.minecraft.world.level.levelgen.structure.pieces.StructurePieceSerializationContext context,
+								  Set<Identifier> templateIds, Map<Identifier, Set<Block>> cache) {
+		Set<Block> out = new HashSet<>();
+		if (piece.getClass().getName().contains("NetherFortressPieces")) {
+			out.add(net.minecraft.world.level.block.Blocks.NETHER_BRICKS);
+			out.add(net.minecraft.world.level.block.Blocks.NETHER_BRICK_FENCE);
+			out.addAll(FORTRESS_PIECES.getOrDefault(piece.getClass().getSimpleName(), Set.of()));
+			return out;
+		}
+		Set<Identifier> named = new HashSet<>();
+		collect(piece.createTag(context), named);
+		RegistryOps<JsonElement> ops = RegistryOps.create(JsonOps.INSTANCE, context.registryAccess());
+		var processors = context.registryAccess().lookupOrThrow(Registries.PROCESSOR_LIST);
+		for (Identifier id : named) {
+			out.addAll(cache.computeIfAbsent(id, i -> {
+				Set<Identifier> inside = templateIds.contains(i) ? read(context.structureTemplateManager(), i)
+						: processors.containsKey(i) ? ids(net.minecraft.world.level.levelgen.structure.templatesystem.StructureProcessorType.DIRECT_CODEC
+						.encodeStart(ops, processors.getValue(i)).result().map(JsonElement::toString).orElse(""))
+						: Set.of(i);
+				Set<Block> blocks = new HashSet<>();
+				for (Identifier b : inside) {
+					BuiltInRegistries.BLOCK.getOptional(b).filter(x -> !x.defaultBlockState().isAir()).ifPresent(blocks::add);
+				}
+				return blocks;
+			}));
+		}
+		return out;
+	}
+
 	private static final Set<Block> FORTRESS_BLOCKS = Set.of(
 			net.minecraft.world.level.block.Blocks.NETHER_BRICKS, net.minecraft.world.level.block.Blocks.NETHER_BRICK_FENCE,
 			net.minecraft.world.level.block.Blocks.NETHER_BRICK_STAIRS, net.minecraft.world.level.block.Blocks.SOUL_SAND,

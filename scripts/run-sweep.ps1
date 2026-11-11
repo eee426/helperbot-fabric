@@ -14,6 +14,8 @@ $properties = Join-Path $run "server.properties"
 $kept = if (Test-Path $properties) { Get-Content -Raw $properties } else { $null }
 @"
 online-mode=false
+# No player joins: without this the server stops ticking after a minute (since 1.21).
+pause-when-empty-seconds=0
 level-name=sweep
 level-seed=$Seed
 spawn-protection=0

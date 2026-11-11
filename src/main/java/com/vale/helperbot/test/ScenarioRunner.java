@@ -85,6 +85,9 @@ public final class ScenarioRunner {
 		if (index >= scenarios.size()) {
 			return;
 		}
+		if (!com.vale.helperbot.knowledge.StructureOdds.ready()) {
+			return; // like the bot, which takes no orders before (see StructureOdds)
+		}
 		ticks++;
 		switch (step) {
 			case WAIT -> {
