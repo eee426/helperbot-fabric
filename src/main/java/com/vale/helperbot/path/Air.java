@@ -7,6 +7,7 @@ import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodData;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.state.BlockState;
 
 /**
  * Breath as a resource, the one model everything under water uses: the planner (where may it
@@ -193,10 +194,17 @@ public final class Air {
 	/**
 	 * Mining slowdown with feet in {@code feet}: vanilla's 5x for not standing on anything. That goes
 	 * for floating at the surface too, head out: it used to count as dry land, so a block under 3 of
-	 * water looked as cheap as one on the shore. (With the head under, it doesn't mine: see Guard#ofTheSea.)
+	 * water looked as cheap as one on the shore. On the bottom of water a block deep, or on a block in
+	 * the water (a chest in a wreck), it stands: full speed. (With the head under, it doesn't mine:
+	 * see Guard#ofTheSea.)
 	 */
 	public static double digPenalty(BlockGetter level, BlockPos feet) {
-		return LocalPathfinder.isWater(level, feet) && !LocalPathfinder.isSupport(level, feet.below()) ? 5 : 1;
+		if (!LocalPathfinder.isWater(level, feet)) {
+			return 1;
+		}
+		BlockState in = level.getBlockState(feet);
+		boolean onBlock = !BlockTable.empty(in, level, feet) && LocalPathfinder.ground(in);
+		return onBlock || !Double.isNaN(LocalPathfinder.groundUnder(level, feet)) ? 1 : 5;
 	}
 
 	/** With feet in this cell (standing, or floating at the surface), is the head out of the water? */

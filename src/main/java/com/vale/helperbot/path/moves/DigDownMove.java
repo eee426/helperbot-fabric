@@ -54,7 +54,7 @@ final class DigDownMove implements Move {
 		} else if (pf.water(under) && pf.inWindow(under)) {
 			// Through the floor, into the water two down. Ice turns to water when broken, so the head
 			// is under; other blocks (packed ice) leave a hole, and it floats with its head in that.
-			double f = Escape.floodsWhenDug(pf.world(), below) ? under.getY() : under.getY() + LocalPathfinder.SWIM_FLOOR;
+			double f = Escape.floodsWhenDug(pf.world(), below) ? under.getY() : LocalPathfinder.swimHeight(pf.world(), under);
 			double ticks = down(pf, p) + Air.swimTicks(0, 1, 0);
 			out.add(new Candidate(new PathStep(PathStep.Type.DESCEND, p, under, breaks), f, ticks + dig, ticks + pf.dugTicks()));
 		}

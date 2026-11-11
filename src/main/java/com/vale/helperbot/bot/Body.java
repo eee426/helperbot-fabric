@@ -169,7 +169,8 @@ final class Body {
 				}
 				return;
 			}
-			double surface = f.getY() + LocalPathfinder.SWIM_FLOOR;
+			// Head out: on the bottom of water a block deep, as the plan has it, or afloat (see swimHeight).
+			double surface = LocalPathfinder.swimHeight(bot.level(), f);
 			double dy = Math.max(-SWIM_UP_SPEED, Math.min(SWIM_UP_SPEED, surface - bot.getY()));
 			if (dy < 0) {
 				moveDown(dy);

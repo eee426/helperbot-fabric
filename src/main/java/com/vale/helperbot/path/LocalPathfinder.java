@@ -142,6 +142,8 @@ public final class LocalPathfinder implements Planner {
 		BlockPos hole;
 		/** Building blocks left when it gets here: a route can't lay more than it has. */
 		int blocks;
+		/** Cells near here this route dug that are water by now (see {@link Wet}). */
+		Wet wet;
 
 		Node(BlockPos pos, double floor, double g, double h, Node parent, PathStep step, int air) {
 			this.pos = pos;
@@ -320,13 +322,14 @@ public final class LocalPathfinder implements Planner {
 			if (partial && expanded >= EARLY_STOP_MIN_NODES && atWindowEdge(closest.pos)) {
 				break;
 			}
-			List<Candidate> steps = neighbours(node.pos, node.floor);
+			List<Candidate> steps = neighbours(node);
 			Candidate breath = breathe(node);
 			if (breath != null) {
 				steps.add(breath);
 			}
 			for (Candidate c : steps) {
-				int airLeft = airAfter(node, c);
+				Wet wet = wetAfter(node, c.step());
+				int airLeft = airAfter(node, c, wet);
 				if (airLeft < 0) {
 					continue; // couldn't get back up from there in time
 				}
@@ -346,11 +349,13 @@ public final class LocalPathfinder implements Planner {
 						next.set(c.floor(), g, toGoal, node, c.step(), airLeft); // still waiting: just cheaper now
 						next.ticks = c.ticks();
 						next.blocks = blocks;
+						next.wet = wet;
 						open.decreased(next);
 					} else {
 						next = new Node(c.step().to(), c.floor(), g, toGoal, node, c.step(), airLeft);
 						next.ticks = c.ticks();
 						next.blocks = blocks;
+						next.wet = wet;
 						if (reachOnly) {
 							next.f += (air.full() - airLeft) * MOST_AIR_FIRST;
 						}
@@ -450,10 +455,10 @@ public final class LocalPathfinder implements Planner {
 		if (level instanceof Snapshot snap) {
 			sb.append("；").append(snap.describe());
 		}
-		List<Candidate> first = neighbours(origin, startNode.floor);
+		List<Candidate> first = neighbours(startNode);
 		int noAir = 0;
 		for (Candidate c : first) {
-			if (airAfter(startNode, c) < 0) {
+			if (airAfter(startNode, c, wetAfter(startNode, c.step())) < 0) {
 				noAir++;
 			}
 		}
@@ -500,6 +505,80 @@ public final class LocalPathfinder implements Planner {
 	}
 
 	/**
+	 * Cells a route dug that the water has come into by the time it's further on: the world it plans
+	 * on still has the block (ice over a shallow sea bed, the bank of a lake), and taken for the dry
+	 * hole it would be anywhere else, the plan dug on down from there with its head "out of the water",
+	 * at full speed, while the bot floated in what the ice had turned into, five times slower, the
+	 * step ran out of time just before the block went, and it tried the next patch of ice, over and
+	 * over (player's report). The air rules already knew (see {@link #airAfter}); the cells around
+	 * a node, what it may dig from there and how fast, didn't. Only the cells near the route's end are
+	 * kept: further back they don't touch what it does next.
+	 */
+	record Wet(BlockPos pos, Wet next) {
+		static boolean has(Wet w, BlockPos pos) {
+			for (; w != null; w = w.next) {
+				if (w.pos.equals(pos)) {
+					return true;
+				}
+			}
+			return false;
+		}
+	}
+
+	/** Further than this from where a route is, what it flooded is forgotten (see {@link Wet}). */
+	private static final int WET_KEPT = 4;
+
+	/** {@code from}'s flooded cells near where {@code step} ends, and those of its own that flood. */
+	private Wet wetAfter(Node from, PathStep step) {
+		if (step.toBreak().isEmpty() && from.wet == null) {
+			return null;
+		}
+		BlockPos to = step.to();
+		Wet kept = null;
+		boolean all = true;
+		for (Wet w = from.wet; w != null; w = w.next) {
+			if (Math.max(Math.abs(w.pos.getX() - to.getX()), Math.max(Math.abs(w.pos.getY() - to.getY()),
+					Math.abs(w.pos.getZ() - to.getZ()))) <= WET_KEPT) {
+				kept = new Wet(w.pos, kept);
+			} else {
+				all = false;
+			}
+		}
+		if (all) {
+			kept = from.wet; // nothing dropped: share it as it is
+		}
+		for (BlockPos b : step.toBreak()) {
+			if (floodsWhenDug(b, kept)) {
+				kept = new Wet(b, kept);
+			}
+		}
+		return kept;
+	}
+
+	/** {@link Escape#floodsWhenDug}, with what the route flooded itself as the water it is by then. */
+	private boolean floodsWhenDug(BlockPos b, Wet wet) {
+		if (Escape.floodsWhenDug(level, b) || Wet.has(wet, b.above())) {
+			return true;
+		}
+		for (Direction dir : Direction.Plane.HORIZONTAL) {
+			if (Wet.has(wet, b.relative(dir))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Water there, in the world or because the route let it in (see {@link Wet}). */
+	private boolean wet(BlockPos pos, Wet wet) {
+		return isWater(level, pos) || Wet.has(wet, pos);
+	}
+
+	/** {@link Air#breathable}, with what the route flooded itself. */
+	private boolean breathable(BlockPos feet, Wet wet) {
+		return Air.breathable(level, feet) && !Wet.has(wet, feet.above());
+	}
+
+	/**
 	 * Ticks to air from {@code feet}, as things stand, or by the hole the route itself opened: the
 	 * world it plans on still has that floor, and {@link Escape} would have it dug from below.
 	 */
@@ -512,11 +591,12 @@ public final class LocalPathfinder implements Planner {
 		return Math.min(way, Air.swimTicks(across, hole.getY() - feet.getY(), 0));
 	}
 
-	private int airAfter(Node from, Candidate c) {
+	/** @param wet the flooded cells once the step is taken (see {@link #wetAfter}) */
+	private int airAfter(Node from, Candidate c, Wet wet) {
 		BlockPos to = c.step().to();
 		boolean floods = false;
 		for (BlockPos b : c.step().toBreak()) {
-			if (Escape.floodsWhenDug(level, b)) {
+			if (Wet.has(wet, b)) {
 				floods = true;
 				break;
 			}
@@ -524,7 +604,7 @@ public final class LocalPathfinder implements Planner {
 		if (!air.limited()) {
 			return 0;
 		}
-		if (!floods && Air.breathable(level, to)) {
+		if (!floods && breathable(to, wet)) {
 			// Head out of the water: the breath comes back as it goes, at vanilla's pace, not all at once.
 			return (int) Math.min(air.full(), Math.max(0, from.air) + air.refill() * c.ticks());
 		}
@@ -535,7 +615,7 @@ public final class LocalPathfinder implements Planner {
 		// breath half way through, by the start's reckoning, on a step that ended fine).
 		BlockPos hole = holeAfter(from, c.step());
 		double way = c.step().toBreak().isEmpty() ? wayUp(to, hole) : Math.max(wayUp(to, hole), wayUp(from.pos, from.hole));
-		if (!c.step().toBreak().isEmpty() && Air.breathable(level, from.pos)) {
+		if (!c.step().toBreak().isEmpty() && breathable(from.pos, from.wet)) {
 			// Digging from where it can breathe (out of a dry mine, into the sea above it): if the water
 			// comes, that's the way back, which the world it plans on doesn't show as open yet.
 			way = Math.min(way, c.ticks());
@@ -555,7 +635,7 @@ public final class LocalPathfinder implements Planner {
 	 */
 	private Candidate breathe(Node node) {
 		// (A block for a head isn't air: it landed under ice just dug through, which the world here still has.)
-		if (!air.limited() || node.air >= air.full() || !Air.breathable(level, node.pos) || !passable(node.pos.above())) {
+		if (!air.limited() || node.air >= air.full() || !breathable(node.pos, node.wet) || !passable(node.pos.above())) {
 			return null;
 		}
 		double ticks = Math.ceil((air.full() - node.air) / air.refill());
@@ -568,7 +648,7 @@ public final class LocalPathfinder implements Planner {
 	 * how deep it lies says nothing of how long the way is from where the bot is.
 	 */
 	private boolean airForWork(Node node) {
-		return !air.limited() || air.workTicks() <= 0 || Air.breathable(level, node.pos)
+		return !air.limited() || air.workTicks() <= 0 || breathable(node.pos, node.wet)
 				|| Air.enough(node.air, wayUp(node.pos, node.hole), air.workTicks() + Air.PLAN_SLACK);
 	}
 
@@ -746,11 +826,6 @@ public final class LocalPathfinder implements Planner {
 		}
 	}
 
-	/** Mining from feet in {@code p}: slower floating. */
-	private double digPenalty(BlockPos p) {
-		return Air.digPenalty(level, p);
-	}
-
 	/** Ticks to fall {@code blocks} under vanilla gravity (0.08 blocks/tick²). */
 	public static double fallTicks(double blocks) {
 		return Math.sqrt(2 * blocks / 0.08);
@@ -805,9 +880,15 @@ public final class LocalPathfinder implements Planner {
 	/** The head is out of the water where the cell being gone through would dig from (see {@link #clearCost}). */
 	private boolean digsDry;
 
-	/** Every step out of {@code p}: each move the bot knows adds its own (see {@link Moves}). */
-	private List<Candidate> neighbours(BlockPos p, double cur) {
+	/** Every step out of {@code node}: each move the bot knows adds its own (see {@link Moves}). */
+	private List<Candidate> neighbours(Node node) {
+		BlockPos p = node.pos;
+		double cur = node.floor;
 		List<Candidate> out = new ArrayList<>(16);
+		// Dug by the route and flooded since: water, whatever the world it plans on still has there (see Wet).
+		boolean flooded = Wet.has(node.wet, p);
+		boolean feetWet = flooded || isWater(level, p);
+		boolean headWet = wet(p.above(), node.wet);
 		// In a protected chunk it's a ghost: it can pass through, but not dig or build from there.
 		// Digging and building assume we stand on a full block (or hold still in water).
 		// (On top of a fence it's standing too, half a block up: from there digging may be the only way off.)
@@ -815,9 +896,10 @@ public final class LocalPathfinder implements Planner {
 		// sand: the ground itself, see floorHeight). Only the bottom counted, so on a path at the
 		// bottom of a pit it wasn't standing, couldn't dig or build, and had no first step at all.
 		BlockState in = level.getBlockState(p);
-		double ground = BlockTable.empty(in, level, p) ? p.getY() : p.getY() + BlockTable.top(in, level, p);
+		boolean empty = flooded || BlockTable.empty(in, level, p);
+		double ground = empty ? p.getY() : p.getY() + BlockTable.top(in, level, p);
 		boolean standing = Math.abs(cur - ground) < ON_GROUND || Math.abs(cur - p.getY()) < ON_GROUND
-				|| (!isWater(level, p) && BlockTable.top(level.getBlockState(p.below()), level, p.below()) > 1 + 1e-6);
+				|| (!feetWet && BlockTable.top(level.getBlockState(p.below()), level, p.below()) > 1 + 1e-6);
 		// Where it really is, a height alone isn't a floor: sinking through water it passed whole
 		// heights, within ON_GROUND of each it was "standing", and bridged out of the water over a
 		// drop, against nothing, over and over till it drowned. So there it needs one under it.
@@ -825,15 +907,16 @@ public final class LocalPathfinder implements Planner {
 		// on, the heights are the plan's own: on what the plan stands, a block it puts down a step
 		// earlier among them, which the world doesn't have yet.)
 		boolean atStart = p.equals(origin) && cur == startNode.floor;
-		if ((atStart || isWater(level, p)) && standing && BlockTable.empty(in, level, p)) {
+		if ((atStart || feetWet) && standing && empty) {
 			BlockState under = level.getBlockState(p.below());
 			double top = BlockTable.empty(under, level, p.below()) ? 0 : BlockTable.top(under, level, p.below());
-			standing = top >= 1 - 1e-3 || (!isWater(level, p) && top > 1 + 1e-6);
+			standing = top >= 1 - 1e-3 || (!feetWet && top > 1 + 1e-6);
 		}
-		digsDry = !isWater(level, p.above());
+		digsDry = !headWet;
 		// Still in the water where it is, it may dig sideways as it always could from there (what
 		// it may mine is the hand's gate's to say: see Guard); only building and digging down need the floor.
-		Move.From from = new Move.From(digPenalty(p), !ProtectionZones.isProtected(level, p), standing, isWater(level, p));
+		// Mining in the water is five times slower unless it stands on something (vanilla).
+		Move.From from = new Move.From(feetWet && !standing ? 5 : 1, !ProtectionZones.isProtected(level, p), standing, feetWet);
 		for (Move move : Moves.ALL) {
 			move.addSteps(this, p, cur, from, out);
 		}
@@ -949,8 +1032,8 @@ public final class LocalPathfinder implements Planner {
 				// Fully under water. How deep it may go is up to its air (see Air), not a fixed limit.
 				return isOpenWater(level, c.above()) ? c.getY() : Double.NaN;
 			}
-			// Swimming at the surface, head out of the water.
-			base = c.getY() + SWIM_FLOOR;
+			// Head out of the water: on the bottom of water a block deep, or swimming at the surface.
+			base = surfaceFeet(level, c);
 		} else if (empty) {
 			double under = BlockTable.top(level.getBlockState(c.below()), level, c.below());
 			if (under > 1 + 1e-6 && BlockTable.clean(state)) {
@@ -966,7 +1049,7 @@ public final class LocalPathfinder implements Planner {
 		} else {
 			// A low block in the feet cell (slab, path, snow layer, carpet) is the ground itself.
 			double top = BlockTable.top(state, level, c);
-			if (top > 0.9375 + 1e-4 || !BlockTable.clean(state)) {
+			if (top > 0.9375 + 1e-4 || !ground(state)) {
 				return Double.NaN;
 			}
 			base = c.getY() + top;
@@ -986,7 +1069,49 @@ public final class LocalPathfinder implements Planner {
 
 	/** Feet height when swimming in water cell {@code c}: at the surface, or fully under. */
 	public static double swimHeight(BlockGetter level, BlockPos c) {
-		return isWater(level, c.above()) ? c.getY() : c.getY() + SWIM_FLOOR;
+		return isWater(level, c.above()) ? c.getY() : surfaceFeet(level, c);
+	}
+
+	/**
+	 * Feet height in water cell {@code c} with the head out of it: on what's under it if that holds
+	 * the feet in this cell (a full block, or a fence or wall half a block up into it), as a player
+	 * stands in water a block deep, else afloat. It used to be afloat whatever was under: a little
+	 * over the bottom of a shallow sea, never on the ground, it dug five times slower than planned and
+	 * couldn't dig down or build from there (player's report: ice broken over the sea bed turns into
+	 * water). Under something lower (a slab, a chest) the feet are down in that cell, not this one.
+	 */
+	static double surfaceFeet(BlockGetter level, BlockPos c) {
+		BlockState in = level.getBlockState(c);
+		if (!BlockTable.empty(in, level, c)) {
+			// A block in the water here (waterlogged): on it, if it's low enough to be the ground.
+			double top = BlockTable.top(in, level, c);
+			return top <= 0.9375 + 1e-4 && ground(in) ? c.getY() + top : c.getY() + SWIM_FLOOR;
+		}
+		double ground = groundUnder(level, c);
+		return Double.isNaN(ground) ? c.getY() + SWIM_FLOOR : ground;
+	}
+
+	/** Where the feet rest in {@code c} on the block under it, or NaN if that doesn't reach up into it. */
+	public static double groundUnder(BlockGetter level, BlockPos c) {
+		BlockPos b = c.below();
+		BlockState under = level.getBlockState(b);
+		if (!Worlds.loaded(level, b) || BlockTable.empty(under, level, b) || !ground(under)) {
+			return Double.NaN;
+		}
+		double top = BlockTable.top(under, level, b);
+		return top > 1 + 1e-6 ? c.getY() + top - 1 : top >= 1 - 1e-3 ? c.getY() : Double.NaN;
+	}
+
+	/**
+	 * May be stood on: nothing that hurts or that it must not step on. Water in it is no reason: a
+	 * chest in a wreck, a slab or stairs in the sea are waterlogged, and were taken for nothing to
+	 * stand on while the body stood on them all the same. (Lava never fills a block.)
+	 */
+	static boolean ground(BlockState state) {
+		if (BlockTable.clean(state)) {
+			return true;
+		}
+		return state.getFluidState().is(FluidTags.WATER) && !BlockTable.dangerous(state) && !Guard.isNoStep(state);
 	}
 
 	/** Water the bot can swim through: no collision, no bubble column or other hazard. */

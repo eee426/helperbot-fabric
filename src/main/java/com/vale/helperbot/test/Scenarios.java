@@ -458,6 +458,35 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.RAW_IRON, 1, Mode.NORMAL);
 				}, Scenario.has(Items.RAW_IRON, 1)),
 
+				new Scenario("IC1", "冻住的浅海：冰下面直接是泥土，煤埋在冰面下 9 格（玩家报告：挖开冰变成水，脚泡在水里挖得慢，快挖完就说太慢换一格，一格一格地挖冰）", 3 * MINUTE, (a, bot, me) -> {
+					// The grass layer is ice here: ice over a solid block turns into water when it's broken (vanilla).
+					a.fill(-15, Arena.SURFACE - 1, -15, 15, Arena.SURFACE - 1, 15, Blocks.ICE);
+					a.set(4, Arena.SURFACE - 10, 3, Blocks.COAL_ORE);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.STONE_SHOVEL, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					WET[0] = false;
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, Scenario.has(Items.COAL, 1, c -> !(WET[0] |= c.bot().movement().headUnderwater()) && c.logCount("比预计慢太多") <= 1,
+						"下水了，或者一步一步超时换地方")),
+
+				new Scenario("IC2", "一格深的浅水里有块含水的下半砖：站在水底或砖上挖，原版是着地的，正常速度，不说太慢", 2 * MINUTE, (a, bot, me) -> {
+					a.fill(-6, Arena.SURFACE - 1, -6, 6, Arena.SURFACE - 1, 6, Blocks.WATER);
+					a.set(0, Arena.SURFACE - 1, 0, Blocks.STONE_SLAB.defaultBlockState()
+							.setValue(net.minecraft.world.level.block.state.properties.BlockStateProperties.WATERLOGGED, true));
+					a.set(2, Arena.SURFACE - 4, 1, Blocks.COAL_ORE);
+					bot.teleportTo(a.level, a.origin.getX() + 0.5, Arena.SURFACE - 0.5, a.origin.getZ() + 0.5, Set.of(), 0, 0, true);
+					give(bot, Items.STONE_PICKAXE, 1);
+					give(bot, Items.STONE_SHOVEL, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					WET[0] = false;
+					return new AcquireTask(me, Items.COAL, 1, Mode.NORMAL);
+				}, Scenario.has(Items.COAL, 1, c -> !(WET[0] |= c.bot().movement().headUnderwater()) && !c.logHas("比预计慢太多"),
+						"下水了，或者有一步超时")),
+
 				new Scenario("SO1", "结构里有它的机会（开服时让游戏在内存里拼 100 次统计）：地狱疣在要塞里大多有，在堡垒里约四分之一（只查知识）", 20, (a, bot, me) -> {
 					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
 					var reg = nether.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.STRUCTURE);
