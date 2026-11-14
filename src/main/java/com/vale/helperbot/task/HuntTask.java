@@ -58,15 +58,9 @@ final class HuntTask {
 	/** ...and at most this long for the night to come. */
 	private static final int NIGHT_WAIT = 12_000;
 	private static final int RESCAN_INTERVAL = 100;
-	/** Back off to heal below this health; resume at RESUME_HEALTH or after HEAL_MAX_TICKS. */
-	private static final float LOW_HEALTH = 8;
-	private static final float RESUME_HEALTH = 10;
-	private static final int HEAL_MAX_TICKS = 600;
-	/** After a wait that didn't work: on with the hunt for this long, or it would only wait again. */
-	private static final int HEAL_RETRY_TICKS = 1200;
 
 	private enum Phase {
-		FIND, LOCATE, EXPLORE, STRUCTURE, WAIT, WAY, CHASE, FETCH, HEAL
+		FIND, LOCATE, EXPLORE, STRUCTURE, WAIT, WAY, CHASE, FETCH
 	}
 
 	private final ServerPlayer requester;
@@ -167,21 +161,9 @@ final class HuntTask {
 			return fail(bot, "背包里没有" + CraftPlanner.name(use).getString());
 		}
 		phaseTicks++;
-		// Only stop to heal when health can come back (food at 18+, or something to eat): without
-		// food it just stood there doing nothing, for nothing.
-		if (healLater > 0) {
-			healLater--;
-		}
-		if (phase != Phase.HEAL && bot.getHealth() < LOW_HEALTH && healLater == 0) {
-			if (bot.canRegenerate()) {
-				bot.log("血量太低，先停下回血");
-				bot.movement().stop();
-				setPhase(Phase.HEAL);
-			} else if (!warnedNoFood) {
-				warnedNoFood = true;
-				bot.log("血量低但没有吃的，回不了血，继续（小心点）");
-			}
-		}
+		// No stopping to heal when hurt: health comes back walking as well (it's the food bar, 18 and
+		// up, and eating keeps it there, see BotPlayer#foodToEat), and standing there let a skeleton
+		// out of the fighting range shoot it till it died.
 		return switch (phase) {
 			case FIND -> find(bot);
 			case LOCATE -> locate(bot);
@@ -196,22 +178,8 @@ final class HuntTask {
 				}
 				yield BotTask.Status.RUNNING;
 			}
-			case HEAL -> {
-				if (phaseTicks > HEAL_MAX_TICKS) {
-					bot.log("等了 " + HEAL_MAX_TICKS / 20 + " 秒血也没回够，先继续打猎");
-					healLater = HEAL_RETRY_TICKS;
-					setPhase(Phase.FIND);
-				} else if (bot.getHealth() >= RESUME_HEALTH || !bot.canRegenerate()) {
-					setPhase(Phase.FIND);
-				}
-				yield BotTask.Status.RUNNING;
-			}
 		};
 	}
-
-	private boolean warnedNoFood;
-	/** Ticks until it may stop to heal again. */
-	private int healLater;
 
 	private void setPhase(Phase next) {
 		phase = next;
@@ -825,7 +793,6 @@ final class HuntTask {
 			case WAY -> "打猎（" + what + "）：算能不能到";
 			case CHASE -> "打猎（" + what + "）：追击 " + (target == null ? "?" : target.getType().getDescription().getString());
 			case FETCH -> "打猎（" + what + "）：捡地上的";
-			case HEAL -> "打猎（" + what + "）：血量低，回血中";
 		};
 	}
 

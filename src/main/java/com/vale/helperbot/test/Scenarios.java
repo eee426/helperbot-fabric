@@ -957,21 +957,14 @@ public final class Scenarios {
 					give(bot, Items.IRON_SWORD, 1);
 					a.spawn(EntityType.SHEEP, 6, Arena.SURFACE, 3);
 					return new AcquireTask(me, Items.MUTTON, 1, Mode.NORMAL);
-				}, Scenario.has(Items.MUTTON, 1, c -> !c.logHas("先停下回血"), "站着等回血了")),
+				}, Scenario.has(Items.MUTTON, 1, c -> !c.logHas("回血"), "站着等回血了")),
 
-				new Scenario("FD7", "打猎时等回血等不到：30 秒后接着打，不再回去等", 3 * MINUTE, (a, bot, me) -> {
+				new Scenario("FD7", "打猎时血很低、饥饿值 20（能回血）：不站着等回血，边走边回，接着打（站着会被射程外的远程怪一直射）", MINUTE, (a, bot, me) -> {
 					hungry(bot, 6, 20);
 					give(bot, Items.IRON_SWORD, 1);
 					a.spawn(EntityType.SHEEP, 6, Arena.SURFACE, 3);
 					return new AcquireTask(me, Items.MUTTON, 1, Mode.NORMAL);
-				}, c -> {
-					// Whatever it heals doesn't help, and healing doesn't use up the food it waits on.
-					c.bot().setHealth(6);
-					c.bot().getFoodData().setFoodLevel(20);
-					return c.logCount("先停下回血") > 1 ? Scenario.Outcome.fail("又回去等回血了")
-							: c.count(Items.MUTTON) < 1 ? (c.ended() ? Scenario.Outcome.fail("任务结束了") : null)
-							: c.logHas("血也没回够") ? Scenario.Outcome.pass("等满 30 秒后去打了") : Scenario.Outcome.fail("没等就去打了");
-				}),
+				}, Scenario.has(Items.MUTTON, 1, c -> !c.logHas("回血"), "站着等回血了")),
 
 				new Scenario("T22", "挖 10 个钻石：一处 4 个的矿堆要挖干净再去下一处", 8 * MINUTE, (a, bot, me) -> {
 					a.fill(5, -50, 5, 6, -50, 6, Blocks.DEEPSLATE_DIAMOND_ORE); // 4, the nearer vein

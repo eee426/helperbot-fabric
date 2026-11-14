@@ -697,14 +697,6 @@ public class BotPlayer extends ServerPlayer {
 		resetFallDistance();
 	}
 
-	/**
-	 * Can it get health back right now: food at 18 or more (vanilla regenerates then), or something
-	 * it would really eat to get there. Waiting to heal without either just wastes time.
-	 */
-	public boolean canRegenerate() {
-		return getFoodData().getFoodLevel() >= 18 || foodToEat() >= 0;
-	}
-
 	public void startTask(BotTask newTask) {
 		if (task != null) {
 			task.onEnd(this, BotTask.Status.CANCELLED);
