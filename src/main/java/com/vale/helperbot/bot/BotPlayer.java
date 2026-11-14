@@ -624,9 +624,8 @@ public class BotPlayer extends ServerPlayer {
 	}
 
 	/**
-	 * What it would eat right now, or -1: the one answer, for eating and for waiting to heal, so
-	 * the two can't disagree. (Waiting asked only whether there was any food, while eating turned
-	 * down an apple one point too big for the bar: it stood there at 17, waiting for nothing.)
+	 * What it would eat right now, or -1. (It once was asked by hunting too, which stopped to wait
+	 * for health to come back; that's gone: health comes back walking as well, on this food.)
 	 *
 	 * <p>It keeps enough to sprint (over 6), and when hurt 18 or more, so health regenerates. At
 	 * least three quarters of what it eats must count: the biggest such food. Too hungry to sprint,
