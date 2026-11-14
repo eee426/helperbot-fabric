@@ -400,12 +400,15 @@ final class HuntTask {
 			return BotTask.Status.RUNNING;
 		}
 		boolean monsters = !anyAnimals(level);
-		if (monsters && !waitedAlready && worth(level).getOrDefault(level.getBiome(bot.blockPosition()), 0.0) > 0) {
-			return startWait(bot); // they come to where it is: going anywhere won't bring more
+		int left = Math.max(1, wanted - (count(bot.getInventory()) - startCount));
+		// Monsters come to where it is: staying is a place too, weighed like the others (see Explorer#staying).
+		if (monsters && !waitedAlready && explorer.staying(level, bot.blockPosition(),
+				worth(level).getOrDefault(level.getBiome(bot.blockPosition()), 0.0), left)) {
+			return startWait(bot);
 		}
 		var owner = bot.current(requester);
 		BlockPos next = explorer.timeUp() ? null : explorer.next(level, bot.blockPosition(),
-				owner != null && owner.level() == level ? owner.blockPosition() : null, Math.max(1, wanted - (count(bot.getInventory()) - startCount)));
+				owner != null && owner.level() == level ? owner.blockPosition() : null, left);
 		if (next != null) {
 			if (!announcedExplore) {
 				announcedExplore = true;

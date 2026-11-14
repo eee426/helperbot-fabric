@@ -146,17 +146,10 @@ final class Explorer {
 	 * @param back where it will go when it's done, as far as it knows now (null: where it started)
 	 */
 	BlockPos next(ServerLevel level, BlockPos here, BlockPos back, int left) {
-		List<Spot> open = new ArrayList<>();
-		for (Spot s : map.getNow(List.of())) {
-			if (!seen.contains(key(s.gx, s.gz)) && !ProtectionZones.isProtected(level, place(s, here))) {
-				open.add(s);
-			}
-		}
-		double perPlace = 2.0 * sight / speed;
-		double chunksSeen = (2.0 * sight / 16) * (2.0 * sight / 16);
+		List<Spot> open = open(level, here);
 		double soonest = Double.MAX_VALUE, worth = 0;
 		for (Spot s : open) {
-			double ticks = Math.sqrt(place(s, here).distSqr(here)) / speed + left / (s.worth * chunksSeen) * perPlace;
+			double ticks = ticks(s, here, left);
 			if (ticks < soonest) {
 				soonest = ticks;
 				worth = s.worth;
@@ -176,6 +169,53 @@ final class Explorer {
 			}
 		}
 		return heading == null ? null : place(heading, here);
+	}
+
+	/**
+	 * Staying is a place to go too, with no walk to it: for monsters, which spawn round wherever it
+	 * is, worth {@code hereWorth} (the same measure as the places, see the task's worth). True if
+	 * staying gets {@code left} done no later than going to the best place not seen yet (see the
+	 * first question of {@link #next}). It used to stay wherever they could spawn at all, the
+	 * comparison never made: in the Nether wastes, endermen a hundredth of what spawns, it waited
+	 * there twice till it gave up, a warped forest, nearly all endermen, nearby.
+	 */
+	boolean staying(ServerLevel level, BlockPos here, double hereWorth, int left) {
+		if (hereWorth <= 0) {
+			return false;
+		}
+		double stay = left / (hereWorth * chunksSeen()) * perPlace();
+		for (Spot s : open(level, here)) {
+			if (ticks(s, here, left) < stay) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** Places not seen yet, and not in a protected chunk (nothing can be got there). */
+	private List<Spot> open(ServerLevel level, BlockPos here) {
+		List<Spot> open = new ArrayList<>();
+		for (Spot s : map.getNow(List.of())) {
+			if (!seen.contains(key(s.gx, s.gz)) && !ProtectionZones.isProtected(level, place(s, here))) {
+				open.add(s);
+			}
+		}
+		return open;
+	}
+
+	/** The walk there, and the walking to take in as many places as {@code left} more takes (see {@link #next}). */
+	private double ticks(Spot s, BlockPos here, int left) {
+		return Math.sqrt(place(s, here).distSqr(here)) / speed + left / (s.worth * chunksSeen()) * perPlace();
+	}
+
+	/** Ticks to walk on to the next place: across what it takes in from one. */
+	private double perPlace() {
+		return 2.0 * sight / speed;
+	}
+
+	/** Chunks it takes in from one place. */
+	private double chunksSeen() {
+		return (2.0 * sight / 16) * (2.0 * sight / 16);
 	}
 
 	private static double flatDistSq(BlockPos a, BlockPos b) {

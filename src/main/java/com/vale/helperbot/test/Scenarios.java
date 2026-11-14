@@ -1759,6 +1759,64 @@ public final class Scenarios {
 				// The player's world itself: run with -Seed -8287987321081270424 (新的世界 (2)), whose Nether this
 				// is, block for block as generated. From where the player found it (a fortress, by the log)
 				// towards the next one, with no blocks to build with.
+				new Scenario("NE6", "地狱里要末影珍珠，站在末影人很少刷的群系（下界荒地或灵魂沙峡谷），附近有诡异森林：去诡异森林，不原地等（玩家报告）", MINUTE, (a, bot, me) -> {
+					net.minecraft.server.level.ServerLevel nether = a.level.getServer().getLevel(net.minecraft.world.level.Level.NETHER);
+					java.util.function.Predicate<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> warped =
+							b -> b.is(net.minecraft.world.level.biome.Biomes.WARPED_FOREST);
+					java.util.function.Predicate<net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome>> poor =
+							b -> b.is(net.minecraft.world.level.biome.Biomes.NETHER_WASTES) || b.is(net.minecraft.world.level.biome.Biomes.SOUL_SAND_VALLEY);
+					var forest = nether.findClosestBiome3d(warped, new BlockPos(0, 64, 0), 2000, 32, 32);
+					var start = forest == null ? null : nether.findClosestBiome3d(poor, forest.getFirst(), 400, 8, 16);
+					PLAN_RESULT[0] = forest == null ? "2000 格内没有诡异森林" : start == null ? "诡异森林旁边没有下界荒地或灵魂沙峡谷" : null;
+					if (PLAN_RESULT[0] != null) {
+						return null;
+					}
+					// Somewhere to stand there, in that biome.
+					BlockPos at = null;
+					BlockPos c0 = start.getFirst();
+					search:
+					for (int r = 0; r <= 24; r += 4) {
+						for (int dx = -r; dx <= r; dx += 4) {
+							for (int dz = -r; dz <= r; dz += 4) {
+								nether.getChunk((c0.getX() + dx) >> 4, (c0.getZ() + dz) >> 4); // generated and loaded
+								for (int y = 110; y > 32; y--) {
+									BlockPos q = new BlockPos(c0.getX() + dx, y, c0.getZ() + dz);
+									if (!Double.isNaN(com.vale.helperbot.path.LocalPathfinder.floorHeight(nether, q)) && poor.test(nether.getBiome(q))
+											&& !nether.getBlockState(q.below()).is(Blocks.LAVA)) {
+										at = q;
+										break search;
+									}
+								}
+							}
+						}
+					}
+					if (at == null) {
+						PLAN_RESULT[0] = "那一片没有能站的地方";
+						return null;
+					}
+					PLAN_RESULT[1] = nether.getBiome(at).unwrapKey().map(k -> k.identifier().getPath()).orElse("?") + " " + at.toShortString()
+							+ "，诡异森林在 " + forest.getFirst().toShortString();
+					bot.teleportTo(nether, at.getX() + 0.5, at.getY(), at.getZ() + 0.5, Set.of(), 0, 0, true);
+					bot.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.FIRE_RESISTANCE, 20 * 600));
+					bot.addEffect(new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.RESISTANCE, 20 * 600, 4));
+					give(bot, Items.IRON_SWORD, 1);
+					give(bot, Items.IRON_PICKAXE, 1);
+					give(bot, Items.COBBLESTONE, 64);
+					give(bot, Items.BREAD, 16);
+					return new AcquireTask(me, Items.ENDER_PEARL, 4, Mode.NORMAL);
+				}, c -> {
+					if (PLAN_RESULT[0] != null) {
+						return Scenario.Outcome.fail(PLAN_RESULT[0]);
+					}
+					if (c.logHas("在这里等它们刷出来")) {
+						return Scenario.Outcome.fail("原地等末影人（" + PLAN_RESULT[1] + "）");
+					}
+					if (c.logHas("找（warped_forest）") || c.logHas("盯上了 末影人")) {
+						return Scenario.Outcome.pass("去找了（" + PLAN_RESULT[1] + "）");
+					}
+					return c.ended() ? Scenario.Outcome.fail("没去找就结束了（" + PLAN_RESULT[1] + "）") : null;
+				}),
+
 				new Scenario("NE5", "玩家的地狱（种子 -8287987321081270424）：从第一个要塞 -512, 51, 304 去 80, 16，身上没方块：不在悬崖边来回走", 5 * MINUTE, (a, bot, me) -> {
 					if (a.level.getSeed() != PLAYER_SEED) {
 						return null; // another Nether: nothing to rebuild (see the check)
