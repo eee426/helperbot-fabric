@@ -184,6 +184,27 @@ public final class Scenarios {
 					return new AcquireTask(me, Items.IRON_PICKAXE, 1, Mode.AGGRESSIVE);
 				}, Scenario.has(Items.IRON_PICKAXE, 1)),
 
+				new Scenario("ST12", "坑底有一头不动的牛和机器人站在同一格，只能垫方块爬出去：被挡住几次后换旁边一格垫，不在原地一直蹦（玩家报告：玩家和它重叠时一直跳）", MINUTE, (a, bot, me) -> {
+					// A 2×1 pit, 4 deep, in bedrock: no way out but up, from either cell.
+					a.fill(-3, Arena.SURFACE - 5, -3, 4, Arena.SURFACE - 1, 3, Blocks.BEDROCK);
+					a.fill(0, Arena.SURFACE - 4, 0, 1, Arena.SURFACE - 1, 0, Blocks.AIR);
+					teleport(bot, a, 0, Arena.SURFACE - 4, 0);
+					var cow = a.spawn(EntityType.COW, 0, Arena.SURFACE - 4, 0);
+					cow.setNoAi(true);
+					give(bot, Items.COBBLESTONE, 16);
+					give(bot, Items.BREAD, 16);
+					return farTrip(new BlockPos(a.origin.getX() + 30, Arena.SURFACE, a.origin.getZ()), Mode.NORMAL);
+				}, c -> {
+					int blocked = c.logCount("有人或生物挡在那里");
+					if (c.bot().getBlockY() >= Arena.SURFACE) {
+						return Scenario.Outcome.pass("爬出来了，被挡了 " + blocked + " 次");
+					}
+					if (blocked > 9) {
+						return Scenario.Outcome.fail("被挡了 " + blocked + " 次还在原地垫");
+					}
+					return c.ended() ? Scenario.Outcome.fail("没爬出来就结束了，被挡了 " + blocked + " 次") : null;
+				}),
+
 				new Scenario("ST11", "同 ST3，但机器人悬在坑底上方 0.0093 格（玩家报告：进游戏时就停在这个高度）", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.STONE);
 					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);

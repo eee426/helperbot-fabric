@@ -49,7 +49,10 @@ final class BuildMoves {
 				return;
 			}
 			BlockPos up = p.above();
-			if (!pf.inWindow(up) || !pf.canPlace(p) || pf.water(p)) {
+			// (passable: not where it's steering round either. A player standing in it, which no plan
+			// sees, refused the block every time; the step went on the list after three, and the next
+			// plan, not looking, put it there again: it jumped on the spot till the player moved.)
+			if (!pf.inWindow(up) || !pf.passable(up) || !pf.canPlace(p) || pf.water(p)) {
 				return;
 			}
 			List<BlockPos> breaks = new ArrayList<>(1);
