@@ -1,6 +1,8 @@
 # 水下怎么做：重新规划（讨论稿）
 
-日期：2026-11-02。状态：**方案，待讨论，还没动代码**。
+日期：2026-11-02。状态：**历史记录**。水下已经做完并在 2026-11-04 收尾，之后的规则按日期一节一节记在后面。
+
+> 2026-11-14 注：这份文档按时间顺序写，前面的方案后来没有全照做。第一到第五节的“潜水计划、原路返回、`AirPolicy`”没有做成那样：气的规则统一在 `path/Air`，换气由规划安排，水下不挖。**现在的规则以“全局总闸”一节和它之后的几节为准**，实际流程看 `HelperBot 行为图.html`。文中有些名字后来挪了地方：`MovementController.mine` / `digOut` 现在是 `Hands.mine` / `Hands.digOut`，`MovementController.findWay` / `startLocked` 现在在 `RouteSearch`（`startWay` / `startLocked`）。还没修的问题以 `BUGS.md` 为准。
 
 ## 一、为什么越修越多
 
