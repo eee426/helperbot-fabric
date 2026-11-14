@@ -205,6 +205,30 @@ public final class Scenarios {
 					return c.ended() ? Scenario.Outcome.fail("没爬出来就结束了，被挡了 " + blocked + " 次") : null;
 				}),
 
+				new Scenario("LD1", "去东边 40 格，正前方地面上有一口 11 格深的梯子井（井口就是一格梯子）：绕过去，不从井口走过去掉下去（玩家报告：试炼大厅里从长梯子顶上掉下去摔死）", MINUTE, (a, bot, me) -> {
+					// Ladders from y=30 up to the surface's own layer, on the north wall of the shaft.
+					var ladder = Blocks.LADDER.defaultBlockState().setValue(net.minecraft.world.level.block.LadderBlock.FACING, net.minecraft.core.Direction.SOUTH);
+					for (int y = Arena.SURFACE - 11; y <= Arena.SURFACE - 1; y++) {
+						a.set(5, y, -1, Blocks.STONE);
+						a.set(5, y, 0, ladder);
+					}
+					a.set(5, Arena.SURFACE - 12, 0, Blocks.STONE);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.BREAD, 16);
+					MAX_Y[0] = Integer.MAX_VALUE;
+					// (Arrived within 16 of it: past the shaft, whichever way.)
+					return farTrip(new BlockPos(a.origin.getX() + 40, Arena.SURFACE, a.origin.getZ()), Mode.NORMAL);
+				}, c -> {
+					MAX_Y[0] = Math.min(MAX_Y[0], c.bot().getBlockY()); // here: the lowest it got
+					if (MAX_Y[0] < Arena.SURFACE - 1) {
+						return Scenario.Outcome.fail("掉进梯子井了（最低到 y=" + MAX_Y[0] + "，血 " + c.bot().getHealth() + "）");
+					}
+					if (c.ended()) {
+						return c.bot().getBlockX() >= c.arena().origin.getX() + 20 ? Scenario.Outcome.pass("走过去了，没掉进井里") : Scenario.Outcome.fail("没走过去");
+					}
+					return null;
+				}),
+
 				new Scenario("ST11", "同 ST3，但机器人悬在坑底上方 0.0093 格（玩家报告：进游戏时就停在这个高度）", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.STONE);
 					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);

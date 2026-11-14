@@ -942,7 +942,7 @@ public final class LocalPathfinder implements Planner {
 		boolean atStart = p.equals(origin) && cur == startNode.floor;
 		if ((atStart || feetWet) && standing && empty) {
 			BlockState under = level.getBlockState(p.below());
-			double top = BlockTable.empty(under, level, p.below()) ? 0 : BlockTable.top(under, level, p.below());
+			double top = BlockTable.empty(under, level, p.below()) || climbable(under) ? 0 : BlockTable.top(under, level, p.below());
 			standing = top >= 1 - 1e-3 || (!feetWet && top > 1 + 1e-6);
 		}
 		digsDry = !headWet;
@@ -1197,7 +1197,7 @@ public final class LocalPathfinder implements Planner {
 	public static double groundUnder(BlockGetter level, BlockPos c) {
 		BlockPos b = c.below();
 		BlockState under = level.getBlockState(b);
-		if (!Worlds.loaded(level, b) || BlockTable.empty(under, level, b) || !ground(under)) {
+		if (!Worlds.loaded(level, b) || BlockTable.empty(under, level, b) || !ground(under) || climbable(under)) {
 			return Double.NaN;
 		}
 		double top = BlockTable.top(under, level, b);
@@ -1246,7 +1246,21 @@ public final class LocalPathfinder implements Planner {
 		BlockState state = level.getBlockState(pos);
 		return !BlockTable.empty(state, level, pos)
 				&& BlockTable.top(state, level, pos) >= 0.999
-				&& BlockTable.clean(state);
+				&& BlockTable.clean(state)
+				&& !climbable(state);
+	}
+
+	/**
+	 * A ladder, a vine (the game's climbable tag): never a floor to stand on. A ladder's box is a
+	 * block tall, so it looked like one, but it's a thin plate against the wall: the middle of the
+	 * cell above it, where the plan has the feet, stands on nothing. Over the top of a long ladder in
+	 * a trial chamber it fell eleven blocks down the shaft, twice, and the second time died of it.
+	 *
+	 * <p>A patch until climbing is a move of its own (see PERF_BACKLOG.md, docs/BUGS.md): with that,
+	 * a ladder is the way up and down, and this may well have to go, or the plan will never take one.
+	 */
+	public static boolean climbable(BlockState state) {
+		return state.is(net.minecraft.tags.BlockTags.CLIMBABLE);
 	}
 
 	@Override
