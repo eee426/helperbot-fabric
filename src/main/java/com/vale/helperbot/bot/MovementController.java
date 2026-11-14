@@ -773,8 +773,21 @@ public final class MovementController {
 	/** How long a learned obstacle is avoided, in ticks (the world may change, e.g. it gets mined). */
 	private static final int AVOID_TICKS = 600;
 	int blockedTicks;
-	/** Cells that turned out to block movement although the plan thought them open: pos -> expiry tick. */
+	/**
+	 * Cells the next plans steer round: pos -> expiry tick. Those that turned out to block movement
+	 * although the plan thought them open (learnObstacle), and those a step was going to that took
+	 * far too long or kept failing (giveUpOn): see com.vale.helperbot.path.Avoided for what each means.
+	 */
 	final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap avoidUntil = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
+	/** Of {@link #avoidUntil}, the cells a step was given up on: no plan digs its way into these either. */
+	final it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap givenUpUntil = new it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap();
+
+	/** Where this step was going is kept out of for a while, by every kind of move. */
+	private void giveUpOn(PathStep step) {
+		int until = bot.tickCount + AVOID_TICKS;
+		avoidUntil.put(step.to().asLong(), until);
+		givenUpUntil.put(step.to().asLong(), until);
+	}
 
 	/**
 	 * Whatever blocked {@code attempted} (a fence sticking up from below, an odd-shaped block, a
@@ -872,7 +885,7 @@ public final class MovementController {
 		if (++stepTicks <= expected + STEP_TIMEOUT_EXTRA) {
 			return false;
 		}
-		avoidUntil.put(step.to().asLong(), bot.tickCount + AVOID_TICKS);
+		giveUpOn(step);
 		replan("这一步比预计慢太多（预计 " + (int) expected + " 刻，已用 " + stepTicks + " 刻），换条路");
 		return true;
 	}
@@ -940,7 +953,7 @@ public final class MovementController {
 			}
 			failedStepTick = bot.tickCount;
 			if (failedStepCount >= SAME_STEP_FAILURES) {
-				avoidUntil.put(step.to().asLong(), bot.tickCount + AVOID_TICKS);
+				giveUpOn(step);
 				bot.log("同一步（" + step.from().toShortString() + " → " + step.to().toShortString() + "）连续失败 "
 						+ failedStepCount + " 次，暂时当它走不通");
 				failedStep = null;

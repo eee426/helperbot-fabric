@@ -38,8 +38,8 @@ final class DigDownMove implements Move {
 			}
 			return;
 		}
-		if (!from.canAct() || !from.standing()) {
-			return;
+		if (!from.canAct() || !from.standing() || pf.givenUp(below)) {
+			return; // (given up: a step down into it just kept failing, see Planner#givenUp)
 		}
 		List<BlockPos> breaks = new ArrayList<>(1);
 		pf.resetDig();
@@ -51,7 +51,7 @@ final class DigDownMove implements Move {
 		if (pf.support(under)) {
 			out.add(new Candidate(new PathStep(PathStep.Type.DESCEND, p, below, breaks), below.getY(),
 					down(pf, p) + dig, down(pf, p) + pf.dugTicks()));
-		} else if (pf.water(under) && pf.inWindow(under)) {
+		} else if (pf.water(under) && pf.inWindow(under) && !pf.givenUp(under)) {
 			// Through the floor, into the water two down. Ice turns to water when broken, so the head
 			// is under; other blocks (packed ice) leave a hole, and it floats with its head in that.
 			double f = Escape.floodsWhenDug(pf.world(), below) ? under.getY() : LocalPathfinder.swimHeight(pf.world(), under);

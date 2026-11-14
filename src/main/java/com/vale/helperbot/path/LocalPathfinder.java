@@ -180,8 +180,8 @@ public final class LocalPathfinder implements Planner {
 	private final boolean horizontalOnly;
 	private final Limits limits;
 	private final PathGoal goal;
-	/** Cells the bot found blocked in practice (see MovementController#learnObstacle): treated as walls. */
-	private final LongPredicate avoid;
+	/** Cells it steers round for now, as the bot found them in practice: closed, and some not to be dug into either (see {@link Avoided}). */
+	private final Avoided avoid;
 	private final double walkCost;
 	private final boolean canBuild;
 	/** 0 = unknown, 1 = passable, 2 = blocked. */
@@ -243,14 +243,14 @@ public final class LocalPathfinder implements Planner {
 	 */
 	public LocalPathfinder(BlockGetter level, Inventory inventory, Mode mode, int maxDrop, BlockPos start, double startFloor,
 						   PathGoal goal, BlockPos target, boolean horizontalOnly, Limits limits,
-						   LongPredicate avoid, Air.Profile air, LongPredicate favored) {
+						   Avoided avoid, Air.Profile air, LongPredicate favored) {
 		this(level, inventory, mode, maxDrop, start, startFloor, goal, target, horizontalOnly, limits, avoid, air, favored, false, null, false);
 	}
 
 	/** @param whole see {@link #whole}; @param ahead see {@link #ahead}, or null; @param reachOnly see {@link #reachOnly} */
 	public LocalPathfinder(BlockGetter level, Inventory inventory, Mode mode, int maxDrop, BlockPos start, double startFloor,
 						   PathGoal goal, BlockPos target, boolean horizontalOnly, Limits limits,
-						   LongPredicate avoid, Air.Profile air, LongPredicate favored,
+						   Avoided avoid, Air.Profile air, LongPredicate favored,
 						   boolean whole, ToDoubleFunction<BlockPos> ahead, boolean reachOnly) {
 		this.whole = whole;
 		this.reachOnly = reachOnly;
@@ -499,7 +499,7 @@ public final class LocalPathfinder implements Planner {
 		if (!Worlds.loaded(level, p)) {
 			return "未加载";
 		}
-		String avoided = avoid.test(p.asLong()) ? "（绕开中）" : "";
+		String avoided = avoid.givenUp(p.asLong()) ? "（绕开中，不往里走）" : avoid.closed(p.asLong()) ? "（绕开中）" : "";
 		BlockState state = level.getBlockState(p);
 		if (isPassable(level, p)) {
 			return "空" + avoided;
@@ -1039,6 +1039,11 @@ public final class LocalPathfinder implements Planner {
 	}
 
 	@Override
+	public boolean givenUp(BlockPos pos) {
+		return avoid.givenUp(pos.asLong());
+	}
+
+	@Override
 	public boolean swimmable(BlockPos pos) {
 		return passable(pos) || isOpenWater(level, pos);
 	}
@@ -1275,7 +1280,7 @@ public final class LocalPathfinder implements Planner {
 			return Double.longBitsToDouble(stored - 1);
 		}
 		double floor = floorHeight(level, c);
-		if (!Double.isNaN(floor) && (nearLava(c) || avoid.test(c.asLong()) || avoid.test(c.above().asLong()))) {
+		if (!Double.isNaN(floor) && (nearLava(c) || avoid.closed(c.asLong()) || avoid.closed(c.above().asLong()))) {
 			floor = Double.NaN;
 		}
 		s.floor[i] = Double.doubleToLongBits(floor) + 1;
@@ -1291,7 +1296,7 @@ public final class LocalPathfinder implements Planner {
 		}
 		byte cached = s.passable[i];
 		if (cached == 0) {
-			cached = isPassable(level, pos) && !avoid.test(pos.asLong()) ? (byte) 1 : (byte) 2;
+			cached = isPassable(level, pos) && !avoid.closed(pos.asLong()) ? (byte) 1 : (byte) 2;
 			s.passable[i] = cached;
 		}
 		return cached == 1;

@@ -17,8 +17,12 @@ import java.util.Map;
  * just failed before going anywhere else).
  */
 public final class OutOfReach {
-	/** What a thorough finding rules out around the block: the rest of that pocket, or it dives once for each. */
-	private static final int PATCH = 4;
+	/**
+	 * What a thorough finding rules out around the block, this far each way (5 x 5 x 5 with the block
+	 * in the middle): the rest of that pocket, or it dives once for each. It was 4 each way, 9 x 9 x 9:
+	 * more than a pocket, and a lot to lose when the finding was wrong.
+	 */
+	private static final int PATCH = 2;
 	/** Past this from where it found out, it may come at it some way it never saw; and that's past what it scans for targets. */
 	private static final int SEARCHED = 100;
 

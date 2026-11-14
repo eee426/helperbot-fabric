@@ -26,6 +26,13 @@ public interface Planner {
 	/** Feet height when standing in this cell, or NaN if it can't stand there. */
 	double floor(BlockPos pos);
 
+	/**
+	 * A step into this cell took far too long or kept failing a moment ago (see Avoided): for now
+	 * nothing digs its way into it either. Walking and swimming keep out of it by {@link #passable}
+	 * and {@link #floor}; a cell with a block in it is neither, so the moves that dig ask this.
+	 */
+	boolean givenUp(BlockPos pos);
+
 	/** Passable, or open water it can swim through. */
 	boolean swimmable(BlockPos pos);
 

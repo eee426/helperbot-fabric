@@ -229,6 +229,32 @@ public final class Scenarios {
 					return null;
 				}),
 
+				new Scenario("ST13", "去东边 30 格，黑曜石墙上只有一列泥土能挖穿，可这列泥土一挖掉就长回来：这一步超时后换别的走法（垫方块翻过去或绕过去），不一直挖同一格", 3 * MINUTE, (a, bot, me) -> {
+					// Obsidian is far slower than going over or round; the dirt is the cheap way through,
+					// and never opens (the check puts it back), so the step into it times out.
+					a.fill(5, Arena.SURFACE, -15, 5, Arena.SURFACE + 2, 15, Blocks.OBSIDIAN);
+					a.fill(5, Arena.SURFACE, 0, 5, Arena.SURFACE + 2, 0, Blocks.DIRT);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.IRON_SHOVEL, 1);
+					give(bot, Items.COBBLESTONE, 16);
+					give(bot, Items.BREAD, 16);
+					return farTrip(new BlockPos(a.origin.getX() + 30, Arena.SURFACE, a.origin.getZ()), Mode.NORMAL);
+				}, c -> {
+					for (int y = Arena.SURFACE; y <= Arena.SURFACE + 2; y++) {
+						if (c.bot().level().getBlockState(c.arena().at(5, y, 0)).isAir()) {
+							c.arena().set(5, y, 0, Blocks.DIRT);
+						}
+					}
+					int slow = c.logCount("这一步比预计慢太多") + c.logCount("连续失败");
+					if (c.bot().getBlockX() > c.arena().origin.getX() + 5) {
+						return Scenario.Outcome.pass("过了墙，挖不开的步骤放弃了 " + slow + " 次");
+					}
+					if (slow > 6) {
+						return Scenario.Outcome.fail("放弃了 " + slow + " 次还在挖同一列");
+					}
+					return c.ended() ? Scenario.Outcome.fail("没过墙就结束了，放弃了 " + slow + " 次") : null;
+				}),
+
 				new Scenario("ST11", "同 ST3，但机器人悬在坑底上方 0.0093 格（玩家报告：进游戏时就停在这个高度）", MINUTE, (a, bot, me) -> {
 					a.fill(-3, Arena.SURFACE - 3, -3, 3, Arena.SURFACE - 1, 3, Blocks.STONE);
 					a.fill(0, Arena.SURFACE - 2, 0, 0, Arena.SURFACE - 1, 0, Blocks.AIR);
@@ -2462,7 +2488,7 @@ public final class Scenarios {
 		BlockPos target = a.at(400, Arena.SURFACE, 0);
 		var search = new com.vale.helperbot.path.LocalPathfinder(a.level, bot.getInventory(), Mode.NORMAL,
 				Mode.NORMAL.maxDropFor(bot.getHealth()), start, bot.getY(), (w, p) -> p.equals(target), target, true,
-				com.vale.helperbot.path.LocalPathfinder.LEVELS[0], k -> false, bot.movement().airProfile(), k -> false);
+				com.vale.helperbot.path.LocalPathfinder.LEVELS[0], com.vale.helperbot.path.Avoided.NONE, bot.movement().airProfile(), k -> false);
 		while (!search.step(50_000_000L)) {
 			// on this thread, to the end
 		}

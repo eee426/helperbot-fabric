@@ -320,10 +320,10 @@ final class RouteSearch {
 		for (int slot = 0; slot < Inventory.INVENTORY_SIZE; slot++) {
 			tools.setItem(slot, c.bot.getInventory().getItem(slot).copy());
 		}
-		it.unimi.dsi.fastutil.longs.LongOpenHashSet avoided = avoidedNow();
+		com.vale.helperbot.path.Avoided avoided = avoidedNow();
 		it.unimi.dsi.fastutil.longs.LongOpenHashSet favored = new it.unimi.dsi.fastutil.longs.LongOpenHashSet(c.lastPath);
 		PathJob job = new PathJob(new LocalPathfinder(world, tools, c.mode, c.mode.maxDropFor(c.bot.getHealth()), start, startFloor,
-				goal, c.target, c.horizontalOnly, limits, avoided::contains, air, favored::contains, whole, ahead, reachOnly));
+				goal, c.target, c.horizontalOnly, limits, avoided, air, favored::contains, whole, ahead, reachOnly));
 		c.bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);
 		return job;
 	}
@@ -331,18 +331,25 @@ final class RouteSearch {
 	/** A search for further along: the breath the plan has for there, not what it has now. -1: now. */
 	private int breathAtStart = -1;
 
-	/** Cells it's steering around right now (see learnObstacle); expired ones are dropped. */
-	private it.unimi.dsi.fastutil.longs.LongOpenHashSet avoidedNow() {
-		it.unimi.dsi.fastutil.longs.LongOpenHashSet avoided = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
-		for (var it = c.avoidUntil.long2IntEntrySet().iterator(); it.hasNext(); ) {
+	/**
+	 * Cells it's steering around right now, and which of them a step was given up on (see
+	 * MovementController#avoidUntil); expired ones are dropped. A copy: the search reads it on its own thread.
+	 */
+	private com.vale.helperbot.path.Avoided avoidedNow() {
+		return new com.vale.helperbot.path.Avoided(current(c.avoidUntil), current(c.givenUpUntil));
+	}
+
+	private it.unimi.dsi.fastutil.longs.LongOpenHashSet current(it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap until) {
+		it.unimi.dsi.fastutil.longs.LongOpenHashSet cells = new it.unimi.dsi.fastutil.longs.LongOpenHashSet();
+		for (var it = until.long2IntEntrySet().iterator(); it.hasNext(); ) {
 			var e = it.next();
 			if (e.getIntValue() < c.bot.tickCount) {
 				it.remove(); // its time is up
 			} else {
-				avoided.add(e.getLongKey());
+				cells.add(e.getLongKey());
 			}
 		}
-		return avoided;
+		return cells;
 	}
 
 	/**
@@ -354,7 +361,7 @@ final class RouteSearch {
 	private void crossCheck() {
 		LocalPathfinder.Limits limits = levels[minLevel];
 		LocalPathfinder live = new LocalPathfinder(c.bot.level(), c.bot.getInventory(), c.mode, c.mode.maxDropFor(c.bot.getHealth()),
-				c.feet(), c.bot.getY(), c.goal, c.target, c.horizontalOnly, limits, avoidedNow()::contains, c.airProfile(),
+				c.feet(), c.bot.getY(), c.goal, c.target, c.horizontalOnly, limits, avoidedNow(), c.airProfile(),
 				new it.unimi.dsi.fastutil.longs.LongOpenHashSet(c.lastPath)::contains);
 		long started = System.nanoTime();
 		boolean done = false;

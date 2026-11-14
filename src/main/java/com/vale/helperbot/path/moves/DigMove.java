@@ -31,7 +31,7 @@ final class DigMove implements Move {
 	 */
 	private static void digOutUnder(Planner pf, BlockPos p, double pen, List<Candidate> out) {
 		BlockPos head = p.above(), roof = head.above();
-		if (pf.water(head) || !pf.water(roof.above()) || !pf.inWindow(roof.above()) || pf.water(roof) || pf.nearLava(roof)) {
+		if (pf.water(head) || !pf.water(roof.above()) || !pf.inWindow(roof.above()) || pf.water(roof) || pf.nearLava(roof) || pf.givenUp(roof)) {
 			return;
 		}
 		List<BlockPos> breaks = new ArrayList<>(2);
@@ -49,11 +49,13 @@ final class DigMove implements Move {
 			return;
 		}
 		double walk = pf.walkCost();
+		// (Not into a cell a step into it was just given up on, see Planner#givenUp: only the cell it
+		// ends in, or goes through on the way down; sand that falls in after is dug as ever.)
 		// Tunnel forward.
 		List<BlockPos> breaks = new ArrayList<>(2);
 		pf.resetDig();
 		double dig = pf.clearCost(t, breaks, pen) + pf.clearCost(t.above(), breaks, pen);
-		if (dig >= 0 && !breaks.isEmpty() && pf.support(t.below()) && !pf.nearLava(t)) {
+		if (dig >= 0 && !breaks.isEmpty() && pf.support(t.below()) && !pf.nearLava(t) && !pf.givenUp(t)) {
 			out.add(new Candidate(new PathStep(PathStep.Type.WALK, p, t, breaks), t.getY(), walk + dig, walk + pf.dugTicks()));
 		}
 
@@ -62,7 +64,7 @@ final class DigMove implements Move {
 		breaks = new ArrayList<>(3);
 		pf.resetDig();
 		dig = pf.clearCost(p.above(2), breaks, pen) + pf.clearCost(up, breaks, pen) + pf.clearCost(up.above(), breaks, pen);
-		if (dig >= 0 && !breaks.isEmpty() && pf.support(t) && !pf.nearLava(up)) {
+		if (dig >= 0 && !breaks.isEmpty() && pf.support(t) && !pf.nearLava(up) && !pf.givenUp(up)) {
 			out.add(new Candidate(new PathStep(PathStep.Type.ASCEND, p, up, breaks), up.getY(),
 					walk + LocalPathfinder.ASCEND_EXTRA + dig, walk + LocalPathfinder.ASCEND_EXTRA + pf.dugTicks()));
 		}
@@ -72,7 +74,7 @@ final class DigMove implements Move {
 		breaks = new ArrayList<>(3);
 		pf.resetDig();
 		dig = pf.clearCost(t.above(), breaks, pen) + pf.clearCost(t, breaks, pen) + pf.clearCost(down, breaks, pen);
-		if (dig >= 0 && !breaks.isEmpty() && pf.support(down.below()) && !pf.nearLava(down)) {
+		if (dig >= 0 && !breaks.isEmpty() && pf.support(down.below()) && !pf.nearLava(down) && !pf.givenUp(down) && !pf.givenUp(t)) {
 			out.add(new Candidate(new PathStep(PathStep.Type.DESCEND, p, down, breaks), down.getY(),
 					walk + DigDownMove.down(pf, p) + dig, walk + DigDownMove.down(pf, p) + pf.dugTicks()));
 		}
