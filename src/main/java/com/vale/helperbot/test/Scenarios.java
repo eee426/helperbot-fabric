@@ -424,6 +424,32 @@ public final class Scenarios {
 							: c.ended() ? Scenario.Outcome.fail("任务结束了没捡到") : null;
 				}),
 
+				new Scenario("WB1", "水下隧道里游到 12 格外：半路气比计划少了 2 秒（像站着想路时掉的），照样把这条路走完，不停下来重新规划（玩家报告：水下追远处的鱼，走一格停一下）", MINUTE, (a, bot, me) -> {
+					// A flooded tunnel two high under the ground, open to the air only up a shaft at its start.
+					a.fill(-2, 33, -2, 16, 38, 2, Blocks.STONE);
+					a.fill(0, 34, 0, 14, 35, 0, Blocks.WATER);
+					a.fill(0, 36, 0, 0, 40, 0, Blocks.WATER);
+					teleport(bot, a, 0, 34, 0);
+					give(bot, Items.BREAD, 8);
+					POKED[0] = -1;
+					return toCell(a.at(12, 34, 0), Mode.NORMAL);
+				}, c -> {
+					BotPlayer b = c.bot();
+					if (POKED[0] < 0 && b.isEyeInFluid(net.minecraft.tags.FluidTags.WATER) && b.getBlockX() >= c.arena().origin.getX() + 3) {
+						b.setAirSupply(b.getAirSupply() - 40);
+						POKED[0] = c.logCount("规划出");
+					}
+					if (!c.ended()) {
+						return null;
+					}
+					int again = POKED[0] < 0 ? 0 : c.logCount("规划出") - POKED[0];
+					if (b.getBlockX() < c.arena().origin.getX() + 11) {
+						return Scenario.Outcome.fail("没游到（" + b.lastTaskStatus() + "）");
+					}
+					return again == 0 ? Scenario.Outcome.pass("一条路走完，没重新规划")
+							: Scenario.Outcome.fail("气少了以后重新规划了 " + again + " 次");
+				}),
+
 				new Scenario("LV1", "一格宽的石头堤穿过岩浆池（岩浆比脚低一层），堤那头的小岛上有铁矿：沿着堤走过去挖（不会被击退）", 2 * MINUTE, (a, bot, me) -> {
 					// Bedrock under it all: no way under the pool, the causeway is the only way over.
 					a.fill(-2, Arena.SURFACE - 6, -8, 16, Arena.SURFACE - 3, 8, Blocks.BEDROCK);
@@ -2527,6 +2553,39 @@ public final class Scenarios {
 	private static final long PLAYER_SEED = -8287987321081270424L;
 
 	/** Off to {@code far} and nothing else; ends when the movement arrives or fails (and logs why). */
+	/** Set to the plans logged when the scene took the air away (see WB1); -1 before. */
+	private static final int[] POKED = {-1};
+
+	/** Go to that very cell, by the movement alone. */
+	private static com.vale.helperbot.bot.BotTask toCell(BlockPos cell, Mode mode) {
+		return new com.vale.helperbot.bot.BotTask() {
+			private boolean sent;
+
+			@Override
+			public Status tick(BotPlayer b) {
+				if (!sent) {
+					sent = true;
+					b.movement().goTo((w, p) -> p.equals(cell), cell, mode);
+				}
+				var status = b.movement().status();
+				if (status == com.vale.helperbot.bot.MovementController.Status.FAILED) {
+					b.log("（场景）移动失败：" + b.movement().failReason());
+					return Status.FAILED;
+				}
+				return status == com.vale.helperbot.bot.MovementController.Status.ARRIVED ? Status.DONE : Status.RUNNING;
+			}
+
+			@Override
+			public void onEnd(BotPlayer b, Status status) {
+			}
+
+			@Override
+			public String describe() {
+				return "去 " + cell.toShortString();
+			}
+		};
+	}
+
 	private static com.vale.helperbot.bot.BotTask farTrip(BlockPos far, Mode mode) {
 		return new com.vale.helperbot.bot.BotTask() {
 			private boolean sent;

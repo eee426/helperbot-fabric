@@ -593,11 +593,15 @@ public final class MovementController {
 				replan("不在这一步的起点（被推开或掉下去了）：在 " + feet().toShortString() + "，应该在 " + path.get(index).from().toShortString());
 			}
 			// Under water a route that gets there is walked to the end: thinking again every second
-			// cost nearly half the breath, standing still. Only when its breath isn't what the plan
-			// said (what's ahead is checked by aheadChanged). The way up is different: the world
-			// there changes fast (sand, flowing water, kelp) and nothing matters more, so again and
-			// again from what's there now, quietly, it's routine.
-			if (path != null && headUnderwater() && (ignoreAir ? bot.tickCount - routes.plannedAt > WATER_REPLAN_TICKS : shortOfBreath())) {
+			// cost nearly half the breath, standing still. Even with less breath than the plan has for
+			// here: whether what's left still does is the breathing layer's to say, every tick, from
+			// where it really is (see BotPlayer#breathe). Planning again for it stood still once more,
+			// on top of the standing still that had cost the breath (the plan starts from the breath
+			// when it began thinking): a step, think, a step, think, chasing a fish far off. (What's
+			// ahead is still checked by aheadChanged.) The way up is different: the world there
+			// changes fast (sand, flowing water, kelp) and nothing matters more, so again and again
+			// from what's there now, quietly, it's routine.
+			if (path != null && headUnderwater() && ignoreAir && bot.tickCount - routes.plannedAt > WATER_REPLAN_TICKS) {
 				hands.abortBreaking();
 				path = null;
 				routes.cancelLookahead();
@@ -699,11 +703,6 @@ public final class MovementController {
 				fail("用最大搜索范围也没能靠近目标，可能在原地绕圈");
 			}
 		}
-	}
-
-	/** Less breath than the plan has for here (see LocalPathfinder.Result#air). */
-	private boolean shortOfBreath() {
-		return index > 0 && index <= pathAir.size() && Air.budget(bot) < pathAir.get(index - 1) - Air.PLAN_SLACK;
 	}
 
 	private TravelEstimate travel;
