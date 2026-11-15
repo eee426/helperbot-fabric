@@ -570,10 +570,4 @@ public final class DropAnalysis {
 		options.remove("空手");
 		return String.join(" 或 ", options);
 	}
-
-	/** Block that the item is the block form of, if any (so it can be listed first). */
-	public static Block blockFormOf(Item item) {
-		Block block = Block.byItem(item);
-		return block == Blocks.AIR ? null : block;
-	}
 }

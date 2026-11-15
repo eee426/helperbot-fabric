@@ -365,7 +365,7 @@ public class BotPlayer extends ServerPlayer {
 	private Breath breath = Breath.NONE;
 	private int breathTicks;
 	private double bestEscape;
-	/** The planner found no way up at all (see MovementController#digOut). */
+	/** The planner found no way up at all (see Hands#digOut). */
 	private boolean digOut;
 	/** On the planned way up this long without getting any closer to air: just go straight up. */
 	private static final int ROUTE_STALL_TICKS = 60;

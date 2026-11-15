@@ -87,11 +87,6 @@ final class HuntTask {
 	 * blocks it had then. Back on the list once it has more: there is a way, it couldn't lay it.
 	 */
 	private final Map<UUID, Integer> shortOfBlocks;
-	/**
-	 * Under water: the mobs this far, each way, from one found out of reach are taken to be in the
-	 * same pocket (5 x 5 x 5 with it in the middle, as OutOfReach has it for blocks; it was 4 each way).
-	 */
-	private static final int SAME_POCKET = 2;
 	private Phase phase = Phase.FIND;
 	/** Items on the ground are sources too (a kill's drops, say): the one it's fetching, in FETCH (see DropFetch). */
 	private final DropFetch drops = new DropFetch();
@@ -341,8 +336,8 @@ final class HuntTask {
 		int left = 0, out = 0;
 		for (Mob m : wayTo.keySet()) {
 			if (nearest != null && m.getType() == nearest.getType()
-					&& Math.abs(m.getBlockX() - nearest.getBlockX()) <= SAME_POCKET && Math.abs(m.getBlockY() - nearest.getBlockY()) <= SAME_POCKET
-					&& Math.abs(m.getBlockZ() - nearest.getBlockZ()) <= SAME_POCKET) {
+					&& Math.abs(m.getBlockX() - nearest.getBlockX()) <= OutOfReach.POCKET && Math.abs(m.getBlockY() - nearest.getBlockY()) <= OutOfReach.POCKET
+					&& Math.abs(m.getBlockZ() - nearest.getBlockZ()) <= OutOfReach.POCKET) {
 				unreachable.put(m.getUUID(), 0.0); // under water: not again this order
 				out++;
 			} else {

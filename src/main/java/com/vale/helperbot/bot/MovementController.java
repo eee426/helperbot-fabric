@@ -45,7 +45,7 @@ public final class MovementController {
 		IDLE, MOVING, ARRIVED, FAILED
 	}
 
-	/** Place the pillar block only once the feet are this far above the cell (see {@link #pillar}). */
+	/** Place the pillar block only once the feet are this far above the cell (see PillarStep). */
 	static final double PILLAR_CLEARANCE = 0.05;
 	/** Jumps allowed for one pillar step before giving up on it (e.g. something blocks the jump). */
 	static final int MAX_PILLAR_JUMPS = 3;
@@ -142,7 +142,7 @@ public final class MovementController {
 
 	/**
 	 * Going to something it knows the place of, and can see all the way to: a block, an item, an
-	 * animal, a player nearby. It doesn't set off without the whole way (see {@link #startLocked}):
+	 * animal, a player nearby. It doesn't set off without the whole way (see RouteSearch#startLocked):
 	 * yes or no, before the first step. Heading off a bit at a time towards a place it could not see
 	 * took it to the sea bed, nearest the target by the crow, and nothing to dig there.
 	 */
@@ -474,7 +474,7 @@ public final class MovementController {
 	// ---- breath -------------------------------------------------------------------------
 
 	/** Planning ignores air (on the way up for air: any way up will do). */
-	private boolean ignoreAir;
+	boolean ignoreAir;
 	/** The planner found nowhere to go on the air left: the breathing layer should take over. */
 	boolean airRequested;
 

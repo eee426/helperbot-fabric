@@ -482,6 +482,28 @@ public final class Scenarios {
 					return c.ended() ? Scenario.Outcome.fail("任务结束了（" + c.bot().lastTaskStatus() + "），没判它到不了") : null;
 				}),
 
+				new Scenario("WB3", "水下换气：正上方 18 格水再上面是顶，空气在旁边（一大片水，贴着底从墙下的缺口横游到另一个水潭，再往上 8 格）：绕过去换气，不在顶下面憋死（玩家报告：打发光鱿鱼，在地下含水层里淹死）", MINUTE, (a, bot, me) -> {
+					// Like the aquifer it drowned in: water right up to a lid, and the air a way off to the side.
+					// A wide body of water (the search rushes up it), a low gap through the wall at the bottom.
+					a.fill(-8, 10, -8, 16, 34, 8, Blocks.BEDROCK);
+					a.fill(-6, 12, -6, 6, 30, 6, Blocks.WATER);
+					a.fill(6, 12, 0, 10, 13, 0, Blocks.WATER);
+					a.fill(9, 12, -1, 13, 20, 1, Blocks.WATER);
+					a.fill(9, 21, -1, 13, 24, 1, Blocks.AIR);
+					teleport(bot, a, 0, 12, 0);
+					hungry(bot, 12, 6); // nothing to spend drowning; no sprinting
+					bot.setAirSupply(200);
+					return null;
+				}, c -> {
+					if (!c.bot().isAlive() || c.bot().getHealth() <= 0) {
+						return Scenario.Outcome.fail("淹死了");
+					}
+					if (!c.bot().isEyeInFluid(net.minecraft.tags.FluidTags.WATER)) {
+						return Scenario.Outcome.pass("头出水了（" + c.bot().blockPosition().toShortString() + "），血 " + c.bot().getHealth());
+					}
+					return c.ticks() > 50 * 20 ? Scenario.Outcome.fail("50 秒还在水下（" + c.bot().blockPosition().toShortString() + "）") : null;
+				}),
+
 				new Scenario("WB1", "水下隧道里游到 12 格外：半路气比计划少了 2 秒（像站着想路时掉的），照样把这条路走完，不停下来重新规划（玩家报告：水下追远处的鱼，走一格停一下）", MINUTE, (a, bot, me) -> {
 					// A flooded tunnel two high under the ground, open to the air only up a shaft at its start.
 					a.fill(-2, 33, -2, 16, 38, 2, Blocks.STONE);

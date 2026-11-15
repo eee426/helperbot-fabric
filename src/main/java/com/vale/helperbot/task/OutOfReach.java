@@ -18,11 +18,12 @@ import java.util.Map;
  */
 public final class OutOfReach {
 	/**
-	 * What a thorough finding rules out around the block, this far each way (5 x 5 x 5 with the block
-	 * in the middle): the rest of that pocket, or it dives once for each. It was 4 each way, 9 x 9 x 9:
-	 * more than a pocket, and a lot to lose when the finding was wrong.
+	 * What a thorough finding rules out around what was found out of reach, this far each way (5 x 5 x 5
+	 * with it in the middle): the rest of that pocket, or it dives once for each. For blocks here, and
+	 * for mobs under water (see HuntTask#way): one number, so the two can't drift apart. It was 4 each
+	 * way, 9 x 9 x 9: more than a pocket, and a lot to lose when the finding was wrong.
 	 */
-	private static final int PATCH = 2;
+	static final int POCKET = 2;
 	/** Past this from where it found out, it may come at it some way it never saw; and that's past what it scans for targets. */
 	private static final int SEARCHED = 100;
 
@@ -40,7 +41,7 @@ public final class OutOfReach {
 
 	/** Found out at {@code from}, for this block and what's around it: a search went through everything, or a whole breath wasn't enough. */
 	public void proven(BlockPos pos, int breath, BlockPos from) {
-		entries.add(new Entry(pos, breath, from, PATCH));
+		entries.add(new Entry(pos, breath, from, POCKET));
 	}
 
 	/** Went wrong at {@code from}, for this block alone: the way was blocked, it couldn't be mined. */

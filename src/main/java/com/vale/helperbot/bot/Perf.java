@@ -108,11 +108,6 @@ public final class Perf {
 		return average(Part.VANILLA) + average(Part.SURVIVAL) + average(Part.TASK) + average(Part.MOVE);
 	}
 
-	/** Worst single tick of the bot's own parts together (approximately: the worst of each, added). */
-	public double worstTotal() {
-		return worst(Part.VANILLA) + worst(Part.SURVIVAL) + worst(Part.TASK) + worst(Part.MOVE);
-	}
-
 	private double all(Part p) {
 		return allSum[p.ordinal()] / 1e6 / Math.max(1, allTicks);
 	}

@@ -134,16 +134,6 @@ public final class Air {
 		return Math.max(0, points) * EXHAUSTION_PER_POINT / EXHAUSTION_PER_BLOCK;
 	}
 
-	/**
-	 * Ticks up through {@code depth} blocks of open water: sprinting as far as the food goes, not
-	 * for the last block (its head comes out, and that's where sprint-swimming ends). See
-	 * {@link Escape}, which works this out cell by cell.
-	 */
-	public static double ascentTicks(Profile air, int depth) {
-		int fast = (int) Math.min(Math.max(0, depth - 1), air.sprintBlocks());
-		return fast / SPRINT_SWIM_SPEED + (depth - fast) / SWIM_UP_SPEED;
-	}
-
 	/** Fully under water: feet and head cells both water (where it may sprint-swim). */
 	public static boolean submerged(BlockGetter level, BlockPos feet) {
 		return LocalPathfinder.isWater(level, feet) && LocalPathfinder.isWater(level, feet.above());

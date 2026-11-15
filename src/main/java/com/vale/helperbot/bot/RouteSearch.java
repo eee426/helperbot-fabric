@@ -51,7 +51,7 @@ final class RouteSearch {
 	private static final int LOCK_MARGIN = 32;
 	/** Most nodes for the next whole search, and how many the last one took (see MovementController#limitSearch). */
 	int lockNodes = MovementController.LOCK_NODES, searchedNodes;
-	/** Set while it's yet to know if there's a way to these (see {@link #findWay}). */
+	/** Set while it's yet to know if there's a way to these (see MovementController#findWay). */
 	List<BlockPos> wayTargets;
 	BlockPos wayEnd;
 	/** Looking only up from the bot, or only down from it (see startWay). */
@@ -119,7 +119,7 @@ final class RouteSearch {
 	}
 
 	/**
-	 * See {@link #findWay}: the box is whole chunks. Everything is below the bot: from the bottom of
+	 * See MovementController#findWay: the box is whole chunks. Everything is below the bot: from the bottom of
 	 * the world up to the bot; everything above: from the bot up over all that's in the box. That's
 	 * half of what there is to look through, usually. It can miss a way over a ridge higher than
 	 * the bot, so what it doesn't find is looked for again, top to bottom, before it's believed.
@@ -164,7 +164,7 @@ final class RouteSearch {
 		plannedAt = c.bot.tickCount;
 	}
 
-	/** What the search of {@link #findWay} came to. */
+	/** What the search of MovementController#findWay came to. */
 	private void endWay() {
 		PathJob job = search;
 		search = null;
@@ -282,7 +282,11 @@ final class RouteSearch {
 		if (search != null) {
 			search.cancel();
 		}
-		search = startSearch(c.feet(), c.bot.getY(), levels[levelIndex]);
+		// On the way up for air the window is gone through to the end, not leaning anywhere (see
+		// LocalPathfinder#whole): the goal is anywhere to breathe, and the place it heads for is only
+		// straight up. Leaning that way it stopped at the window's edge, under a lid of rock 18 up,
+		// with the air 8 blocks off to the side under a wall, and drowned there.
+		search = startSearch(c.feet(), c.bot.getY(), levels[levelIndex], c.goal, null, c.ignoreAir);
 		long started = System.nanoTime();
 		search.await(PLAN_WAIT_NANOS);
 		c.bot.perf().add(Perf.Part.PATHFIND, System.nanoTime() - started);

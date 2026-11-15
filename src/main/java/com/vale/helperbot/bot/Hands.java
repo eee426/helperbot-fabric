@@ -40,11 +40,6 @@ public final class Hands {
 		return breakingPos;
 	}
 
-	/** Already hitting this block (some progress made), as opposed to about to start on it. */
-	public boolean isBreaking(BlockPos pos) {
-		return pos.equals(breakingPos);
-	}
-
 	void resetAttempts() {
 		breakAttempts = 0;
 	}

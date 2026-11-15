@@ -80,7 +80,7 @@ public final class Escape {
 			return cached;
 		}
 		double best = 0;
-		if (wet(feet.above())) {
+		if (!air(feet.above())) {
 			// Straight up from here, or sideways first: from here, or from a neighbour (here may be too
 			// tight to swim in).
 			best = Math.min(up(feet), field(feet));
@@ -120,7 +120,7 @@ public final class Escape {
 				visit(c.below(), seen, inOrder, queue);
 			}
 			for (BlockPos c : queue) {
-				if (!wet(c.above())) {
+				if (air(c.above())) {
 					return (steps + 1) * UP_TICKS;
 				}
 			}
@@ -210,7 +210,7 @@ public final class Escape {
 		BlockPos head = feet.above();
 		double result = Double.POSITIVE_INFINITY;
 		for (int i = 0; i < MAX_UP; i++) {
-			if (!wet(head)) {
+			if (air(head)) {
 				result = t;
 				break;
 			}
@@ -230,6 +230,16 @@ public final class Escape {
 		}
 		upMemo.put(key, result);
 		return result;
+	}
+
+	/**
+	 * The head can breathe here: what counts as air for the way up to it is what counts as air at the
+	 * end of it (see Air#breathable). Not a pocket with water over it, about to be filled: this once
+	 * took such a pocket for air where the search for air didn't, and said "up in a few seconds" of a
+	 * way that wasn't there.
+	 */
+	private boolean air(BlockPos pos) {
+		return !wet(pos) && !Air.waterComing(level, pos);
 	}
 
 	/** Under water now, or would be once dug out (water next to it pours in). */

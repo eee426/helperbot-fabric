@@ -129,7 +129,7 @@ const CHAINS = [
 }},
 {id:"breath", group:"身体", title:"换气", lead:"反射层保命。正常情况下路线自己安排换气，这里是兜底。", start:"low", nodes:{
  low:{k:"q",t:"气只够游上去？",d:"预算不够“上去的时间 × 1.25 + 2 秒”。",c:"BotPlayer.breathe",n:[["是","route"]]},
- route:{k:"a",t:"用寻路游上去",d:"目标是任何能呼吸的地方。不挖，每秒重想一次。",c:"MovementController.headForAir",n:[["头出水了","full"],["搜不到路","climb"],["3 秒没进展","swim"]]},
+ route:{k:"a",t:"用寻路游上去",d:"目标是任何能呼吸的地方，把窗口里能去的地方都搜一遍找最近的，不只朝正上方找（正上方是顶、空气在旁边时，以前会憋死）。不挖，每秒重想一次。",c:"MovementController.headForAir",n:[["头出水了","full"],["搜不到路","climb"],["3 秒没进展","swim"]]},
  swim:{k:"a",t:"直接往上游",d:"还有路时不挖。",c:"Body.ascendStep",n:[["头出水了","full"]]},
  climb:{k:"a",t:"往上游，挖开头顶",d:"唯一能在水下挖的情况。浮着挖慢 25 倍，沙土来得及，石头基本来不及。",c:"Body.ascendStep",n:[["头出水了","full"],["气耗尽","dead"]]},
  full:{k:"g",t:"等气满，回到原来的事",d:"disengage 恢复目标，再搜一次路。",c:"MovementController.disengage",n:[]},
