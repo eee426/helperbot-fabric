@@ -8,7 +8,9 @@ import net.minecraft.core.BlockPos;
 import java.util.List;
 
 /**
- * From water, swim to any neighbouring water cell: level, diving down, or rising (3D).
+ * From water, swim to any neighbouring water cell: level, diving down, or rising, and across the
+ * diagonal on the level. Not both at once (across the diagonal and up or down): one more kind of
+ * corner to check, for little.
  */
 final class SwimMove implements Move {
 	@Override
@@ -22,11 +24,17 @@ final class SwimMove implements Move {
 		for (int dx = -1; dx <= 1; dx++) {
 			for (int dy = -1; dy <= 1; dy++) {
 				for (int dz = -1; dz <= 1; dz++) {
-					if ((dx == 0 && dy == 0 && dz == 0) || (dx != 0 && dz != 0)) {
+					if ((dx == 0 && dy == 0 && dz == 0) || (dx != 0 && dz != 0 && dy != 0)) {
 						continue;
 					}
 					BlockPos c = p.offset(dx, dy, dz);
 					if (!pf.inWindow(c) || !pf.water(c)) {
+						continue;
+					}
+					// Across the diagonal: both cells it cuts the corner of must be open, as high as it is
+					// (two, like any cell it swims into), or it scrapes along a corner of the wall. It
+					// only went straight across for that once, and swam a zigzag over open sea.
+					if (dx != 0 && dz != 0 && !(open(pf, p.offset(dx, 0, 0)) && open(pf, p.offset(0, 0, dz)))) {
 						continue;
 					}
 					// Moving up/down and sideways at once: both corner cells must be open too.
@@ -44,5 +52,10 @@ final class SwimMove implements Move {
 				}
 			}
 		}
+	}
+
+	/** Room to swim through: this cell and the one over it. */
+	private static boolean open(Planner pf, BlockPos q) {
+		return pf.swimmable(q) && pf.swimmable(q.above());
 	}
 }

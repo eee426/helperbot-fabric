@@ -450,6 +450,26 @@ public final class Scenarios {
 							: Scenario.Outcome.fail("气少了以后重新规划了 " + again + " 次");
 				}),
 
+				new Scenario("SW1", "水下游到斜对角 10 格外（池子 3 格深，中间什么都没有）：斜着游过去，十来步，不走 20 步的锯齿（玩家报告：海里走锯齿）", MINUTE, (a, bot, me) -> {
+					// (Deeper, it rises first and comes down at the end: the plan prefers it nearer the top,
+					// and up or down goes straight, not across the diagonal at the same time.)
+					a.fill(-1, 38, -1, 13, 40, 13, Blocks.WATER);
+					teleport(bot, a, 0, 38, 0);
+					give(bot, Items.BREAD, 8);
+					return toCell(a.at(10, 38, 10), Mode.NORMAL);
+				}, c -> {
+					if (!c.ended()) {
+						return null;
+					}
+					java.util.regex.Matcher m = java.util.regex.Pattern.compile("规划出 (\\d+) 步").matcher(c.log());
+					int steps = m.find() ? Integer.parseInt(m.group(1)) : -1;
+					if (c.bot().lastTaskStatus() != com.vale.helperbot.bot.BotTask.Status.DONE) {
+						return Scenario.Outcome.fail("没游到（" + c.bot().lastTaskStatus() + "）");
+					}
+					return steps > 0 && steps <= 12 ? Scenario.Outcome.pass("斜着游过去了，" + steps + " 步")
+							: Scenario.Outcome.fail("游了 " + steps + " 步（锯齿）");
+				}),
+
 				new Scenario("LV1", "一格宽的石头堤穿过岩浆池（岩浆比脚低一层），堤那头的小岛上有铁矿：沿着堤走过去挖（不会被击退）", 2 * MINUTE, (a, bot, me) -> {
 					// Bedrock under it all: no way under the pool, the causeway is the only way over.
 					a.fill(-2, Arena.SURFACE - 6, -8, 16, Arena.SURFACE - 3, 8, Blocks.BEDROCK);
