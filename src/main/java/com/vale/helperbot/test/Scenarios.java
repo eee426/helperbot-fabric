@@ -444,6 +444,44 @@ public final class Scenarios {
 							: c.ended() ? Scenario.Outcome.fail("任务结束了没捡到") : null;
 				}),
 
+				new Scenario("WB2", "锁定的鱿鱼在浅处，规划好路线它就躲进水下隧道深处（直线不到 16 格，一口气来回不够）：最多换一次气就判到不了、不再打它，不上上下下潜好几次，也不追一分钟靠超时放弃（玩家报告：追发光鱿鱼，一直游下去又上来）", 3 * MINUTE, (a, bot, me) -> {
+					// A pool, a shaft down from it, and at the bottom a tunnel two high off to the side, sealed
+					// at its far end: 8 down and 12 across, 14 by the crow, more than a breath there and back.
+					// All in bedrock, or it digs a dry shaft down onto the tunnel from the ground above.
+					a.fill(2, 29, -3, 24, 40, 3, Blocks.BEDROCK);
+					a.fill(3, 38, -2, 12, 40, 2, Blocks.WATER);
+					a.fill(10, 30, 0, 10, 37, 0, Blocks.WATER);
+					a.fill(10, 30, 0, 22, 31, 0, Blocks.WATER);
+					var squid = a.spawn(EntityType.SQUID, 10, 38, 0);
+					squid.setNoAi(true);
+					SQUID[0] = squid;
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					// Nothing to spend drowning, and nothing to heal on: one breath is all it has.
+					hungry(bot, 12, 6); // (and no sprint-swimming on 6)
+					give(bot, Items.IRON_SWORD, 1);
+					return new AcquireTask(me, Items.INK_SAC, 1, Mode.NORMAL);
+				}, c -> {
+					var squid = SQUID[0];
+					if (squid != null && squid.isAlive() && squid.getY() > 33 && c.logHas("盯上了") && c.logHas("规划出")) {
+						squid.setPos(c.arena().origin.getX() + 22.5, 30, c.arena().origin.getZ() + 0.5);
+					}
+					int trips = c.logCount("这口气不够走下去") + c.logCount("该换气了");
+					if (c.logHas("追不上")) {
+						return Scenario.Outcome.fail("追了一分钟靠超时才放弃，没判出到不了（换了 " + trips + " 次气）");
+					}
+					if (c.logHas("这一单不再打它")) {
+						return trips <= 2 ? Scenario.Outcome.pass("换了 " + trips + " 次气，判到不了，不再打它")
+								: Scenario.Outcome.fail("上上下下 " + trips + " 次才放弃");
+					}
+					if (c.count(Items.INK_SAC) > 0) {
+						return Scenario.Outcome.fail("打到了：场景搭得不对，那里其实一口气够");
+					}
+					if (trips > 4) {
+						return Scenario.Outcome.fail("上上下下 " + trips + " 次还在追");
+					}
+					return c.ended() ? Scenario.Outcome.fail("任务结束了（" + c.bot().lastTaskStatus() + "），没判它到不了") : null;
+				}),
+
 				new Scenario("WB1", "水下隧道里游到 12 格外：半路气比计划少了 2 秒（像站着想路时掉的），照样把这条路走完，不停下来重新规划（玩家报告：水下追远处的鱼，走一格停一下）", MINUTE, (a, bot, me) -> {
 					// A flooded tunnel two high under the ground, open to the air only up a shaft at its start.
 					a.fill(-2, 33, -2, 16, 38, 2, Blocks.STONE);
@@ -2595,6 +2633,8 @@ public final class Scenarios {
 	/** Off to {@code far} and nothing else; ends when the movement arrives or fails (and logs why). */
 	/** Set to the plans logged when the scene took the air away (see WB1); -1 before. */
 	private static final int[] POKED = {-1};
+	/** The squid WB2 sends down the shaft. */
+	private static final net.minecraft.world.entity.Entity[] SQUID = {null};
 
 	/** Go to that very cell, by the movement alone. */
 	private static com.vale.helperbot.bot.BotTask toCell(BlockPos cell, Mode mode) {

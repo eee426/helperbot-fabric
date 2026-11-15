@@ -147,6 +147,14 @@ public final class MovementController {
 	 * took it to the sea bed, nearest the target by the crow, and nothing to dig there.
 	 */
 	boolean locked;
+	/**
+	 * Keeping up with something that moves, that it knows the place of and sees the way to (see
+	 * {@link #follow}): the small window first, as fast as it gets, but only for a way that gets
+	 * there. When the small window has none, the whole search, not the wider windows: a bit of the way
+	 * in the hope of the rest, under water, dived on a breath for a squid that had gone deeper, came up
+	 * for air, and dived again, and the small windows never proved it out of reach.
+	 */
+	boolean tracking;
 	/** Past this it goes by the windows (LocalPathfinder#LEVELS), like anywhere it can't see. */
 	private static final int LOCK_RANGE = 128;
 	/** About 15 seconds in the background: no way found by then counts as none. */
@@ -166,7 +174,7 @@ public final class MovementController {
 		return routes.searchedNodes;
 	}
 
-	private boolean inSight(BlockPos at) {
+	boolean inSight(BlockPos at) {
 		BlockPos from = feet();
 		return Math.abs(at.getX() - from.getX()) <= LOCK_RANGE && Math.abs(at.getZ() - from.getZ()) <= LOCK_RANGE
 				&& bot.level().getChunkSource().getChunkNow(at.getX() >> 4, at.getZ() >> 4) != null;
@@ -174,13 +182,15 @@ public final class MovementController {
 
 	/**
 	 * Keep up with something that moves, close by, once it knows it can get there (see {@link #locked}):
-	 * the small windows, again and again, as it drifts or runs. A whole search each time would have
-	 * it stand and think while the thing got away.
+	 * the small window, again and again, as it drifts or runs, where that gets there; where it doesn't,
+	 * the whole search (see {@link #tracking}). A whole search each time would have it stand and think
+	 * while the thing got away.
 	 */
 	public void follow(PathGoal goal, BlockPos target, Mode mode) {
 		goTo(goal, target, mode);
 		locked = false;
 		horizontalOnly = false;
+		tracking = true;
 	}
 
 	/**
@@ -260,6 +270,7 @@ public final class MovementController {
 		this.target = target;
 		this.locked = false;
 		this.horizontalOnly = false;
+		this.tracking = true;
 		this.replanRequested = true;
 		routes.cancelSearches();
 		this.bestDistance = Double.MAX_VALUE;
@@ -280,6 +291,7 @@ public final class MovementController {
 		work = null;
 		paused = false;
 		locked = false;
+		tracking = false;
 		engaged = false;
 		ignoreAir = false;
 		airRequested = false;
@@ -414,6 +426,7 @@ public final class MovementController {
 	private Status savedStatus;
 	private boolean savedHorizontalOnly;
 	private boolean savedLocked;
+	private boolean savedTracking;
 
 	/**
 	 * Go somewhere for a fight (e.g. to get at a skeleton), remembering the task's own
@@ -433,11 +446,13 @@ public final class MovementController {
 			savedStatus = status;
 			savedHorizontalOnly = horizontalOnly;
 			savedLocked = locked;
+			savedTracking = tracking;
 			locked = false;
 			lastPath.clear();
 			goal = chaseGoal;
 			target = chaseTarget;
 			horizontalOnly = false;
+			tracking = true; // (not on the way up for air: see headForAir)
 			status = Status.MOVING;
 			bestDistance = Double.MAX_VALUE;
 			ticksWithoutProgress = 0;
@@ -491,6 +506,8 @@ public final class MovementController {
 		engage((w, p, floor) -> Air.breathable(w, p)
 				&& (LocalPathfinder.isPassable(w, p.above()) || !Escape.floodsWhenDug(w, p.above())),
 				f.above(Math.max(2, body.waterAbove())), "去换气");
+		// Anywhere to breathe, not a place: up the windows, whatever gets nearer (see BotPlayer#breathe).
+		tracking = false;
 	}
 
 	/** Back to what the task was doing before the chase (re-planning from here if it was walking). */
@@ -506,6 +523,7 @@ public final class MovementController {
 		status = savedStatus;
 		horizontalOnly = savedHorizontalOnly;
 		locked = savedLocked;
+		tracking = savedTracking;
 		bestDistance = Double.MAX_VALUE;
 		ticksWithoutProgress = 0;
 		recoveries = 0;
@@ -1005,7 +1023,7 @@ public final class MovementController {
 
 	/** What the task had the movement doing, while the restock reflex borrows it. */
 	public record Lent(PathGoal goal, BlockPos target, Mode mode, Status status, boolean horizontalOnly, boolean locked,
-					   double goalWork, int lockNodes, int emptyPlans, boolean wantedBlocks, BlockPos provenFrom, BlockPos shortOfBlocksAt) {
+					   boolean tracking, double goalWork, int lockNodes, int emptyPlans, boolean wantedBlocks, BlockPos provenFrom, BlockPos shortOfBlocksAt) {
 	}
 
 	/**
@@ -1024,7 +1042,7 @@ public final class MovementController {
 
 	/** Lend it to the restock reflex: what it was doing, to give back with {@link #takeBack}; meanwhile it's free. */
 	public Lent lend() {
-		Lent was = new Lent(goal, target, mode, status, horizontalOnly, locked, goalWork, routes.lockNodes, emptyPlans,
+		Lent was = new Lent(goal, target, mode, status, horizontalOnly, locked, tracking, goalWork, routes.lockNodes, emptyPlans,
 				wantsBlocks, provenFrom, shortOfBlocksAt);
 		stop();
 		lent = true;
@@ -1056,6 +1074,7 @@ public final class MovementController {
 		status = lent.status();
 		horizontalOnly = lent.horizontalOnly();
 		locked = lent.locked();
+		tracking = lent.tracking();
 		goalWork = lent.goalWork();
 		routes.lockNodes = lent.lockNodes();
 		provenFrom = lent.provenFrom();

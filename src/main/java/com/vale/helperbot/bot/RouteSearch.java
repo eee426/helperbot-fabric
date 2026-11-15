@@ -421,6 +421,15 @@ final class RouteSearch {
 		LocalPathfinder.Result result = search.result();
 		boolean wasZone = zoneSearch;
 		zoneSearch = false;
+		if (c.tracking && !wasZone && !result.reachesGoal() && c.target != null && c.inSight(c.target)) {
+			// Keeping up with something: the small window gets there, or the whole search says (see
+			// MovementController#tracking). Never a bit of the way, never the wider windows.
+			c.bot.log("±" + search.limits().radiusXZ() + " 格内到不了 " + c.target.toShortString() + "，改用全量搜索");
+			c.locked = true;
+			c.resetStep();
+			startLocked();
+			return;
+		}
 		if (!wasZone && !result.reachesGoal() && !c.headUnderwater() && startZoneSearch()) {
 			return;
 		}
@@ -530,7 +539,7 @@ final class RouteSearch {
 		}
 		LocalPathfinder.Result result = next.result();
 		boolean useful = result.reachesGoal()
-				|| (!result.steps().isEmpty() && next.progressBlocks() >= MIN_USEFUL_PROGRESS);
+				|| (!c.tracking && !result.steps().isEmpty() && next.progressBlocks() >= MIN_USEFUL_PROGRESS);
 		if (!useful || next.provenUnreachable() || (!result.reachesGoal() && ProtectionZones.isProtected(c.bot.level(), c.feet()))) {
 			return false; // let the normal planner try (and widen the search if needed)
 		}
