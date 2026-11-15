@@ -248,7 +248,7 @@ public final class MovementController {
 
 	/** Walk out of the protected area it's in, by the nearest way that leads out. */
 	public void leaveZone(ZoneExit exit, Mode mode) {
-		goTo((w, p) -> exit.outside(w, p), exit.nearestOutside(feet()), mode);
+		goTo((w, p, floor) -> exit.outside(w, p), exit.nearestOutside(feet()), mode);
 		locked = false;
 		horizontalOnly = false;
 		leaving = exit;
@@ -488,7 +488,7 @@ public final class MovementController {
 		ignoreAir = true; // read when it plans, next tick
 		// A cell whose head space is still a block to dig only counts if it won't be water once dug
 		// (the goal sees the world as it is now, not as the path will leave it).
-		engage((w, p) -> Air.breathable(w, p)
+		engage((w, p, floor) -> Air.breathable(w, p)
 				&& (LocalPathfinder.isPassable(w, p.above()) || !Escape.floodsWhenDug(w, p.above())),
 				f.above(Math.max(2, body.waterAbove())), "去换气");
 	}

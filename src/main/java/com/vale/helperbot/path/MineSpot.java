@@ -120,9 +120,7 @@ public final class MineSpot {
 
 	/** {@link #eyeAt(BlockGetter, BlockPos, double)} with the feet at {@code floor} in that cell, if known. */
 	public static Vec3 eyeAt(BlockGetter level, BlockPos q, double floor, double eyeHeight) {
-		if (Double.isNaN(floor)) {
-			floor = LocalPathfinder.floorHeight(level, q);
-		}
+		floor = PathGoal.floorAt(level, q, floor);
 		return new Vec3(q.getX() + 0.5, (Double.isNaN(floor) ? q.getY() : floor) + eyeHeight, q.getZ() + 0.5);
 	}
 
@@ -144,11 +142,6 @@ public final class MineSpot {
 			private boolean inReach(BlockGetter w, BlockPos p, Vec3 eye) {
 				return !p.equals(block) && !ProtectionZones.isProtected(w, p) && eye.distanceTo(center) <= reach
 						&& (!headOut || Air.breathable(w, p));
-			}
-
-			@Override
-			public boolean test(BlockGetter w, BlockPos p) {
-				return test(w, p, Double.NaN);
 			}
 
 			@Override

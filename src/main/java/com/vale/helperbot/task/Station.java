@@ -133,7 +133,7 @@ final class Station {
 		bot.log("这里放不下" + name + "，去有地方的位置（大致朝 " + shore.toShortString() + "）");
 		heading = shore;
 		BlockPos here = bot.movement().feet();
-		com.vale.helperbot.path.PathGoal room = (w, p) -> !p.equals(here) && roomBeside(w, p);
+		com.vale.helperbot.path.PathGoal room = (w, p, floor) -> !p.equals(here) && roomBeside(w, p, floor);
 		if (bot.movement().isInWater()) {
 			bot.movement().findWay(List.of(shore), room, com.vale.helperbot.path.Mode.DEFAULT);
 		} else {
@@ -220,8 +220,17 @@ final class Station {
 
 	/** A dry spot to stand, with room next to it for the station. Asked by searches too, of their copy of the world. */
 	private static boolean roomBeside(BlockGetter level, BlockPos q) {
+		return roomBeside(level, q, Double.NaN);
+	}
+
+	/**
+	 * Standing here, at {@code floor} (see PathGoal#test), with a spot beside to put it on. Where it
+	 * stands goes by the plan's height: a spot it stands on once it has laid a block is one. Where it
+	 * puts it goes by the world: that block is really going there, it needs something under it now.
+	 */
+	private static boolean roomBeside(BlockGetter level, BlockPos q, double floor) {
 		if (LocalPathfinder.isWater(level, q) || LocalPathfinder.isWater(level, q.above())
-				|| Double.isNaN(LocalPathfinder.floorHeight(level, q))) {
+				|| Double.isNaN(com.vale.helperbot.path.PathGoal.floorAt(level, q, floor))) {
 			return false;
 		}
 		for (Direction dir : Direction.Plane.HORIZONTAL) {

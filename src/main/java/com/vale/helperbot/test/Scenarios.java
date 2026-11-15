@@ -409,8 +409,8 @@ public final class Scenarios {
 					log.setUnlimitedLifetime();
 					log.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
 					a.level.addFreshEntity(log);
-					// A log block further off: with no block around at all, gathering doesn't look at what
-					// lies on the ground (a gap of its own), and this scene is about the pickup.
+					// A log block further off, as there was when it was found: gathering didn't look at what
+					// lay on the ground with no block around at all (DR2).
 					a.set(-25, Arena.SURFACE, 0, Blocks.OAK_LOG);
 					teleport(bot, a, 0, Arena.SURFACE, 0);
 					give(bot, Items.COBBLESTONE, 16);
@@ -421,6 +421,26 @@ public final class Scenarios {
 						return Scenario.Outcome.fail("说到不了，不去捡");
 					}
 					return c.count(Items.OAK_LOG) >= 1 ? Scenario.Outcome.pass("垫上去捡到了")
+							: c.ended() ? Scenario.Outcome.fail("任务结束了没捡到") : null;
+				}),
+
+				new Scenario("DR2", "附近一块橡木方块都没有，地上 6 格外躺着 2 块橡木原木：要 2 个，去捡，不跑去远处找树", MINUTE, (a, bot, me) -> {
+					for (int i = 0; i < 2; i++) {
+						BlockPos at = a.at(6, Arena.SURFACE, i);
+						net.minecraft.world.entity.item.ItemEntity log = new net.minecraft.world.entity.item.ItemEntity(a.level,
+								at.getX() + 0.5, at.getY(), at.getZ() + 0.5, new net.minecraft.world.item.ItemStack(Items.OAK_LOG));
+						log.setUnlimitedLifetime();
+						log.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
+						a.level.addFreshEntity(log);
+					}
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.BREAD, 8);
+					return new AcquireTask(me, Items.OAK_LOG, 2, Mode.NORMAL);
+				}, c -> {
+					if (c.logHas("附近没有，到方圆")) {
+						return Scenario.Outcome.fail("没看地上的，去远处找树了");
+					}
+					return c.count(Items.OAK_LOG) >= 2 ? Scenario.Outcome.pass("捡到了")
 							: c.ended() ? Scenario.Outcome.fail("任务结束了没捡到") : null;
 				}),
 
@@ -2552,7 +2572,7 @@ public final class Scenarios {
 		BlockPos start = bot.blockPosition();
 		BlockPos target = a.at(400, Arena.SURFACE, 0);
 		var search = new com.vale.helperbot.path.LocalPathfinder(a.level, bot.getInventory(), Mode.NORMAL,
-				Mode.NORMAL.maxDropFor(bot.getHealth()), start, bot.getY(), (w, p) -> p.equals(target), target, true,
+				Mode.NORMAL.maxDropFor(bot.getHealth()), start, bot.getY(), (w, p, floor) -> p.equals(target), target, true,
 				com.vale.helperbot.path.LocalPathfinder.LEVELS[0], com.vale.helperbot.path.Avoided.NONE, bot.movement().airProfile(), k -> false);
 		while (!search.step(50_000_000L)) {
 			// on this thread, to the end
@@ -2585,7 +2605,7 @@ public final class Scenarios {
 			public Status tick(BotPlayer b) {
 				if (!sent) {
 					sent = true;
-					b.movement().goTo((w, p) -> p.equals(cell), cell, mode);
+					b.movement().goTo((w, p, floor) -> p.equals(cell), cell, mode);
 				}
 				var status = b.movement().status();
 				if (status == com.vale.helperbot.bot.MovementController.Status.FAILED) {

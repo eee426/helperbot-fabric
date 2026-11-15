@@ -293,7 +293,10 @@ public class GatherTask implements BotTask {
 		scanned = true;
 		targets = scan(bot, SCAN_CHUNKS);
 		bot.log("附近扫描到 " + targets.size() + " 处" + itemName().getString() + "（不算记下到不了的 " + unreachable.size() + " 处）");
-		if (!targets.isEmpty()) {
+		// What lies on the ground is a source too, blocks or none: with no block of it around it went
+		// off looking far away, past the logs of the tree it had just felled. (Not for a restock: that's
+		// the ground around, dug, see RestockStep.)
+		if (!targets.isEmpty() || (onlyFrom == null && drops.lying(bot, item, DROP_RANGE) > 0)) {
 			return nextTarget(bot);
 		}
 		return lookFurther(bot);

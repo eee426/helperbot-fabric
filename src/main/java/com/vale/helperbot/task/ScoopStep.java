@@ -256,7 +256,7 @@ final class ScoopStep {
 		BlockPos t = target;
 		Set<Block> at = way.at();
 		var reach = MineSpot.reachGoal(t, MineSpot.reach(bot) - 0.5, bot.getEyeHeight(), true, true);
-		bot.movement().goTo((w, p) -> reach.test(w, p)
+		bot.movement().goTo((w, p, floor) -> reach.test(w, p, floor)
 				&& !at.contains(w.getBlockState(p).getBlock()) && !at.contains(w.getBlockState(p.below()).getBlock())
 				&& !w.getFluidState(p).is(net.minecraft.tags.FluidTags.LAVA) && !w.getFluidState(p.below()).is(net.minecraft.tags.FluidTags.LAVA)
 				&& !LocalPathfinder.isWater(w, p.above()), t, mode);

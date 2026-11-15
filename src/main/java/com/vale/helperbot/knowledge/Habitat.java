@@ -80,7 +80,7 @@ public final class Habitat {
 	/** Arrived: within {@code radius} of the x/z, and for surface things, out under the sky. */
 	public static com.vale.helperbot.path.PathGoal arrived(BlockPos xz, int radius, Layer layer) {
 		long r2 = (long) radius * radius;
-		return (w, p) -> {
+		return (w, p, floor) -> {
 			long dx = p.getX() - xz.getX(), dz = p.getZ() - xz.getZ();
 			return dx * dx + dz * dz <= r2
 					&& (layer != Layer.SURFACE || com.vale.helperbot.path.Worlds.hasCeiling(w) || p.getY() >= com.vale.helperbot.path.Worlds.surfaceY(w, p.getX(), p.getZ()) - 1);

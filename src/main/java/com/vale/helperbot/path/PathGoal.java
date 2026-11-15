@@ -12,15 +12,31 @@ import java.util.List;
  */
 @FunctionalInterface
 public interface PathGoal {
-	boolean test(BlockGetter world, BlockPos feet);
+	/**
+	 * Does the path end well with the feet in this cell, at {@code floor}: the height the plan has the
+	 * feet at there, or for the cell the bot is in, where it really is. NaN: not known, the cell's
+	 * floor in the world as it is (see {@link #floorAt}).
+	 *
+	 * <p>It's the one way to ask, so that every goal has the plan's height in hand. A goal that looks
+	 * for itself where the feet would be, in the world as it is now, gets the cells wrong that the
+	 * route changes: one it stands in only once it has laid a block under it, or dug it out, isn't
+	 * one at all now. Picking up went by the world like that, and an item up a tree, with nowhere by
+	 * it to stand but on a pillar, was searched for to the end and left. A goal that's about where it
+	 * is, not how high (near a player, out of a protected chunk), takes the floor and leaves it.
+	 */
+	boolean test(BlockGetter world, BlockPos feet, double floor);
+
+	/** The same, the height not known. */
+	default boolean test(BlockGetter world, BlockPos feet) {
+		return test(world, feet, Double.NaN);
+	}
 
 	/**
-	 * The same, knowing the height the feet are at in that cell: the plan's for a cell it would go
-	 * to, the bot's own for where it is. Only a goal about what it reaches from there needs it (see
-	 * {@link MineSpot#reachGoal}); the rest ignore it. NaN: not known, the cell's floor.
+	 * Where the feet are in that cell, for a goal: the plan's height if it gave one, else the cell's
+	 * floor as the world has it now (NaN if it can't stand there now). The one place that decides it.
 	 */
-	default boolean test(BlockGetter world, BlockPos feet, double floor) {
-		return test(world, feet);
+	static double floorAt(BlockGetter world, BlockPos feet, double floor) {
+		return Double.isNaN(floor) ? LocalPathfinder.floorHeight(world, feet) : floor;
 	}
 
 	/**
@@ -34,35 +50,10 @@ public interface PathGoal {
 		return null;
 	}
 
-	/** A goal that goes by the height of the feet (see {@link #test(BlockGetter, BlockPos, double)}). */
-	@FunctionalInterface
-	interface AtFloor {
-		boolean test(BlockGetter world, BlockPos feet, double floor);
-	}
-
-	static PathGoal atFloor(AtFloor goal) {
-		return new PathGoal() {
-			@Override
-			public boolean test(BlockGetter world, BlockPos feet) {
-				return goal.test(world, feet, Double.NaN);
-			}
-
-			@Override
-			public boolean test(BlockGetter world, BlockPos feet, double floor) {
-				return goal.test(world, feet, floor);
-			}
-		};
-	}
-
 	/** Ends at any of these: for one search to many targets (see MovementController#findWay). */
 	static PathGoal anyOf(java.util.Collection<PathGoal> goals) {
 		List<PathGoal> all = List.copyOf(goals);
 		return new PathGoal() {
-			@Override
-			public boolean test(BlockGetter world, BlockPos feet) {
-				return test(world, feet, Double.NaN);
-			}
-
 			@Override
 			public boolean test(BlockGetter world, BlockPos feet, double floor) {
 				for (PathGoal g : all) {
@@ -87,13 +78,8 @@ public interface PathGoal {
 	}
 
 	/** This goal, or also where {@code also} holds (the work in place stays this goal's). */
-	static PathGoal orAlso(PathGoal goal, AtFloor also) {
+	static PathGoal orAlso(PathGoal goal, PathGoal also) {
 		return new PathGoal() {
-			@Override
-			public boolean test(BlockGetter world, BlockPos feet) {
-				return test(world, feet, Double.NaN);
-			}
-
 			@Override
 			public boolean test(BlockGetter world, BlockPos feet, double floor) {
 				return goal.test(world, feet, floor) || also.test(world, feet, floor);
