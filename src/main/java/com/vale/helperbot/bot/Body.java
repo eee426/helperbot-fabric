@@ -216,7 +216,7 @@ final class Body {
 		BlockPos f = feet();
 		boolean sprint = canSprint && Air.submerged(level, f) && Air.submerged(level, f.above());
 		bot.setSprinting(sprint);
-		if (tryMove(0, sprint ? Air.SPRINT_SWIM_SPEED : Air.SWIM_UP_SPEED, 0)) {
+		if (tryMove(0, sprint ? Air.SPRINT_SWIM_UP_SPEED : Air.SWIM_UP_SPEED, 0)) {
 			return false;
 		}
 		BlockPos best = null;

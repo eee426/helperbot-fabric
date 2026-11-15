@@ -504,7 +504,7 @@ public final class Scenarios {
 					return c.ticks() > 50 * 20 ? Scenario.Outcome.fail("50 秒还在水下（" + c.bot().blockPosition().toShortString() + "）") : null;
 				}),
 
-				new Scenario("WB1", "水下隧道里游到 12 格外：半路气比计划少了 2 秒（像站着想路时掉的），照样把这条路走完，不停下来重新规划（玩家报告：水下追远处的鱼，走一格停一下）", MINUTE, (a, bot, me) -> {
+				new Scenario("WB1", "水下隧道里游到 8 格外：半路气比计划少了 2 秒（像站着想路时掉的），照样把这条路走完，不停下来重新规划（玩家报告：水下追远处的鱼，走一格停一下）", MINUTE, (a, bot, me) -> {
 					// A flooded tunnel two high under the ground, open to the air only up a shaft at its start.
 					a.fill(-2, 33, -2, 16, 38, 2, Blocks.STONE);
 					a.fill(0, 34, 0, 14, 35, 0, Blocks.WATER);
@@ -512,7 +512,9 @@ public final class Scenarios {
 					teleport(bot, a, 0, 34, 0);
 					give(bot, Items.BREAD, 8);
 					POKED[0] = -1;
-					return toCell(a.at(12, 34, 0), Mode.NORMAL);
+					// (8, not 12: with the bit of breath taken it must still be enough to get back up, or the
+					// breathing layer rightly takes it up, and that's not what this is about.)
+					return toCell(a.at(8, 34, 0), Mode.NORMAL);
 				}, c -> {
 					BotPlayer b = c.bot();
 					if (POKED[0] < 0 && b.isEyeInFluid(net.minecraft.tags.FluidTags.WATER) && b.getBlockX() >= c.arena().origin.getX() + 3) {
@@ -523,7 +525,7 @@ public final class Scenarios {
 						return null;
 					}
 					int again = POKED[0] < 0 ? 0 : c.logCount("规划出") - POKED[0];
-					if (b.getBlockX() < c.arena().origin.getX() + 11) {
+					if (b.getBlockX() < c.arena().origin.getX() + 7) {
 						return Scenario.Outcome.fail("没游到（" + b.lastTaskStatus() + "）");
 					}
 					return again == 0 ? Scenario.Outcome.pass("一条路走完，没重新规划")

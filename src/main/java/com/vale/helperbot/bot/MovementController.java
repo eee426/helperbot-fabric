@@ -1232,7 +1232,7 @@ public final class MovementController {
 		bot.setSprinting(sprint);
 		if (len > Body.EPS) {
 			double speed = sprint ? Air.SPRINT_SWIM_SPEED : LocalPathfinder.SWIM_SPEED;
-			double vertical = sprint ? Air.SPRINT_SWIM_SPEED : Air.SWIM_UP_SPEED;
+			double vertical = sprint ? Air.SPRINT_SWIM_UP_SPEED : Air.SWIM_UP_SPEED;
 			double s = Math.min(speed, len) / len;
 			double mx = dx * s, my = Math.max(-vertical, Math.min(vertical, dy * s)), mz = dz * s;
 			if (Math.abs(dx) > Body.EPS || Math.abs(dz) > Body.EPS) {

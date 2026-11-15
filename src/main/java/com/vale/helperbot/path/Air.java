@@ -74,18 +74,27 @@ public final class Air {
 	}
 
 	/**
-	 * Sprint-swimming (vanilla's swimming pose: sprinting with the head under water), blocks/tick, in
-	 * any direction: vanilla works out to about 0.18 across (friction 0.9 instead of 0.8, pull 0.02),
-	 * as fast or faster up and down (it swims where it looks). A touch under that, to be safe.
+	 * Sprint-swimming (vanilla's swimming pose: sprinting with the head under water), blocks/tick
+	 * across, as vanilla has it (LivingEntity#travelInWater): a push of 0.02 times the forward input
+	 * (0.98, LocalPlayer#modifyInput) a tick, and 0.9 of the speed kept (sprinting; 0.8 without), so
+	 * 0.0196 / (1 - 0.9) once it's up to speed. It was 0.17, "a touch under, to be safe": a player
+	 * swims an eighth faster, and a squid it chased kept just out of reach for long.
 	 */
-	public static final double SPRINT_SWIM_SPEED = 0.17;
+	public static final double SPRINT_SWIM_SPEED = 0.196;
+	/**
+	 * Sprint-swimming up or down, blocks/tick: the swimming pose turns the speed up and down towards
+	 * where it looks, 0.06 of the way a tick, and keeps 0.8 of it (Player#travel, then travelInWater):
+	 * 0.8 * 0.06 / (1 - 0.8 * 0.94), looking straight up. A little slower than across.
+	 */
+	public static final double SPRINT_SWIM_UP_SPEED = 0.19;
 
 	/**
 	 * Ticks to swim (dx, dy, dz) blocks sprinting, when it can: fully under water at both ends (in the
 	 * swimming pose the eyes are low, so at the surface they'd be under and the air would run).
 	 */
 	public static double swimTicks(double dx, double dy, double dz, boolean sprint) {
-		return sprint ? Math.sqrt(dx * dx + dy * dy + dz * dz) / SPRINT_SWIM_SPEED : swimTicks(dx, dy, dz);
+		return sprint ? Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz) / SPRINT_SWIM_SPEED, Math.abs(dy) / SPRINT_SWIM_UP_SPEED)
+				: swimTicks(dx, dy, dz);
 	}
 
 	/** Ticks to swim (dx, dy, dz) blocks: at the swimming speed, but no faster up or down than {@link #SWIM_UP_SPEED}. */

@@ -225,7 +225,7 @@ public final class Escape {
 				sprint = false;
 			}
 			// Like the swim itself (see Air#submerged): the last block, head coming out, isn't sprinted.
-			t += sprint ? 1 / Air.SPRINT_SWIM_SPEED : UP_TICKS;
+			t += sprint ? 1 / Air.SPRINT_SWIM_UP_SPEED : UP_TICKS;
 			head = next;
 		}
 		upMemo.put(key, result);
