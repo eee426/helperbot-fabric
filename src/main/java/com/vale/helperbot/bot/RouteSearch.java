@@ -424,9 +424,20 @@ final class RouteSearch {
 		if (c.tracking && !wasZone && !result.reachesGoal() && c.target != null && c.inSight(c.target)) {
 			// Keeping up with something: the small window gets there, or the whole search says (see
 			// MovementController#tracking). Never a bit of the way, never the wider windows.
-			c.bot.log("±" + search.limits().radiusXZ() + " 格内到不了 " + c.target.toShortString() + "，改用全量搜索");
 			c.locked = true;
 			c.resetStep();
+			if (c.headUnderwater() && Air.budget(c.bot) < Air.UNLIMITED) {
+				// Under water the whole search's no isn't believed, and it thinks standing still on what
+				// breath is left (ten seconds, once). The whole search said yes before the dive; the small
+				// window, a cube 33 across, says no now: whatever changed (it swam off, the way's shut,
+				// breath ran short), the whole search up top says, on a full breath, where a no counts.
+				c.bot.log("±" + search.limits().radiusXZ() + " 格内到不了 " + c.target.toShortString() + "，先上去换气，回来用全量搜索再看");
+				search = null;
+				c.path = null;
+				c.airRequested = true;
+				return;
+			}
+			c.bot.log("±" + search.limits().radiusXZ() + " 格内到不了 " + c.target.toShortString() + "，改用全量搜索");
 			startLocked();
 			return;
 		}
