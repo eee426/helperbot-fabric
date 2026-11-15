@@ -398,6 +398,32 @@ public final class Scenarios {
 					return c.log().contains("等了很久也没刷出") ? Scenario.Outcome.fail("把牛都当成到不了，原地等刷怪") : null;
 				}),
 
+				new Scenario("DR1", "一块橡木原木掉在 4 格高的石柱顶上，上面压着一块石头（柱顶站不了）：在旁边垫方块上去捡，不判到不了（玩家报告：砍完树，原木挂在树上，搜了一分多钟说找不到路）", 2 * MINUTE, (a, bot, me) -> {
+					// Every spot it could pick it up from is in the air beside the pillar: only standing on
+					// blocks it lays first. The cap keeps it off the top (one block of room there).
+					a.fill(5, Arena.SURFACE, 0, 5, Arena.SURFACE + 3, 0, Blocks.STONE);
+					a.set(5, Arena.SURFACE + 5, 0, Blocks.STONE);
+					BlockPos on = a.at(5, Arena.SURFACE + 4, 0);
+					net.minecraft.world.entity.item.ItemEntity log = new net.minecraft.world.entity.item.ItemEntity(a.level,
+							on.getX() + 0.5, on.getY(), on.getZ() + 0.5, new net.minecraft.world.item.ItemStack(Items.OAK_LOG));
+					log.setUnlimitedLifetime();
+					log.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
+					a.level.addFreshEntity(log);
+					// A log block further off: with no block around at all, gathering doesn't look at what
+					// lies on the ground (a gap of its own), and this scene is about the pickup.
+					a.set(-25, Arena.SURFACE, 0, Blocks.OAK_LOG);
+					teleport(bot, a, 0, Arena.SURFACE, 0);
+					give(bot, Items.COBBLESTONE, 16);
+					give(bot, Items.BREAD, 8);
+					return new AcquireTask(me, Items.OAK_LOG, 1, Mode.NORMAL);
+				}, c -> {
+					if (c.logHas("那里的路找不到")) {
+						return Scenario.Outcome.fail("说到不了，不去捡");
+					}
+					return c.count(Items.OAK_LOG) >= 1 ? Scenario.Outcome.pass("垫上去捡到了")
+							: c.ended() ? Scenario.Outcome.fail("任务结束了没捡到") : null;
+				}),
+
 				new Scenario("LV1", "一格宽的石头堤穿过岩浆池（岩浆比脚低一层），堤那头的小岛上有铁矿：沿着堤走过去挖（不会被击退）", 2 * MINUTE, (a, bot, me) -> {
 					// Bedrock under it all: no way under the pool, the causeway is the only way over.
 					a.fill(-2, Arena.SURFACE - 6, -8, 16, Arena.SURFACE - 3, 8, Blocks.BEDROCK);

@@ -183,12 +183,18 @@ final class DropFetch {
 		return bot.getBoundingBox().inflate(1.0, 0.5, 1.0).intersects(e.getBoundingBox());
 	}
 
-	/** Path goal: standing (or swimming) in this cell, the pickup box touches the item where it is now. */
+	/**
+	 * Path goal: standing (or swimming) in this cell, the pickup box touches the item where it is now.
+	 * At the height the plan has the feet at there, like what it mines from (see PathGoal#test with a
+	 * floor): a spot it stands on only once it has laid a block under it, or dug it out, isn't one in
+	 * the world as it is now. Going by the world, an item up a tree, with nowhere to stand by it but on
+	 * a pillar, was searched for to the end, twice, and then left.
+	 */
 	private static PathGoal pickupSpot(BotPlayer bot, ItemEntity e) {
 		AABB itemBox = e.getBoundingBox();
 		double half = bot.getBbWidth() / 2, height = bot.getBbHeight();
-		return (w, p) -> {
-			double floor = LocalPathfinder.floorHeight(w, p);
+		return PathGoal.atFloor((w, p, planned) -> {
+			double floor = Double.isNaN(planned) ? LocalPathfinder.floorHeight(w, p) : planned;
 			// A ghost in a protected chunk doesn't pick anything up.
 			if (Double.isNaN(floor) || ProtectionZones.isProtected(w, p)) {
 				return false;
@@ -196,6 +202,6 @@ final class DropFetch {
 			double cx = p.getX() + 0.5, cz = p.getZ() + 0.5;
 			return new AABB(cx - half, floor, cz - half, cx + half, floor + height, cz + half)
 					.inflate(1.0, 0.5, 1.0).intersects(itemBox);
-		};
+		});
 	}
 }
