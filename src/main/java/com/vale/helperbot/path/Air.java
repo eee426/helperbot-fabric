@@ -32,8 +32,10 @@ public final class Air {
 	 * planning and the way-up estimate charge, from this one place. Up or down is slower than
 	 * across; the planner once charged vertical swimming at the across speed, so a dive took half
 	 * as long again as planned, and the bot turned back for air half way along a planned route.
+	 * Across, not sprinting, as vanilla has it (LivingEntity#travelInWater): 0.02 x 0.98 a tick and
+	 * 0.8 of the speed kept, 0.0196 / (1 - 0.8). It was 0.12, "roughly 0.1-0.15": faster than a player.
 	 */
-	public static final double SWIM_SPEED = 0.12;
+	public static final double SWIM_SPEED = 0.098;
 	/** Up or down: swimming straight up for air, and the vertical part of any swim. */
 	public static final double SWIM_UP_SPEED = 0.08;
 	/**

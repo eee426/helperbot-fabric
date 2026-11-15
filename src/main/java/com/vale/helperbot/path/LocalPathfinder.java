@@ -73,7 +73,7 @@ public final class LocalPathfinder implements Planner {
 	public static final double ON_GROUND = 0.03;
 	/** Feet height above the cell bottom when floating at a water surface. */
 	public static final double SWIM_FLOOR = 0.1;
-	/** Vanilla swimming speed is roughly 0.1-0.15 blocks/tick. */
+	/** Swimming across, not sprinting (see Air#SWIM_SPEED). */
 	public static final double SWIM_SPEED = Air.SWIM_SPEED;
 	/** Air is tracked in steps of this many ticks: two routes to a cell differing by less are the same. */
 	private static final int AIR_BUCKET = 30;
