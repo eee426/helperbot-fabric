@@ -289,6 +289,7 @@ public final class MovementController {
 	public void stop() {
 		hands.abortBreaking();
 		work = null;
+		stillTicks = 0;
 		paused = false;
 		locked = false;
 		tracking = false;
@@ -697,11 +698,10 @@ public final class MovementController {
 		path = null;
 		// Only when air was the reason: it used to be assumed whenever it was under water with less
 		// than a full breath, and a drop it couldn't reach for another reason sent it up for air.
-		if (!ignoreAir && headUnderwater() && noPathForAir && Air.budget(bot) < Air.fullBudget(bot)) {
-			// Nowhere to go on the air left: get a full breath and try again (a player diving to
-			// dig deeper does the same: down, dig, up, down again).
-			bot.log("这口气不够走下去，先去换气");
-			airRequested = true;
+		if (!ignoreAir && headUnderwater() && noPathForAir && Air.budget(bot) < Air.fullBudget(bot) && routes.startAirCheck()) {
+			// Nowhere to go on the air left: would a full breath help? (a player diving to dig deeper
+			// goes down, digs, comes up, goes down again; but not into a pocket with no way out.) The
+			// search says, then up for air or not (see RouteSearch#startAirCheck).
 			return;
 		}
 		if (askForBlocks()) {

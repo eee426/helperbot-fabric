@@ -364,8 +364,8 @@ public class BotPlayer extends ServerPlayer {
 
 	private Breath breath = Breath.NONE;
 	private int breathTicks;
-	/** Least it has had to go to air since going for it (see breathe), by the route if any. */
-	private double bestToAir;
+	/** Least it has had to go to air since going for it (see breathe): by the route, and by the estimate. */
+	private double bestRoute, bestEscape;
 	/** The planner found no way up at all (see Hands#digOut). */
 	private boolean digOut;
 	/** On the planned way up this long without getting any closer to air: just go straight up. */
@@ -399,7 +399,8 @@ public class BotPlayer extends ServerPlayer {
 			}
 			breathTicks = 0;
 			breath = Breath.ROUTE;
-			bestToAir = Double.POSITIVE_INFINITY;
+			bestRoute = Double.POSITIVE_INFINITY;
+			bestEscape = Double.POSITIVE_INFINITY;
 			String plan = movement.planAirNote();
 			log("该换气了（还能撑 " + budget / 20 + " 秒，上去要 "
 					+ (Double.isInfinite(escape) ? "?" : String.valueOf((int) Math.ceil(escape / 20))) + " 秒；实际 " + budget + " 刻"
@@ -409,16 +410,30 @@ public class BotPlayer extends ServerPlayer {
 		breathTicks++;
 		if (underwater) {
 			if (breath == Breath.ROUTE) {
+				// Taken away meanwhile (a new task started, and that stops the movement): heading for air
+				// again, or it stood there on the way up, its route gone, until it gave up on it.
+				if (!movement.isEngaged()) {
+					movement.headForAir();
+				}
 				movement.tick();
 				// Getting nearer to air is the route's to say: what it still takes, by the plan. The
 				// estimate of the way up (Escape) can't see round the side of things: on a way that
 				// rose first and went under a wall after, it said none from up there, the route was
 				// dropped as getting nowhere, and it drowned under a lid with the air 8 blocks off.
-				// (With no route that gets there, as yet, the estimate it is.)
+				// (With no route that gets there, as yet, the estimate it is.) Each against its own best:
+				// the estimate is far quicker than any route, and once it had been the best so far, the
+				// route never got below it, and a route that was getting there was dropped (WB4).
 				double route = movement.ticksLeftOnRoute();
-				double toAir = Double.isNaN(route) ? movement.escapeTicks() : route;
-				if (toAir < bestToAir - 1) {
-					bestToAir = toAir;
+				boolean nearer;
+				if (Double.isNaN(route)) {
+					double escape = movement.escapeTicks();
+					nearer = escape < bestEscape - 1;
+					bestEscape = Math.min(bestEscape, escape);
+				} else {
+					nearer = route < bestRoute - 1;
+					bestRoute = Math.min(bestRoute, route);
+				}
+				if (nearer) {
 					breathTicks = 0;
 				}
 				boolean noWay = movement.status() == MovementController.Status.FAILED;

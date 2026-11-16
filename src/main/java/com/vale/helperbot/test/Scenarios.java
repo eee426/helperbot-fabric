@@ -546,6 +546,22 @@ public final class Scenarios {
 					return c.ticks() > 50 * 20 ? Scenario.Outcome.fail("50 秒还在水下（" + c.bot().blockPosition().toShortString() + "）") : null;
 				}),
 
+				new Scenario("WB4", "封闭的水洞（三格深，往北 40 格，四面基岩，只有南头一个气孔），机器人在洞里 20 格处、气不满，要去北边 110 格外：换了气也出不去，就不去换气，直接判去不了（玩家报告：抓发光鱿鱼时在水下洞穴的气孔那里来回转，每次都说气不够）", MINUTE, (a, bot, me) -> {
+					a.fill(-4, 20, -4, 6, 30, 46, Blocks.BEDROCK);
+					a.fill(0, 23, 0, 2, 25, 40, Blocks.WATER);
+					a.fill(1, 26, 0, 1, 28, 0, Blocks.AIR); // the air hole, capped
+					teleport(bot, a, 1, 23, 20);
+					bot.setAirSupply(300);
+					give(bot, Items.BREAD, 8);
+					return farTrip(a.at(1, 25, 110), Mode.NORMAL);
+				}, c -> {
+					int trips = c.logCount("这口气不够走下去");
+					if (trips > 0) {
+						return Scenario.Outcome.fail("说气不够，上去换了 " + trips + " 次气（换了也出不去）");
+					}
+					return c.ended() ? Scenario.Outcome.pass("没去换气，判去不了（" + c.bot().lastTaskStatus() + "）") : null;
+				}),
+
 				new Scenario("WB1", "水下隧道里游到 8 格外：半路气比计划少了 2 秒（像站着想路时掉的），照样把这条路走完，不停下来重新规划（玩家报告：水下追远处的鱼，走一格停一下）", MINUTE, (a, bot, me) -> {
 					// A flooded tunnel two high under the ground, open to the air only up a shaft at its start.
 					a.fill(-2, 33, -2, 16, 38, 2, Blocks.STONE);

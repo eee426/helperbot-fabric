@@ -82,6 +82,7 @@ final class RouteSearch {
 	 * again from there. False if it isn't in a protected area.
 	 */
 	boolean startZoneSearch() {
+		airCheck = false; // a new search: whatever comes back is this one's (see startAirCheck)
 		BlockPos from = c.feet();
 		ZoneExit exit = c.leaving != null ? c.leaving : ZoneExit.at(c.bot.level(), from);
 		if (exit == null) {
@@ -125,6 +126,7 @@ final class RouteSearch {
 	 * the bot, so what it doesn't find is looked for again, top to bottom, before it's believed.
 	 */
 	void startWay() {
+		airCheck = false;
 		ServerLevel level = c.bot.level();
 		BlockPos from = c.feet();
 		int minX = from.getX(), maxX = minX, minZ = from.getZ(), maxZ = minZ;
@@ -209,6 +211,7 @@ final class RouteSearch {
 
 	/** The box around the bot and the target, one search, to the end: see {@link #locked}. */
 	void startLocked() {
+		airCheck = false;
 		zoneSearch = false;
 		zoneRoute = false;
 		BlockPos from = c.feet();
@@ -269,6 +272,7 @@ final class RouteSearch {
 	}
 
 	void startPlanning(int levelIndex) {
+		airCheck = false;
 		if (c.locked) {
 			startLocked();
 			return;
@@ -336,6 +340,54 @@ final class RouteSearch {
 	private int breathAtStart = -1;
 
 	/**
+	 * The search under way is the one asking if a breath would help (see {@link #startAirCheck}), with
+	 * this much breath.
+	 */
+	private boolean airCheck;
+	private int airCheckBreath;
+
+	/**
+	 * Under water and nowhere to go, some ways turned down for want of breath: would a breath help?
+	 * The same search again from here, with the breath it would have back here after going up for one
+	 * and coming down again (a full one, less the way up, about as long as the way back). If that finds
+	 * a way, a breath is worth it; if not, it isn't the breath. It used to go up for one every time:
+	 * in a pocket with no way out, swim in, "not enough breath", up, back, the same, round and round.
+	 * False if there's nothing to ask: no way up at all, or no more breath to be had back here than now.
+	 */
+	boolean startAirCheck() {
+		double up = c.escapeTicks();
+		if (Double.isInfinite(up)) {
+			return false;
+		}
+		int breath = (int) Math.max(0, Air.fullBudget(c.bot) - up);
+		if (breath <= Air.budget(c.bot)) {
+			return false;
+		}
+		breathAtStart = breath;
+		search = startSearch(c.feet(), c.bot.getY(), levels[searchLevel], c.goal, null, c.ignoreAir);
+		breathAtStart = -1;
+		airCheck = true;
+		airCheckBreath = breath;
+		plannedAt = c.bot.tickCount;
+		return true;
+	}
+
+	private void endAirCheck(LocalPathfinder.Result result) {
+		airCheck = false;
+		search = null;
+		c.resetStep();
+		if (!result.steps().isEmpty()) {
+			c.bot.log("按换完气回来时的气（" + airCheckBreath + " 刻）再搜一次：能走 " + result.steps().size() + " 步，这口气不够走下去，先去换气");
+			c.path = null;
+			c.airRequested = true;
+			return;
+		}
+		c.bot.log("按换完气回来时的气（" + airCheckBreath + " 刻）再搜一次也走不出去：不是气的问题，不去换气");
+		c.noPathForAir = false;
+		c.onNoPath();
+	}
+
+	/**
 	 * Cells it's steering around right now, and which of them a step was given up on (see
 	 * MovementController#avoidUntil); expired ones are dropped. A copy: the search reads it on its own thread.
 	 */
@@ -390,6 +442,7 @@ final class RouteSearch {
 
 	void cancelSearches() {
 		lockedSearch = false;
+		airCheck = false;
 		if (search != null) {
 			search.cancel();
 			search = null;
@@ -423,6 +476,10 @@ final class RouteSearch {
 			return;
 		}
 		LocalPathfinder.Result result = search.result();
+		if (airCheck) {
+			endAirCheck(result);
+			return;
+		}
 		boolean wasZone = zoneSearch;
 		zoneSearch = false;
 		if (c.tracking && !wasZone && !result.reachesGoal() && c.target != null && c.inSight(c.target)) {
