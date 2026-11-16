@@ -686,9 +686,15 @@ public final class LocalPathfinder implements Planner {
 		return false;
 	}
 
-	/** For {@link #reachOnly}: some route already reached this cell with at least this much air, whatever it cost. */
+	/**
+	 * For {@link #reachOnly}: some route already reached this cell in this step of air or a better one
+	 * (see {@link #AIR_BUCKET}), whatever it cost. By the step, like the whole search: going by the
+	 * tick, it kept a way that had a few ticks more air than the whole search's, and right at the edge
+	 * (a squid 20 down) the one said yes and the other no, to the same question. A dive that close
+	 * to the last of a breath was hardly worth it anyway.
+	 */
 	private static boolean lessAir(Node[] nodes, int b, int air) {
-		if (nodes[b] != null && nodes[b].air >= air) {
+		if (nodes[b] != null) {
 			return true;
 		}
 		for (int i = b + 1; i < nodes.length; i++) {

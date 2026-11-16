@@ -479,6 +479,21 @@ public final class MovementController {
 	boolean airRequested;
 
 	/** Ticks from here until the head is out of the water (see {@link Escape}). */
+	/**
+	 * Ticks the route in hand still takes, from the step it's on to its end, if that end is the goal;
+	 * NaN if there's no such route. The plan's own word on how far it is (see BotPlayer#breathe).
+	 */
+	public double ticksLeftOnRoute() {
+		if (path == null || !pathReachesGoal || index > pathTicks.size()) {
+			return Double.NaN;
+		}
+		double t = 0;
+		for (int i = index; i < pathTicks.size(); i++) {
+			t += pathTicks.get(i);
+		}
+		return t;
+	}
+
 	public double escapeTicks() {
 		return newEscape().ticks(feet());
 	}
@@ -1231,10 +1246,21 @@ public final class MovementController {
 		boolean sprint = canSprintSwim() && Air.submerged(bot.level(), here) && Air.submerged(bot.level(), there);
 		bot.setSprinting(sprint);
 		if (len > Body.EPS) {
-			double speed = sprint ? Air.SPRINT_SWIM_SPEED : LocalPathfinder.SWIM_SPEED;
-			double vertical = sprint ? Air.SPRINT_SWIM_UP_SPEED : Air.SWIM_UP_SPEED;
-			double s = Math.min(speed, len) / len;
-			double mx = dx * s, my = Math.max(-vertical, Math.min(vertical, dy * s)), mz = dz * s;
+			double mx, my, mz;
+			if (sprint) {
+				// Where it looks, along the line (see Air#swimTicks).
+				double s = Math.min(Air.SPRINT_SWIM_SPEED, len) / len;
+				mx = dx * s;
+				my = Math.max(-Air.SPRINT_SWIM_UP_SPEED, Math.min(Air.SPRINT_SWIM_UP_SPEED, dy * s));
+				mz = dz * s;
+			} else {
+				// The forward key across, the jump up (or sneaking down), each at its own speed.
+				double across = Math.sqrt(dx * dx + dz * dz);
+				double s = across > Body.EPS ? Math.min(LocalPathfinder.SWIM_SPEED, across) / across : 0;
+				mx = dx * s;
+				my = Math.max(-Air.SWIM_UP_SPEED, Math.min(Air.SWIM_UP_SPEED, dy));
+				mz = dz * s;
+			}
 			if (Math.abs(dx) > Body.EPS || Math.abs(dz) > Body.EPS) {
 				body.face(dx, dz);
 			}

@@ -29,15 +29,22 @@ public final class Air {
 	private static final float DAMAGE_PER_HIT = 2;
 	/**
 	 * Swimming speeds, blocks/tick: what the bot really moves at (the movement controller) and what
-	 * planning and the way-up estimate charge, from this one place. Up or down is slower than
-	 * across; the planner once charged vertical swimming at the across speed, so a dive took half
-	 * as long again as planned, and the bot turned back for air half way along a planned route.
+	 * planning and the way-up estimate charge, from this one place. Across and up or down are two
+	 * speeds; the planner once charged vertical swimming at the across speed, and a dive took half as
+	 * long again as planned, and the bot turned back for air half way along a planned route.
 	 * Across, not sprinting, as vanilla has it (LivingEntity#travelInWater): 0.02 x 0.98 a tick and
 	 * 0.8 of the speed kept, 0.0196 / (1 - 0.8). It was 0.12, "roughly 0.1-0.15": faster than a player.
 	 */
 	public static final double SWIM_SPEED = 0.098;
-	/** Up or down: swimming straight up for air, and the vertical part of any swim. */
-	public static final double SWIM_UP_SPEED = 0.08;
+	/**
+	 * Up or down, not sprinting: swimming straight up for air, and the vertical part of any swim. As
+	 * vanilla has it with the jump held (LivingEntity#jumpInLiquid, travelInWater,
+	 * getFluidFallingAdjustedMovement): 0.04 up a tick, then 0.8 of the speed kept and gravity / 16
+	 * (0.005) taken off, so (0.032 - 0.005) / (1 - 0.8) = 0.135 kept, 0.175 a tick moved. Faster than
+	 * across without sprinting: the jump and the forward key push on their own, so up and across are
+	 * timed apart (see swimTicks). It was 0.08, under half of it, and every way up looked long.
+	 */
+	public static final double SWIM_UP_SPEED = 0.175;
 	/**
 	 * Breath kept on top of {@link #reserve} when planning: room for moving a little slower than
 	 * planned, so the bot doesn't reach the breathing layer's limit on a route it was given.
@@ -99,9 +106,13 @@ public final class Air {
 				: swimTicks(dx, dy, dz);
 	}
 
-	/** Ticks to swim (dx, dy, dz) blocks: at the swimming speed, but no faster up or down than {@link #SWIM_UP_SPEED}. */
+	/**
+	 * Ticks to swim (dx, dy, dz) blocks, not sprinting: across at {@link #SWIM_SPEED} and up or down at
+	 * {@link #SWIM_UP_SPEED}, at once, as the forward key and the jump push apart; the slower of the two.
+	 * (Sprinting it swims where it looks, one speed along the line: see the other swimTicks.)
+	 */
 	public static double swimTicks(double dx, double dy, double dz) {
-		return Math.max(Math.sqrt(dx * dx + dy * dy + dz * dz) / SWIM_SPEED, Math.abs(dy) / SWIM_UP_SPEED);
+		return Math.max(Math.sqrt(dx * dx + dz * dz) / SWIM_SPEED, Math.abs(dy) / SWIM_UP_SPEED);
 	}
 
 	/**

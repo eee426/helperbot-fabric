@@ -364,7 +364,8 @@ public class BotPlayer extends ServerPlayer {
 
 	private Breath breath = Breath.NONE;
 	private int breathTicks;
-	private double bestEscape;
+	/** Least it has had to go to air since going for it (see breathe), by the route if any. */
+	private double bestToAir;
 	/** The planner found no way up at all (see Hands#digOut). */
 	private boolean digOut;
 	/** On the planned way up this long without getting any closer to air: just go straight up. */
@@ -398,7 +399,7 @@ public class BotPlayer extends ServerPlayer {
 			}
 			breathTicks = 0;
 			breath = Breath.ROUTE;
-			bestEscape = escape;
+			bestToAir = Double.POSITIVE_INFINITY;
 			String plan = movement.planAirNote();
 			log("该换气了（还能撑 " + budget / 20 + " 秒，上去要 "
 					+ (Double.isInfinite(escape) ? "?" : String.valueOf((int) Math.ceil(escape / 20))) + " 秒；实际 " + budget + " 刻"
@@ -409,9 +410,15 @@ public class BotPlayer extends ServerPlayer {
 		if (underwater) {
 			if (breath == Breath.ROUTE) {
 				movement.tick();
-				double escape = movement.escapeTicks();
-				if (escape < bestEscape - 1) {
-					bestEscape = escape;
+				// Getting nearer to air is the route's to say: what it still takes, by the plan. The
+				// estimate of the way up (Escape) can't see round the side of things: on a way that
+				// rose first and went under a wall after, it said none from up there, the route was
+				// dropped as getting nowhere, and it drowned under a lid with the air 8 blocks off.
+				// (With no route that gets there, as yet, the estimate it is.)
+				double route = movement.ticksLeftOnRoute();
+				double toAir = Double.isNaN(route) ? movement.escapeTicks() : route;
+				if (toAir < bestToAir - 1) {
+					bestToAir = toAir;
 					breathTicks = 0;
 				}
 				boolean noWay = movement.status() == MovementController.Status.FAILED;
