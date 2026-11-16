@@ -482,7 +482,49 @@ public final class Scenarios {
 					return c.ended() ? Scenario.Outcome.fail("任务结束了（" + c.bot().lastTaskStatus() + "），没判它到不了") : null;
 				}),
 
-				new Scenario("WB3", "水下换气：正上方 18 格水再上面是顶，空气在旁边（一大片水，贴着底从墙下的缺口横游到另一个水潭，再往上 8 格）：绕过去换气，不在顶下面憋死（玩家报告：打发光鱿鱼，在地下含水层里淹死）", MINUTE, (a, bot, me) -> {
+				new Scenario("SW2", "水下冲刺游到 24 格外，进 16 格后每半秒改一次目标（像追着会动的鱼重新规划）：一直保持游泳姿态，不在每次重新规划时变回站立（玩家报告：游泳转向时一抽一抽地站起来）", MINUTE, (a, bot, me) -> {
+					a.fill(-2, 30, -3, 30, 40, 3, Blocks.WATER); // open to the sky at 41
+					teleport(bot, a, 0, 32, 0);
+					give(bot, Items.BREAD, 8);
+					POKED[0] = 0;
+					POSE_FLIPS[0] = 0;
+					SW2_AT[0] = null;
+					SW2_RUN[0] = 0;
+					return toCell(a.at(24, 32, 0), Mode.NORMAL);
+				}, c -> {
+					BotPlayer b = c.bot();
+					BlockPos goal = c.arena().at(24, 32, 0);
+					boolean swimming = b.isSwimming();
+					// Under way on its own (swimming once already, not there yet, not taken over for air),
+					// and moving: count every tick it's standing up instead.
+					boolean moved = SW2_AT[0] != null && b.position().distanceToSqr(SW2_AT[0]) > 1e-6;
+					boolean own = !b.movement().isEngaged();
+					boolean under = b.isEyeInFluid(net.minecraft.tags.FluidTags.WATER); // (head out, vanilla stands: no swimming pose)
+					// A jerk is standing up for two ticks or more and lying down again: a tick on its own is
+					// vanilla's (the pose follows sprinting a tick later, and near the top it doesn't swim).
+					if (POKED[0] == 1 && own && moved && under && !swimming && b.blockPosition().distManhattan(goal) > 2) {
+						if (++SW2_RUN[0] == 2) {
+							POSE_FLIPS[0]++;
+						}
+					} else {
+						SW2_RUN[0] = 0;
+					}
+					SW2_AT[0] = b.position();
+					if (swimming) {
+						POKED[0] = 1;
+					}
+					// (Within 16 of it, as hunting re-aims at what it chases: see HuntTask#chase.)
+					if (c.ticks() % 10 == 0 && POKED[0] == 1 && own && !c.ended() && b.position().distanceTo(net.minecraft.world.phys.Vec3.atBottomCenterOf(goal)) <= 16) {
+						b.movement().retarget((w, p, f) -> p.equals(goal), goal);
+					}
+					if (!c.ended()) {
+						return null;
+					}
+					return POSE_FLIPS[0] == 0 ? Scenario.Outcome.pass("一路都是游泳姿态")
+							: Scenario.Outcome.fail("游的途中站起来又趴下 " + POSE_FLIPS[0] + " 次");
+				}),
+
+				new Scenario("WB3","水下换气：正上方 18 格水再上面是顶，空气在旁边（一大片水，贴着底从墙下的缺口横游到另一个水潭，再往上 8 格）：绕过去换气，不在顶下面憋死（玩家报告：打发光鱿鱼，在地下含水层里淹死）", MINUTE, (a, bot, me) -> {
 					// Like the aquifer it drowned in: water right up to a lid, and the air a way off to the side.
 					// A wide body of water (the search rushes up it), a low gap through the wall at the bottom.
 					a.fill(-8, 10, -8, 16, 34, 8, Blocks.BEDROCK);
@@ -2657,6 +2699,10 @@ public final class Scenarios {
 	/** Off to {@code far} and nothing else; ends when the movement arrives or fails (and logs why). */
 	/** Set to the plans logged when the scene took the air away (see WB1); -1 before. */
 	private static final int[] POKED = {-1};
+	/** Ticks SW2 saw it standing up again on the way. */
+	private static final int[] POSE_FLIPS = {0};
+	private static final net.minecraft.world.phys.Vec3[] SW2_AT = {null};
+	private static final int[] SW2_RUN = {0};
 	/** The squid WB2 sends down the shaft. */
 	private static final net.minecraft.world.entity.Entity[] SQUID = {null};
 

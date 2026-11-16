@@ -545,6 +545,9 @@ public final class MovementController {
 		replan("战斗结束，回到原来的事");
 	}
 
+	/** Ticks in a row it hasn't moved, on its way (see tick). */
+	private int stillTicks;
+
 	void tick() {
 		if (paused) {
 			bot.setSprinting(false);
@@ -556,9 +559,14 @@ public final class MovementController {
 		if (status == Status.MOVING) {
 			double x = bot.getX(), y = bot.getY(), z = bot.getZ();
 			tickMoving();
-			// Not going anywhere this tick (thinking, mining, placing): not sprinting either. Under
-			// water it would stay in the swimming pose, lying still with its eyes low.
-			if (bot.getX() == x && bot.getY() == y && bot.getZ() == z) {
+			// Not going anywhere (thinking, mining, placing): not sprinting either. Under water it
+			// would stay in the swimming pose, lying still with its eyes low. Mining at once; else
+			// only from the second tick standing still: the one tick of planning again, between one
+			// stretch and the next, stood it up and down again each time it chased something that
+			// turned, at half the speed for that tick, a jerk every few blocks.
+			boolean still = bot.getX() == x && bot.getY() == y && bot.getZ() == z;
+			stillTicks = still ? stillTicks + 1 : 0;
+			if (still && (stillTicks > 1 || hands.breaking() != null)) {
 				bot.setSprinting(false);
 			}
 		} else {
