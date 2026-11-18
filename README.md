@@ -81,4 +81,4 @@ scripts\run-scenarios.ps1 W -Repeat 5   # 有随机性的场景多跑几遍，�
 
 ## 许可
 
-见 [LICENSE](LICENSE)。
+[GPL-3.0](LICENSE)。可以自由使用、修改、再发布；发布修改过的版本时，也必须用 GPL-3.0 公开源码。

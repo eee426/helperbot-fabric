@@ -5,7 +5,7 @@
 	"name": "Helper Bot",
 	"description": "A real-player helper bot that gathers hard-to-find materials using only the tools you give it.",
 	"authors": ["Vale"],
-	"license": "MIT",
+	"license": "GPL-3.0-only",
 	"environment": "*",
 	"entrypoints": {
 		"main": ["com.vale.helperbot.HelperBot"]

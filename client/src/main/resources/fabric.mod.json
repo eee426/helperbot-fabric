@@ -5,7 +5,7 @@
 	"name": "Helper Bot Remote",
 	"description": "Client-side buttons for the Helper Bot: pick what to fetch from a menu instead of typing /bot commands.",
 	"authors": ["Vale"],
-	"license": "MIT",
+	"license": "GPL-3.0-only",
 	"environment": "client",
 	"entrypoints": {
 		"client": ["com.vale.helperbot.client.HelperBotClient"]
